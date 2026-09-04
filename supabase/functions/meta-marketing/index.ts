@@ -77,14 +77,18 @@ async function decryptToken(value: string) {
   return new TextDecoder().decode(decrypted);
 }
 
-async function graphGet(path: string, token: string, params: Record<string, string> = {}) {
-  const url = new URL(`${GRAPH_BASE}/${path.replace(/^\/+/, "")}`);
+async function graphGetAtVersion(version: string, path: string, token: string, params: Record<string, string> = {}) {
+  const url = new URL(`https://graph.facebook.com/${version}/${path.replace(/^\/+/, "")}`);
   url.searchParams.set("access_token", token);
   Object.entries(params).forEach(([key, value]) => value && url.searchParams.set(key, value));
   const res = await fetch(url);
   const payload = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(payload?.error?.message || "Falha ao consultar Meta.");
   return payload;
+}
+
+async function graphGet(path: string, token: string, params: Record<string, string> = {}) {
+  return graphGetAtVersion(GRAPH_VERSION, path, token, params);
 }
 
 async function graphPost(path: string, token: string, body: Record<string, any>) {
@@ -132,6 +136,7 @@ function normalizeMetaPublishError(error: any) {
     return [
       "O app Meta conectado está em modo de desenvolvimento. Para criar criativos de anúncio para clientes reais, coloque o app em modo Live/Público no Meta Developers e garanta acesso avançado às permissões de anúncios.",
       "Depois disso, clique em Atualizar ativos e tente publicar novamente.",
+      `Diagnóstico da Meta: ${message}`,
     ].join(" ");
   }
   return message || "Falha ao publicar campanha na Meta.";
@@ -479,6 +484,34 @@ async function createPausedMetaCampaign(adAccountId: string, token: string, name
   return await graphPost(`${adAccountId}/campaigns`, token, payload);
 }
 
+const placementMap: Record<string, { publisher: "facebook" | "instagram"; position: string }> = {
+  facebook_feed: { publisher: "facebook", position: "feed" },
+  facebook_stories: { publisher: "facebook", position: "story" },
+  instagram_feed: { publisher: "instagram", position: "stream" },
+  instagram_stories: { publisher: "instagram", position: "story" },
+  instagram_reels: { publisher: "instagram", position: "reels" },
+};
+
+function buildMetaPlacements(value: unknown) {
+  const requested = Array.isArray(value) ? value.map(String) : [];
+  const resolved = requested.map((item) => placementMap[item]).filter(Boolean);
+  if (!resolved.length) return {};
+  const publisherPlatforms = [...new Set(resolved.map((item) => item.publisher))];
+  const facebookPositions = [...new Set(resolved.filter((item) => item.publisher === "facebook").map((item) => item.position))];
+  const instagramPositions = [...new Set(resolved.filter((item) => item.publisher === "instagram").map((item) => item.position))];
+  return {
+    publisher_platforms: publisherPlatforms,
+    ...(facebookPositions.length ? { facebook_positions: facebookPositions } : {}),
+    ...(instagramPositions.length ? { instagram_positions: instagramPositions } : {}),
+  };
+}
+
+function toMetaDateTime(value?: string | null) {
+  if (!value) return undefined;
+  const date = new Date(`${value}T12:00:00-03:00`);
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
+}
+
 async function geocodeRestaurantAddress(address?: string | null, city?: string | null) {
   const apiKey = Deno.env.get("GOOGLE_MAPS_API_KEY");
   const query = [address, city, "Brasil"].filter(Boolean).join(", ");
@@ -506,10 +539,35 @@ async function geocodeRestaurantAddress(address?: string | null, city?: string |
 
 async function discoverAssets(token: string) {
   const businesses = await graphGet("me/businesses", token, { fields: "id,name,verification_status" }).catch(() => ({ data: [] }));
-  const adAccounts = await graphGet("me/adaccounts", token, { fields: "id,name,account_status,currency,timezone_name,business" }).catch(() => ({ data: [] }));
+  const directAdAccounts = await graphGet("me/adaccounts", token, { fields: "id,name,account_status,currency,timezone_name,business" }).catch(() => ({ data: [] }));
   const pages = await graphGet("me/accounts", token, { fields: "id,name,access_token,instagram_business_account{id,username,name},connected_instagram_account{id,username,name}" }).catch(() => ({ data: [] }));
   const permissions = await graphGet("me/permissions", token).catch(() => ({ data: [] }));
   const firstBusiness = businesses?.data?.[0] || null;
+  const adAccountsById = new Map<string, any>();
+  (directAdAccounts?.data || []).forEach((item: any) => {
+    if (item?.id) adAccountsById.set(item.id, item);
+  });
+  for (const business of businesses?.data || []) {
+    const [owned, client] = await Promise.all([
+      graphGet(`${business.id}/owned_ad_accounts`, token, { fields: "id,name,account_status,currency,timezone_name,business" }).catch(() => ({ data: [] })),
+      graphGet(`${business.id}/client_ad_accounts`, token, { fields: "id,name,account_status,currency,timezone_name,business" }).catch(() => ({ data: [] })),
+    ]);
+    [...(owned?.data || []), ...(client?.data || [])].forEach((item: any) => {
+      if (item?.id) adAccountsById.set(item.id, item);
+    });
+  }
+  const adAccounts = [...adAccountsById.values()];
+  const pixelsById = new Map<string, any>();
+  await Promise.all(adAccounts.map(async (adAccount: any) => {
+    if (!adAccount?.id) return;
+    const result = await graphGet(`${normalizeAdAccountId(adAccount.id)}/adspixels`, token, {
+      fields: "id,name,last_fired_time",
+    }).catch(() => ({ data: [] }));
+    (result?.data || []).forEach((pixel: any) => {
+      if (pixel?.id) pixelsById.set(pixel.id, { ...pixel, ad_account_id: adAccount.id });
+    });
+  }));
+  const pixels = [...pixelsById.values()];
   let whatsappAccounts: any[] = [];
   let phoneNumbers: any[] = [];
   const warnings: string[] = [];
@@ -528,7 +586,7 @@ async function discoverAssets(token: string) {
     });
     whatsappAccounts = [...byId.values()];
   }
-  const firstAd = adAccounts?.data?.[0] || null;
+  const firstAd = adAccounts[0] || null;
   const firstPage = pages?.data?.[0] || null;
   const firstInstagram = firstPage?.instagram_business_account || firstPage?.connected_instagram_account || null;
   const firstWaba = whatsappAccounts?.[0] || null;
@@ -541,7 +599,8 @@ async function discoverAssets(token: string) {
   }
   return {
     businesses: businesses?.data || [],
-    adAccounts: adAccounts?.data || [],
+    adAccounts,
+    pixels,
     pages: pages?.data || [],
     whatsappAccounts,
     phoneNumbers,
@@ -555,6 +614,7 @@ async function discoverAssets(token: string) {
     selected: {
       business_id: firstBusiness?.id || null,
       ad_account_id: firstAd?.id || null,
+      pixel_id: pixels[0]?.id || null,
       page_id: firstPage?.id || null,
       instagram_account_id: firstInstagram?.id || null,
       whatsapp_business_account_id: firstWaba?.id || null,
@@ -563,6 +623,25 @@ async function discoverAssets(token: string) {
       timezone: firstAd?.timezone_name || null,
     },
   };
+}
+
+async function persistDetectedPixel(serviceClient: any, restaurantId: string, assets: any) {
+  const pixels = Array.isArray(assets?.pixels) ? assets.pixels : [];
+  if (pixels.length !== 1 || !pixels[0]?.id) return;
+
+  const { data: current } = await serviceClient
+    .from("marketing_settings")
+    .select("facebook_pixel_id")
+    .eq("user_id", restaurantId)
+    .maybeSingle();
+  if (current?.facebook_pixel_id) return;
+
+  const { error } = await serviceClient.from("marketing_settings").upsert({
+    user_id: restaurantId,
+    facebook_pixel_id: String(pixels[0].id),
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "user_id" });
+  if (error) console.error("marketing_pixel_auto_link_failed", error);
 }
 
 function moneyToCents(value: unknown) {
@@ -917,6 +996,8 @@ serve(async (req) => {
       url.searchParams.set("state", state);
       url.searchParams.set("response_type", "code");
       url.searchParams.set("scope", scopes);
+      url.searchParams.set("auth_type", "rerequest");
+      url.searchParams.set("return_scopes", "true");
       if (loginConfigId) url.searchParams.set("config_id", loginConfigId);
       return json({ url: url.toString(), state, redirect_uri: redirectUri() });
     }
@@ -939,25 +1020,47 @@ serve(async (req) => {
       const assets = await discoverAssets(token);
       const encrypted = await encryptToken(token);
       const selected = assets.selected;
+      const { data: existingConnection } = await serviceClient
+        .from("meta_connections")
+        .select("*")
+        .eq("restaurant_id", user.id)
+        .maybeSingle();
+      const resolvedSelected = {
+        business_id: selected.business_id || existingConnection?.business_id || null,
+        ad_account_id: selected.ad_account_id || existingConnection?.ad_account_id || null,
+        pixel_id: selected.pixel_id || existingConnection?.assets_json?.selected?.pixel_id || null,
+        page_id: selected.page_id || existingConnection?.page_id || null,
+        instagram_account_id: selected.instagram_account_id || existingConnection?.instagram_account_id || null,
+        whatsapp_business_account_id: selected.whatsapp_business_account_id || existingConnection?.whatsapp_business_account_id || null,
+        phone_number_id: selected.phone_number_id || existingConnection?.phone_number_id || null,
+        currency: selected.currency || existingConnection?.currency || null,
+        timezone: selected.timezone || existingConnection?.timezone || null,
+      };
+      const persistedAssets = {
+        ...(existingConnection?.assets_json || {}),
+        ...assets,
+        selected: resolvedSelected,
+      };
       const expiresAt = tokenPayload.expires_in ? new Date(Date.now() + Number(tokenPayload.expires_in) * 1000).toISOString() : null;
       const { data, error } = await serviceClient.from("meta_connections").upsert({
         restaurant_id: user.id,
-        business_id: selected.business_id,
-        ad_account_id: selected.ad_account_id,
-        page_id: selected.page_id,
-        instagram_account_id: selected.instagram_account_id,
-        whatsapp_business_account_id: selected.whatsapp_business_account_id,
-        phone_number_id: selected.phone_number_id,
+        business_id: resolvedSelected.business_id,
+        ad_account_id: resolvedSelected.ad_account_id,
+        page_id: resolvedSelected.page_id,
+        instagram_account_id: resolvedSelected.instagram_account_id,
+        whatsapp_business_account_id: resolvedSelected.whatsapp_business_account_id,
+        phone_number_id: resolvedSelected.phone_number_id,
         access_token_encrypted: encrypted,
         token_expires_at: expiresAt,
         status: "connected",
         permissions: assets.permissions || [],
-        assets_json: assets,
-        currency: selected.currency,
-        timezone: selected.timezone,
+        assets_json: persistedAssets,
+        currency: resolvedSelected.currency,
+        timezone: resolvedSelected.timezone,
         last_sync_at: new Date().toISOString(),
       }, { onConflict: "restaurant_id" }).select("*").single();
       if (error) throw error;
+      await persistDetectedPixel(serviceClient, user.id, assets);
       return json({ connection: { ...data, access_token_encrypted: undefined } });
     }
 
@@ -982,7 +1085,50 @@ serve(async (req) => {
         status: "connected",
         last_sync_at: new Date().toISOString(),
       }).eq("id", conn.id).select("*").single();
+      await persistDetectedPixel(serviceClient, user.id, assets);
       return json({ connection: { ...data, access_token_encrypted: undefined } });
+    }
+
+    if (action === "get_account_finance") {
+      const { data: conn, error } = await serviceClient
+        .from("meta_connections")
+        .select("id,access_token_encrypted,ad_account_id,currency")
+        .eq("restaurant_id", user.id)
+        .maybeSingle();
+      if (error) throw error;
+      if (!conn?.access_token_encrypted || !conn?.ad_account_id) {
+        return json({ error: "Conta de anúncios Meta não conectada." }, 400);
+      }
+
+      const token = await decryptToken(conn.access_token_encrypted);
+      const accountId = normalizeAdAccountId(conn.ad_account_id);
+      const account = await graphGet(accountId, token, {
+        fields: "id,name,account_status,currency,timezone_name,balance,amount_spent,spend_cap",
+      });
+      const balanceMinor = Number(account?.balance || 0);
+      const amountSpentMinor = Number(account?.amount_spent || 0);
+      const spendCapMinor = account?.spend_cap == null ? null : Number(account.spend_cap);
+      // Keep the finance card aligned with the first implementation: display
+      // Meta's AdAccount.balance field exactly as returned by the API.
+      const availableFundsMinor = Number.isFinite(balanceMinor) ? balanceMinor : null;
+      return json({
+        finance: {
+          adAccountId: account?.id || accountId,
+          name: account?.name || null,
+          accountStatus: Number(account?.account_status || 0),
+          currency: account?.currency || conn.currency || "BRL",
+          timezone: account?.timezone_name || null,
+          balanceMinor,
+          amountSpentMinor,
+          spendCapMinor,
+          directPrepayBalanceMinor: null,
+          storedBalanceMinor: null,
+          availableFundsMinor,
+          availableFundsSource: availableFundsMinor == null ? "unavailable" : "account_balance",
+          isPrepayAccount: null,
+          fetchedAt: new Date().toISOString(),
+        },
+      });
     }
 
     if (action === "plan_campaign") {
@@ -1144,9 +1290,12 @@ serve(async (req) => {
       try {
         const radiusKm = Math.max(1, Number(campaign.target_radius_km || campaign.ai_strategy?.audience?.radius_km || 5));
         const origin = campaign.ai_strategy?.audience?.origin;
-        const geoLocations = origin?.lat && origin?.lng
-          ? { custom_locations: [{ latitude: Number(origin.lat), longitude: Number(origin.lng), radius: radiusKm, distance_unit: "kilometer" }] }
-          : { countries: ["BR"] };
+        if (!origin?.lat || !origin?.lng) {
+          throw new Error("Localização do restaurante não encontrada. Corrija o endereço antes de publicar; a campanha não será ampliada automaticamente para todo o Brasil.");
+        }
+        const geoLocations = {
+          custom_locations: [{ latitude: Number(origin.lat), longitude: Number(origin.lng), radius: radiusKm, distance_unit: "kilometer" }],
+        };
         const copies = Array.isArray(campaign.ai_strategy?.copies) ? campaign.ai_strategy.copies : [];
         const selectedCopy = copies[copyIndex] || copies[0] || {};
         const creativeRows = await loadOrRepairCreativeRows(serviceClient, campaign);
@@ -1178,6 +1327,7 @@ serve(async (req) => {
           },
         });
         const metaCampaign = await createPausedMetaCampaign(adAccountId, token, campaign.name, campaign.objective);
+        const selectedPlacements = campaign.ai_strategy?.placements || campaign.review_snapshot?.placements || [];
         const metaAdset = await graphPost(`${adAccountId}/adsets`, token, {
           name: `${campaign.name} - Público IA`,
           campaign_id: metaCampaign.id,
@@ -1190,8 +1340,11 @@ serve(async (req) => {
             geo_locations: geoLocations,
             age_min: 18,
             age_max: 55,
+            ...buildMetaPlacements(selectedPlacements),
             targeting_automation: { advantage_audience: 0 },
           },
+          ...(toMetaDateTime(campaign.start_date) ? { start_time: toMetaDateTime(campaign.start_date) } : {}),
+          ...(toMetaDateTime(campaign.end_date) ? { end_time: toMetaDateTime(campaign.end_date) } : {}),
           status: "PAUSED",
         });
         const metaAd = await graphPost(`${adAccountId}/ads`, token, {
@@ -1219,10 +1372,51 @@ serve(async (req) => {
       }
     }
 
+    if (action === "update_campaign") {
+      const campaignId = String(body.campaignId || "");
+      const { data: campaign } = await serviceClient.from("marketing_campaigns").select("*, meta_connections(*)").eq("restaurant_id", user.id).eq("id", campaignId).single();
+      if (!campaign?.id) return json({ error: "Campanha não encontrada." }, 404);
+
+      const dailyBudget = Math.max(5, Number(body.dailyBudget || campaign.daily_budget || 5));
+      const endDate = body.endDate === null ? null : String(body.endDate || campaign.end_date || "") || null;
+      const localUpdate = await serviceClient.from("marketing_campaigns").update({ daily_budget: dailyBudget, end_date: endDate }).eq("id", campaign.id).select("*").single();
+      if (localUpdate.error) throw localUpdate.error;
+
+      if (campaign.meta_campaign_id && campaign.meta_connections?.access_token_encrypted) {
+        const token = await decryptToken(campaign.meta_connections.access_token_encrypted);
+        const { data: adset } = await serviceClient.from("marketing_adsets").select("meta_adset_id").eq("campaign_id", campaign.id).maybeSingle();
+        if (adset?.meta_adset_id) {
+          await graphPost(adset.meta_adset_id, token, {
+            daily_budget: moneyToCents(dailyBudget),
+            ...(toMetaDateTime(endDate) ? { end_time: toMetaDateTime(endDate) } : {}),
+          });
+        }
+      }
+      return json({ campaign: localUpdate.data });
+    }
+
+    if (action === "set_campaign_status") {
+      const campaignId = String(body.campaignId || "");
+      const requestedStatus = String(body.status || "").toUpperCase();
+      if (!new Set(["ACTIVE", "PAUSED"]).has(requestedStatus)) return json({ error: "Status de campanha inválido." }, 400);
+      const { data: campaign } = await serviceClient.from("marketing_campaigns").select("*, meta_connections(*)").eq("restaurant_id", user.id).eq("id", campaignId).single();
+      if (!campaign?.meta_campaign_id || !campaign.meta_connections?.access_token_encrypted) return json({ error: "A campanha ainda não foi publicada na Meta." }, 400);
+      const token = await decryptToken(campaign.meta_connections.access_token_encrypted);
+      await graphPost(campaign.meta_campaign_id, token, { status: requestedStatus });
+      const localStatus = requestedStatus === "ACTIVE" ? "active" : "paused";
+      await Promise.all([
+        serviceClient.from("marketing_campaigns").update({ status: localStatus, last_error: null }).eq("id", campaign.id),
+        serviceClient.from("marketing_adsets").update({ status: localStatus }).eq("campaign_id", campaign.id),
+        serviceClient.from("marketing_ads").update({ status: localStatus }).eq("campaign_id", campaign.id),
+      ]);
+      return json({ ok: true, status: localStatus });
+    }
+
     if (action === "metrics") {
       const campaignId = String(body.campaignId || "");
       const { data: campaign } = await serviceClient.from("marketing_campaigns").select("*, meta_connections(*)").eq("restaurant_id", user.id).eq("id", campaignId).single();
       if (!campaign?.meta_campaign_id) return json({ metrics: [] });
+      if (!campaign.meta_connections?.access_token_encrypted) return json({ error: "A conexão com a Meta expirou. Reconecte a conta para consultar as métricas." }, 400);
       const token = await decryptToken(campaign.meta_connections.access_token_encrypted);
       const insights = await graphGet(`${campaign.meta_campaign_id}/insights`, token, { fields: "date_start,impressions,reach,clicks,ctr,cpc,cpm,spend", time_increment: "1" });
       const rows = (insights?.data || []).map((item: any) => ({

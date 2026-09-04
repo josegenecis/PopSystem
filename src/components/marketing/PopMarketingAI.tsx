@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { BarChart3, CheckCircle2, Facebook, Image as ImageIcon, Loader2, MapPin, Megaphone, RefreshCw, Send, ShieldCheck, Sparkles, Upload, Wand2 } from 'lucide-react';
+import { BarChart3, CheckCircle2, Eye, Facebook, Image as ImageIcon, LayoutDashboard, Loader2, MapPin, Megaphone, MousePointerClick, Pause, Play, PlugZap, RefreshCw, Save, Send, ShieldCheck, Sparkles, Target, TrendingUp, Upload, Wand2, WalletCards } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -33,6 +33,14 @@ type MetaConnection = {
   timezone?: string | null;
   assets_json?: any;
 };
+type MetaAccountFinance = {
+  adAccountId: string;
+  currency: string;
+  availableFundsMinor?: number | null;
+  availableFundsSource?: 'account_balance' | 'prepay_account_balance' | 'stored_balance_funding_source' | 'unavailable';
+  isPrepayAccount?: boolean | null;
+  fetchedAt: string;
+};
 type Campaign = {
   id: string;
   name: string;
@@ -42,6 +50,7 @@ type Campaign = {
   product_focus?: string | null;
   target_city?: string | null;
   target_radius_km?: number | null;
+  end_date?: string | null;
   created_at: string;
   ai_strategy?: any;
   review_snapshot?: any;
@@ -63,6 +72,7 @@ type Creative = {
   cta?: string | null;
   type?: string | null;
 };
+type Metric = { date: string; impressions: number; reach: number; clicks: number; ctr: number; cpc: number; cpm: number; spend: number };
 
 const statusLabel: Record<string, string> = {
   draft: 'Rascunho',
@@ -78,9 +88,31 @@ function money(value: unknown) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(value || 0));
 }
 
+function metaMoneyFromMinor(value: unknown, currency = 'BRL') {
+  const safeCurrency = /^[A-Z]{3}$/.test(currency || '') ? currency : 'BRL';
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: safeCurrency }).format(Number(value || 0) / 100);
+}
+
 function dateLabel(value?: string) {
   if (!value) return '-';
   return new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
+}
+
+function timeLabel(value?: string) {
+  if (!value) return '-';
+  return new Intl.DateTimeFormat('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(new Date(value));
+}
+
+function metaBillingUrl(adAccountId?: string | null, businessId?: string | null) {
+  if (!adAccountId) return null;
+  const accountId = String(adAccountId).replace(/^act_/, '');
+  const params = new URLSearchParams({ asset_id: accountId });
+  if (businessId) params.set('business_id', businessId);
+  return `https://business.facebook.com/billing_hub/payment_settings?${params.toString()}`;
 }
 
 const creativeFormatOptions = [
@@ -115,7 +147,17 @@ export default function PopMarketingAI() {
   const [creatives, setCreatives] = useState<Creative[]>([]);
   const [selectedCopyIndex, setSelectedCopyIndex] = useState(0);
   const [selectedCreativeId, setSelectedCreativeId] = useState<string | null>(null);
+  const [metrics, setMetrics] = useState<Metric[]>([]);
+  const [metricsLoading, setMetricsLoading] = useState(false);
+  const [editDailyBudget, setEditDailyBudget] = useState(20);
+  const [editEndDate, setEditEndDate] = useState('');
   const [loading, setLoading] = useState(false);
+  const [workspaceTab, setWorkspaceTab] = useState<'overview' | 'create' | 'campaigns' | 'assets'>('overview');
+  const [tracking, setTracking] = useState({ facebookPixelId: '', googleTagId: '' });
+  const [savedFacebookPixelId, setSavedFacebookPixelId] = useState('');
+  const [savingTracking, setSavingTracking] = useState(false);
+  const [accountFinance, setAccountFinance] = useState<MetaAccountFinance | null>(null);
+  const [accountFinanceLoading, setAccountFinanceLoading] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [uploadingCreativeKey, setUploadingCreativeKey] = useState<string | null>(null);
   const [pendingCreativeImage, setPendingCreativeImage] = useState<{ creative: Creative; key: string; file: File } | null>(null);
@@ -136,6 +178,16 @@ export default function PopMarketingAI() {
 
   const selectedProduct = useMemo(() => products.find((item) => item.id === form.productId) || null, [form.productId, products]);
   const selectedCampaignProduct = selectedCampaign?.ai_strategy?.product || null;
+  const metricTotals = useMemo(() => metrics.reduce((total, item) => ({
+    impressions: total.impressions + Number(item.impressions || 0),
+    reach: total.reach + Number(item.reach || 0),
+    clicks: total.clicks + Number(item.clicks || 0),
+    spend: total.spend + Number(item.spend || 0),
+  }), { impressions: 0, reach: 0, clicks: 0, spend: 0 }), [metrics]);
+  const metricRates = useMemo(() => ({
+    ctr: metricTotals.impressions > 0 ? (metricTotals.clicks / metricTotals.impressions) * 100 : 0,
+    cpc: metricTotals.clicks > 0 ? metricTotals.spend / metricTotals.clicks : 0,
+  }), [metricTotals]);
   const toggleFormArray = (key: 'selectedFormats' | 'selectedPlacements', value: string) => {
     setForm((prev) => {
       const current = new Set(prev[key]);
@@ -166,15 +218,66 @@ export default function PopMarketingAI() {
         ? 'não localizado'
         : 'permissão pendente',
   }), [connection, permissionNames]);
+  const detectedPixels = useMemo(
+    () => Array.isArray(connection?.assets_json?.pixels) ? connection.assets_json.pixels : [],
+    [connection?.assets_json],
+  );
+  const conversionsApiReady = Boolean(
+    connection?.status === 'connected' && savedFacebookPixelId,
+  );
+  const pixelHasUnsavedChanges = tracking.facebookPixelId.trim() !== savedFacebookPixelId;
 
   useEffect(() => {
     if (!user?.id) return;
+    const params = new URLSearchParams(window.location.search);
+    const isMetaCallback = params.get('meta_callback') === '1' && Boolean(params.get('code'));
+    if (isMetaCallback) {
+      // Avoid loading the previous connection in parallel with the OAuth callback.
+      // A slower stale query used to overwrite the freshly connected account in UI.
+      void Promise.all([loadProducts(), loadCampaigns(), loadTrackingSettings()]);
+      void handleMetaCallback();
+      return;
+    }
     void loadAll();
-    void handleMetaCallback();
   }, [user?.id]);
 
   const loadAll = async () => {
-    await Promise.all([loadConnection(), loadProducts(), loadCampaigns()]);
+    await Promise.all([loadConnection(), loadProducts(), loadCampaigns(), loadTrackingSettings()]);
+  };
+
+  const loadTrackingSettings = async () => {
+    if (!user?.id) return;
+    const { data } = await supabase
+      .from('marketing_settings')
+      .select('facebook_pixel_id,google_tag_id')
+      .eq('user_id', user.id)
+      .maybeSingle();
+    const facebookPixelId = String(data?.facebook_pixel_id || '');
+    setTracking({
+      facebookPixelId,
+      googleTagId: String(data?.google_tag_id || ''),
+    });
+    setSavedFacebookPixelId(facebookPixelId);
+  };
+
+  const saveTrackingSettings = async () => {
+    if (!user?.id) return;
+    setSavingTracking(true);
+    try {
+      const { error } = await supabase.from('marketing_settings').upsert({
+        user_id: user.id,
+        facebook_pixel_id: tracking.facebookPixelId.trim() || null,
+        google_tag_id: tracking.googleTagId.trim() || null,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
+      if (error) throw error;
+      setSavedFacebookPixelId(tracking.facebookPixelId.trim());
+      toast({ title: 'Rastreamento atualizado', description: 'Pixel e Google Tag foram salvos nos ativos de marketing.' });
+    } catch (error: any) {
+      toast({ title: 'Não foi possível salvar', description: error?.message || 'Tente novamente.', variant: 'destructive' });
+    } finally {
+      setSavingTracking(false);
+    }
   };
 
   const handleMetaCallback = async () => {
@@ -186,6 +289,7 @@ export default function PopMarketingAI() {
     try {
       const result = await callPopMarketingAI<{ connection: MetaConnection }>({ action: 'complete_oauth', code });
       setConnection(result.connection);
+      await loadTrackingSettings();
       params.delete('code');
       params.delete('state');
       params.delete('meta_callback');
@@ -249,6 +353,7 @@ export default function PopMarketingAI() {
     try {
       const result = await callPopMarketingAI<{ connection: MetaConnection }>({ action: 'sync_assets' });
       setConnection(result.connection);
+      await loadTrackingSettings();
       toast({ title: 'Contas conectadas atualizadas', description: 'Facebook, Instagram e WhatsApp foram sincronizados.' });
     } catch (error: any) {
       toast({ title: 'Erro ao sincronizar', description: error?.message || 'Tente reconectar a Meta.', variant: 'destructive' });
@@ -256,6 +361,39 @@ export default function PopMarketingAI() {
       setLoading(false);
     }
   };
+
+  const loadAccountFinance = async (notifyOnError = false) => {
+    if (!connection?.ad_account_id || connection.status !== 'connected') {
+      setAccountFinance(null);
+      return;
+    }
+    setAccountFinanceLoading(true);
+    try {
+      const result = await callPopMarketingAI<{ finance: MetaAccountFinance }>({ action: 'get_account_finance' });
+      setAccountFinance(result.finance);
+    } catch (error: any) {
+      setAccountFinance(null);
+      if (notifyOnError) {
+        toast({ title: 'Não foi possível atualizar os fundos', description: error?.message || 'Confira o acesso à conta de anúncios.', variant: 'destructive' });
+      }
+    } finally {
+      setAccountFinanceLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (workspaceTab !== 'assets' || connection?.status !== 'connected' || !connection.ad_account_id) return;
+    void loadAccountFinance(false);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void loadAccountFinance(false);
+    };
+    const intervalId = window.setInterval(refreshWhenVisible, 60_000);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [workspaceTab, connection?.id, connection?.status, connection?.ad_account_id]);
 
   const generatePlan = async () => {
     setGenerationError(null);
@@ -366,6 +504,9 @@ export default function PopMarketingAI() {
 
   const openCampaign = async (campaign: Campaign) => {
     setSelectedCampaign(campaign);
+    setEditDailyBudget(Number(campaign.daily_budget || 20));
+    setEditEndDate(campaign.end_date || '');
+    setMetrics([]);
     setSelectedCopyIndex(0);
     const { data } = await (supabase as any)
       .from('marketing_creatives')
@@ -381,6 +522,46 @@ export default function PopMarketingAI() {
       : snapshotCreatives;
     setCreatives(list);
     setSelectedCreativeId(list?.[0]?.id || null);
+    if (campaign.meta_campaign_id) void loadMetrics(campaign.id);
+  };
+
+  const loadMetrics = async (campaignId = selectedCampaign?.id) => {
+    if (!campaignId) return;
+    setMetricsLoading(true);
+    try {
+      const result = await callPopMarketingAI<{ metrics: Metric[] }>({ action: 'metrics', campaignId });
+      setMetrics(result.metrics || []);
+    } catch (error: any) {
+      toast({ title: 'Não foi possível atualizar as métricas', description: error?.message || 'Tente novamente.', variant: 'destructive' });
+    } finally {
+      setMetricsLoading(false);
+    }
+  };
+
+  const saveCampaignSettings = async () => {
+    if (!selectedCampaign?.id) return;
+    setLoading(true);
+    try {
+      const result = await callPopMarketingAI<{ campaign: Campaign }>({ action: 'update_campaign', campaignId: selectedCampaign.id, dailyBudget: editDailyBudget, endDate: editEndDate || null });
+      setSelectedCampaign((previous) => previous ? { ...previous, ...result.campaign } : result.campaign);
+      await loadCampaigns();
+      toast({ title: 'Campanha atualizada', description: 'Orçamento e duração foram salvos.' });
+    } catch (error: any) {
+      toast({ title: 'Não foi possível atualizar', description: error?.message || 'Tente novamente.', variant: 'destructive' });
+    } finally { setLoading(false); }
+  };
+
+  const setCampaignStatus = async (status: 'ACTIVE' | 'PAUSED') => {
+    if (!selectedCampaign?.id) return;
+    setLoading(true);
+    try {
+      const result = await callPopMarketingAI<{ status: string }>({ action: 'set_campaign_status', campaignId: selectedCampaign.id, status });
+      setSelectedCampaign((previous) => previous ? { ...previous, status: result.status } : previous);
+      await loadCampaigns();
+      toast({ title: status === 'ACTIVE' ? 'Campanha ativada' : 'Campanha pausada', description: 'O status foi atualizado na Meta.' });
+    } catch (error: any) {
+      toast({ title: 'Não foi possível alterar o status', description: error?.message || 'Tente novamente.', variant: 'destructive' });
+    } finally { setLoading(false); }
   };
 
   const publishPaused = async () => {
@@ -390,6 +571,8 @@ export default function PopMarketingAI() {
       await callPopMarketingAI({ action: 'publish_paused', campaignId: selectedCampaign.id, copyIndex: selectedCopyIndex, creativeId: selectedCreativeId });
       toast({ title: 'Campanha enviada pausada', description: 'Ela foi criada na Meta como PAUSED para revisão final.' });
       await loadCampaigns();
+      setSelectedCampaign((previous) => previous ? { ...previous, status: 'paused', meta_campaign_id: previous.meta_campaign_id || 'published' } : previous);
+      setMetrics([]);
     } catch (error: any) {
       toast({ title: 'Não foi possível publicar', description: error?.message || 'Confira permissões, página e conta de anúncio.', variant: 'destructive' });
     } finally {
@@ -415,18 +598,25 @@ export default function PopMarketingAI() {
           }}
         />
       ) : null}
-      <Card className="overflow-hidden border-0 bg-[#062f23] text-white shadow-xl">
-        <CardContent className="flex flex-col gap-5 p-6 md:flex-row md:items-center md:justify-between">
-          <div>
+      <Card className="relative overflow-hidden border-0 bg-[#063c2d] text-white shadow-[0_24px_60px_-30px_rgba(0,50,35,0.75)]">
+        <div className="pointer-events-none absolute -right-24 -top-32 h-72 w-72 rounded-full border-[44px] border-white/5" />
+        <div className="pointer-events-none absolute bottom-0 right-1/3 h-24 w-24 translate-y-1/2 rounded-full bg-[#8cc850]/20" />
+        <CardContent className="relative flex flex-col gap-6 p-6 md:p-8 xl:flex-row xl:items-center xl:justify-between">
+          <div className="max-w-4xl">
             <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white/12 px-3 py-1 text-xs font-bold uppercase tracking-[0.28em] text-[#d9ff99]">
-              <Sparkles className="h-4 w-4" /> Anúncios Automáticos
+              <Sparkles className="h-4 w-4" /> PopMarketing AI
             </div>
-            <h2 className="text-3xl font-black">Crie anúncios para Facebook e Instagram em poucos cliques</h2>
-            <p className="mt-2 max-w-3xl text-white/78">
-              Conecte suas contas, escolha o que deseja divulgar e o PopSystem ajuda a criar sua propaganda de forma simples.
+            <h2 className="text-3xl font-black leading-tight md:text-4xl">Marketing que transforma produtos em pedidos</h2>
+            <p className="mt-3 max-w-3xl text-base text-white/75">
+              Escolha um produto, defina o investimento e deixe o PopSystem preparar os anúncios. Você revisa tudo antes de ativar.
             </p>
+            <div className="mt-5 flex flex-wrap gap-2 text-xs font-semibold text-white/85">
+              <span className="rounded-full bg-white/10 px-3 py-2">1. Escolha o produto</span>
+              <span className="rounded-full bg-white/10 px-3 py-2">2. A IA cria as artes</span>
+              <span className="rounded-full bg-white/10 px-3 py-2">3. Publique com segurança</span>
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex min-w-fit flex-col gap-2 sm:flex-row xl:flex-col">
             <Button onClick={connectMeta} disabled={loading} className="bg-[#ff5a00] text-white hover:bg-[#e75000]">
               <Facebook className="mr-2 h-4 w-4" /> Conectar Facebook e Instagram
             </Button>
@@ -437,10 +627,99 @@ export default function PopMarketingAI() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
+      <div className="sticky top-2 z-20 rounded-2xl border border-[#dce8e2] bg-white/95 p-1.5 shadow-sm backdrop-blur">
+        <div className="grid grid-cols-2 gap-1 lg:grid-cols-4">
+          {[
+            { id: 'overview', label: 'Visão geral', description: 'Métricas e resultados', icon: LayoutDashboard },
+            { id: 'create', label: 'Criar campanha', description: 'Oferta, público e orçamento', icon: Wand2 },
+            { id: 'campaigns', label: 'Campanhas', description: 'Revisar e gerenciar', icon: Megaphone },
+            { id: 'assets', label: 'Contas e ativos', description: 'Meta, páginas e pixels', icon: PlugZap },
+          ].map((item) => {
+            const active = workspaceTab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setWorkspaceTab(item.id as typeof workspaceTab)}
+                className={`flex items-center gap-3 rounded-xl px-3 py-3 text-left transition ${active ? 'bg-[#063c2d] text-white shadow-sm' : 'text-[#31584b] hover:bg-[#f1f7f4]'}`}
+              >
+                <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ${active ? 'bg-white/12 text-[#d9ff99]' : 'bg-[#e7f6ee] text-[#086344]'}`}><item.icon className="h-4 w-4" /></span>
+                <span className="min-w-0">
+                  <span className="block font-bold leading-tight">{item.label}</span>
+                  <span className={`hidden truncate text-xs sm:block ${active ? 'text-white/65' : 'text-muted-foreground'}`}>{item.description}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {workspaceTab === 'overview' ? (
+      <Card className="overflow-hidden border-[#dce8e2] shadow-[0_18px_50px_-36px_rgba(0,50,35,0.55)]">
+        <CardHeader className="border-b bg-[#fbfdfb] pb-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <Badge className="bg-[#e7f6ee] text-[#086344] hover:bg-[#e7f6ee]">Visão geral</Badge>
+                {selectedCampaign ? (
+                  <Badge variant="outline">{statusLabel[selectedCampaign.status] || selectedCampaign.status}</Badge>
+                ) : null}
+              </div>
+              <CardTitle className="text-2xl text-[#073d2d]">Desempenho do seu marketing</CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {selectedCampaign ? <>Campanha selecionada: <strong className="text-foreground">{selectedCampaign.name}</strong></> : 'Crie sua primeira campanha para acompanhar os resultados aqui.'}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {selectedCampaign?.meta_campaign_id ? (
+                <Button onClick={() => void loadMetrics()} disabled={loading || metricsLoading} variant="outline" className="bg-white">
+                  <RefreshCw className={`mr-2 h-4 w-4 ${metricsLoading ? 'animate-spin' : ''}`} /> Atualizar resultados
+                </Button>
+              ) : null}
+              <Button onClick={() => setWorkspaceTab('create')} className="bg-[#063c2d] text-white hover:bg-[#052f24]">
+                <Sparkles className="mr-2 h-4 w-4" /> Criar nova campanha
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="p-5 md:p-6">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+            {[
+              { label: 'Alcance', value: metricTotals.reach.toLocaleString('pt-BR'), icon: Target, tone: 'bg-emerald-50 text-emerald-700' },
+              { label: 'Impressões', value: metricTotals.impressions.toLocaleString('pt-BR'), icon: Eye, tone: 'bg-sky-50 text-sky-700' },
+              { label: 'Cliques', value: metricTotals.clicks.toLocaleString('pt-BR'), icon: MousePointerClick, tone: 'bg-violet-50 text-violet-700' },
+              { label: 'Investimento', value: money(metricTotals.spend), icon: WalletCards, tone: 'bg-orange-50 text-orange-700' },
+              { label: 'Taxa de cliques', value: `${metricRates.ctr.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`, icon: TrendingUp, tone: 'bg-lime-50 text-lime-800' },
+              { label: 'Custo por clique', value: money(metricRates.cpc), icon: BarChart3, tone: 'bg-zinc-100 text-zinc-700' },
+            ].map((item) => (
+              <div key={item.label} className="rounded-2xl border bg-white p-4 transition-shadow hover:shadow-md">
+                <div className={`mb-4 grid h-10 w-10 place-items-center rounded-xl ${item.tone}`}><item.icon className="h-5 w-5" /></div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{item.label}</div>
+                <div className="mt-1 text-2xl font-black tracking-tight text-[#073d2d]">{item.value}</div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-dashed bg-[#fbfaf6] p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <strong className="text-[#073d2d]">{metrics.length > 0 ? `${metrics.length} dia(s) de dados reais da Meta` : 'Resultados aparecem automaticamente após a veiculação'}</strong>
+              <p className="mt-0.5 text-muted-foreground">
+                {selectedCampaign?.meta_campaign_id ? 'Ative a campanha e atualize os resultados para acompanhar a evolução.' : 'A campanha é enviada pausada para você revisar antes de investir.'}
+              </p>
+            </div>
+            {selectedCampaign ? <Badge variant="outline" className="w-fit bg-white">{money(selectedCampaign.daily_budget)}/dia</Badge> : null}
+          </div>
+        </CardContent>
+      </Card>
+      ) : null}
+
+      {workspaceTab === 'create' ? (
+      <div id="popmarketing-create" className="scroll-mt-24">
+        <Card className="overflow-hidden border-[#e5e9e6] shadow-sm">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2"><Wand2 className="h-5 w-5 text-[#ff5a00]" /> Criar propaganda com IA</CardTitle>
+            <div className="flex items-start gap-3">
+              <div className="grid h-11 w-11 place-items-center rounded-2xl bg-orange-50 text-[#ff5a00]"><Wand2 className="h-5 w-5" /></div>
+              <div><CardTitle>Criar nova campanha</CardTitle><p className="mt-1 text-sm text-muted-foreground">Configuração simples: oferta, público e investimento em uma única tela.</p></div>
+            </div>
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
@@ -623,43 +902,13 @@ export default function PopMarketingAI() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-emerald-600" /> Facebook e Instagram</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            <div className="flex items-center justify-between">
-              <span>Status</span>
-              <Badge className={connection?.status === 'connected' ? 'bg-emerald-50 text-emerald-700' : 'bg-zinc-100 text-zinc-700'}>{connection?.status === 'connected' ? 'conectado' : 'não conectado'}</Badge>
-            </div>
-            <div>Conta: <strong>{connection?.ad_account_id || 'não vinculada'}</strong></div>
-            <div>Página: <strong>{connection?.page_id || 'não vinculada'}</strong></div>
-            <div>Instagram: <strong>{metaAssetStatus.instagram}</strong></div>
-            <div>WhatsApp Ads: <strong>{metaAssetStatus.whatsapp}</strong></div>
-            <div>Número WABA: <strong>{metaAssetStatus.phone}</strong></div>
-            <div>Moeda/Fuso: <strong>{connection?.currency || '-'} / {connection?.timezone || '-'}</strong></div>
-            {(connection?.assets_json?.warnings || []).length > 0 && (
-              <Alert className="border-amber-200 bg-amber-50 text-amber-900">
-                <AlertTitle>Permissões Meta pendentes</AlertTitle>
-                <AlertDescription>
-                  A conta pode estar vinculada na Meta, mas este app ainda não recebeu permissão para consultar todos os ativos.
-                </AlertDescription>
-              </Alert>
-            )}
-            <Alert>
-              <ShieldCheck className="h-4 w-4" />
-              <AlertTitle>Segurança</AlertTitle>
-              <AlertDescription>
-                A primeira versão sempre cria campanha em revisão/pausada. Nada é publicado ativo sem aprovação.
-              </AlertDescription>
-            </Alert>
-          </CardContent>
-        </Card>
       </div>
+      ) : null}
 
+      {workspaceTab === 'campaigns' ? (
       <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
-        <Card>
-          <CardHeader><CardTitle className="flex items-center gap-2"><Megaphone className="h-5 w-5" /> Campanhas recentes</CardTitle></CardHeader>
+        <Card className="overflow-hidden border-[#e5e9e6] shadow-sm">
+          <CardHeader className="border-b bg-[#fbfdfb]"><CardTitle className="flex items-center gap-2"><Megaphone className="h-5 w-5 text-[#ff5a00]" /> Suas campanhas</CardTitle><p className="text-sm text-muted-foreground">Selecione uma campanha para revisar ou gerenciar.</p></CardHeader>
           <CardContent className="space-y-2">
             {campaigns.length === 0 ? (
               <div className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">Nenhuma campanha criada ainda.</div>
@@ -667,7 +916,7 @@ export default function PopMarketingAI() {
               <button
                 key={campaign.id}
                 onClick={() => openCampaign(campaign)}
-                className={`w-full rounded-xl border p-3 text-left transition hover:border-[#ff5a00] ${selectedCampaign?.id === campaign.id ? 'border-[#ff5a00] bg-orange-50' : 'border-border bg-white'}`}
+                className={`w-full rounded-2xl border p-4 text-left transition hover:-translate-y-0.5 hover:border-[#ff5a00] hover:shadow-sm ${selectedCampaign?.id === campaign.id ? 'border-[#ff5a00] bg-orange-50/70 ring-2 ring-orange-100' : 'border-border bg-white'}`}
               >
                 <div className="font-bold">{campaign.name}</div>
                 <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
@@ -679,22 +928,38 @@ export default function PopMarketingAI() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="overflow-hidden border-[#e5e9e6] shadow-sm">
           <CardHeader>
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <CardTitle className="flex items-center gap-2"><BarChart3 className="h-5 w-5" /> Painel de revisão</CardTitle>
-              <Button onClick={publishPaused} disabled={loading || !selectedCampaign} className="bg-emerald-600 text-white hover:bg-emerald-700">
-                <Send className="mr-2 h-4 w-4" /> Publicar pausada
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                {selectedCampaign?.meta_campaign_id ? (
+                  <>
+                    <Button onClick={() => void loadMetrics()} disabled={loading || metricsLoading} variant="outline">
+                      <RefreshCw className={`mr-2 h-4 w-4 ${metricsLoading ? 'animate-spin' : ''}`} /> Atualizar métricas
+                    </Button>
+                    {selectedCampaign.status === 'active' ? (
+                      <Button onClick={() => void setCampaignStatus('PAUSED')} disabled={loading} variant="outline"><Pause className="mr-2 h-4 w-4" /> Pausar</Button>
+                    ) : (
+                      <Button onClick={() => void setCampaignStatus('ACTIVE')} disabled={loading} className="bg-emerald-600 text-white hover:bg-emerald-700"><Play className="mr-2 h-4 w-4" /> Ativar</Button>
+                    )}
+                  </>
+                ) : (
+                  <Button onClick={publishPaused} disabled={loading || !selectedCampaign} className="bg-emerald-600 text-white hover:bg-emerald-700">
+                    <Send className="mr-2 h-4 w-4" /> Publicar pausada
+                  </Button>
+                )}
+              </div>
             </div>
           </CardHeader>
           <CardContent>
             {!selectedCampaign ? (
               <div className="rounded-xl bg-muted p-8 text-center text-muted-foreground">Selecione ou gere uma campanha para revisar.</div>
             ) : (
-              <Tabs defaultValue="overview">
+              <Tabs defaultValue="management">
                 <TabsList className="mb-4">
                   <TabsTrigger value="overview">Resumo</TabsTrigger>
+                  <TabsTrigger value="management">Gerenciar</TabsTrigger>
                   <TabsTrigger value="copy">Textos</TabsTrigger>
                   <TabsTrigger value="creative">Artes</TabsTrigger>
                 </TabsList>
@@ -720,6 +985,41 @@ export default function PopMarketingAI() {
                     <p className="mt-2 text-white/80">
                       O PopSystem preparou textos, público recomendado, raio de entrega da propaganda e canais indicados para revisão.
                     </p>
+                  </div>
+                </TabsContent>
+                <TabsContent value="management" className="space-y-4">
+                  <div className="flex flex-col gap-3 rounded-xl border bg-[#f7fff0] p-4 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <div className="font-black text-[#003223]">Gerenciamento da campanha</div>
+                      <div className="text-sm text-muted-foreground">
+                        {selectedCampaign.meta_campaign_id
+                          ? 'Campanha vinculada à Meta. Você pode ajustar, ativar, pausar e consultar os resultados.'
+                          : 'Esta campanha ainda não foi publicada na Meta. Publique-a pausada para liberar o gerenciamento e as métricas.'}
+                      </div>
+                    </div>
+                    <Badge className={selectedCampaign.meta_campaign_id ? 'bg-emerald-600 text-white' : 'bg-amber-100 text-amber-900'}>
+                      {selectedCampaign.meta_campaign_id ? 'Conectada à Meta' : 'Aguardando publicação'}
+                    </Badge>
+                  </div>
+                  <div className="grid gap-3 rounded-xl border p-4 md:grid-cols-[1fr_1fr_auto] md:items-end">
+                    <div className="space-y-2"><Label>Investimento diário</Label><Input type="number" min={5} value={editDailyBudget} onChange={(event) => setEditDailyBudget(Number(event.target.value || 0))} /></div>
+                    <div className="space-y-2"><Label>Data final</Label><Input type="date" value={editEndDate} onChange={(event) => setEditEndDate(event.target.value)} /></div>
+                    <Button onClick={saveCampaignSettings} disabled={loading}><Save className="mr-2 h-4 w-4" /> Salvar alterações</Button>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {!selectedCampaign.meta_campaign_id ? (
+                      <Button onClick={publishPaused} disabled={loading} className="bg-emerald-600 text-white hover:bg-emerald-700"><Send className="mr-2 h-4 w-4" /> Publicar pausada</Button>
+                    ) : selectedCampaign.status === 'active' ? (
+                      <Button onClick={() => void setCampaignStatus('PAUSED')} disabled={loading} variant="outline"><Pause className="mr-2 h-4 w-4" /> Pausar campanha</Button>
+                    ) : (
+                      <Button onClick={() => void setCampaignStatus('ACTIVE')} disabled={loading} className="bg-emerald-600 text-white hover:bg-emerald-700"><Play className="mr-2 h-4 w-4" /> Ativar campanha</Button>
+                    )}
+                    <Button onClick={() => void loadMetrics()} disabled={loading || metricsLoading || !selectedCampaign.meta_campaign_id} variant="outline">
+                      <RefreshCw className={`mr-2 h-4 w-4 ${metricsLoading ? 'animate-spin' : ''}`} /> Atualizar métricas
+                    </Button>
+                  </div>
+                  <div className="rounded-xl border border-dashed bg-[#fbfaf6] p-4 text-sm text-muted-foreground">
+                    Os resultados desta campanha aparecem no painel de desempenho no topo da página, mantendo esta área focada apenas nas ações de gerenciamento.
                   </div>
                 </TabsContent>
                 <TabsContent value="copy" className="grid gap-3 md:grid-cols-2">
@@ -830,14 +1130,176 @@ export default function PopMarketingAI() {
           </CardContent>
         </Card>
       </div>
+      ) : null}
 
-      <Alert>
-        <CheckCircle2 className="h-4 w-4" />
-        <AlertTitle>Campanha pronta para sua revisão</AlertTitle>
-        <AlertDescription>
-          As campanhas são planejadas com IA e as artes usam modelos prontos com foto real do produto. Tudo é enviado pausado para você revisar antes de ativar.
-        </AlertDescription>
-      </Alert>
+      {workspaceTab === 'assets' ? (
+        <div className="grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">
+          <Card className="overflow-hidden border-[#e5e9e6] shadow-sm">
+            <CardHeader className="border-b bg-[#fbfdfb]">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-start gap-3">
+                  <div className="grid h-11 w-11 place-items-center rounded-2xl bg-blue-50 text-blue-700"><Facebook className="h-5 w-5" /></div>
+                  <div><CardTitle>Contas e páginas da Meta</CardTitle><p className="mt-1 text-sm text-muted-foreground">Todos os ativos usados para criar, publicar e medir seus anúncios.</p></div>
+                </div>
+                <Badge className={connection?.status === 'connected' ? 'w-fit bg-emerald-50 text-emerald-700 hover:bg-emerald-50' : 'w-fit bg-zinc-100 text-zinc-700 hover:bg-zinc-100'}>
+                  {connection?.status === 'connected' ? 'Meta conectada' : 'Meta não conectada'}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-5 p-5 md:p-6">
+              <div className="grid gap-3 sm:grid-cols-2">
+                {[
+                  { label: 'Gerenciador de negócios', value: connection?.business_id, detail: 'Empresa responsável pelos ativos', isAdAccount: false },
+                  {
+                    label: 'Conta de anúncios',
+                    value: connection?.ad_account_id,
+                    detail: `${connection?.currency || 'Moeda não informada'} · ${connection?.timezone || 'Fuso não informado'}`,
+                    isAdAccount: true,
+                    action: connection?.ad_account_id ? {
+                      label: 'Adicionar saldo',
+                      href: metaBillingUrl(connection.ad_account_id, connection.business_id),
+                    } : null,
+                  },
+                  { label: 'Página do Facebook', value: connection?.page_id, detail: 'Identidade usada nos anúncios', isAdAccount: false },
+                  { label: 'Instagram profissional', value: metaAssetStatus.instagram, detail: 'Perfil conectado à página', isAdAccount: false },
+                  { label: 'WhatsApp Business', value: metaAssetStatus.whatsapp, detail: `Número: ${metaAssetStatus.phone}`, isAdAccount: false },
+                ].map((asset) => {
+                  const connected = Boolean(asset.value && !String(asset.value).includes('não ') && !String(asset.value).includes('pendente'));
+                  return (
+                    <div key={asset.label} className="rounded-2xl border bg-white p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{asset.label}</div>
+                          <div className="mt-2 break-all font-black text-[#073d2d]">{asset.value || 'Não vinculado'}</div>
+                          <div className="mt-1 text-xs text-muted-foreground">{asset.detail}</div>
+                          {asset.isAdAccount && connection?.ad_account_id ? (
+                            <div className="mt-4 min-w-[230px] rounded-xl border border-emerald-100 bg-emerald-50/70 p-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="text-xs font-bold uppercase tracking-wide text-emerald-800">Fundos disponíveis</span>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7 text-emerald-800 hover:bg-emerald-100"
+                                  disabled={accountFinanceLoading}
+                                  onClick={() => void loadAccountFinance(true)}
+                                  aria-label="Atualizar fundos disponíveis"
+                                  title="Atualizar fundos"
+                                >
+                                  <RefreshCw className={`h-3.5 w-3.5 ${accountFinanceLoading ? 'animate-spin' : ''}`} />
+                                </Button>
+                              </div>
+                              <div className="mt-1 text-2xl font-black text-[#073d2d]">
+                                {accountFinanceLoading && !accountFinance
+                                  ? 'Consultando...'
+                                  : accountFinance?.availableFundsMinor != null
+                                    ? metaMoneyFromMinor(accountFinance.availableFundsMinor, accountFinance.currency)
+                                    : 'Indisponível'}
+                              </div>
+                              <p className="mt-1 text-[11px] text-emerald-800/75">
+                                {accountFinance?.fetchedAt
+                                  ? `Atualizado às ${timeLabel(accountFinance.fetchedAt)}`
+                                  : 'Atualize para consultar a conta de anúncios.'}
+                              </p>
+                            </div>
+                          ) : null}
+                          {asset.action?.href ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="mt-4 bg-[#1877f2] text-white hover:bg-[#1267d3]"
+                              onClick={() => window.open(asset.action?.href || '', '_blank', 'noopener,noreferrer')}
+                            >
+                              <WalletCards className="mr-2 h-4 w-4" />
+                              {asset.action.label}
+                            </Button>
+                          ) : null}
+                        </div>
+                        <span className={`mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full ${connected ? 'bg-emerald-500' : 'bg-amber-400'}`} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {(connection?.assets_json?.warnings || []).length > 0 ? (
+                <Alert className="border-amber-200 bg-amber-50 text-amber-900">
+                  <AlertTitle>Existem ativos ou permissões pendentes</AlertTitle>
+                  <AlertDescription>Atualize os ativos. Se algum vínculo continuar ausente, reconecte a Meta e confirme todas as permissões solicitadas.</AlertDescription>
+                </Alert>
+              ) : null}
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={connectMeta} disabled={loading} className="bg-[#1877f2] text-white hover:bg-[#1267d3]"><Facebook className="mr-2 h-4 w-4" /> {connection ? 'Reconectar Meta' : 'Conectar Meta'}</Button>
+                <Button onClick={syncAssets} disabled={loading || !connection} variant="outline"><RefreshCw className="mr-2 h-4 w-4" /> Atualizar todos os ativos</Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="space-y-4">
+            <Card className="overflow-hidden border-[#e5e9e6] shadow-sm">
+              <CardHeader className="border-b bg-[#fbfdfb]"><CardTitle className="flex items-center gap-2"><Target className="h-5 w-5 text-[#ff5a00]" /> Rastreamento e conversões</CardTitle><p className="text-sm text-muted-foreground">Compatível com o PopMarketing e com campanhas administradas por agências externas.</p></CardHeader>
+              <CardContent className="space-y-4 p-5">
+                <div className="space-y-2">
+                  <Label>Pixel da Meta</Label>
+                  <Input inputMode="numeric" value={tracking.facebookPixelId} onChange={(event) => setTracking((previous) => ({ ...previous, facebookPixelId: event.target.value.replace(/\D/g, '') }))} placeholder="ID numérico do Pixel" />
+                  <p className="text-xs text-muted-foreground">Use o Pixel pertencente à loja. A agência poderá validar os eventos pelo Gerenciador de Eventos da Meta.</p>
+                  {detectedPixels.length > 0 ? (
+                    <div className="space-y-2 rounded-xl border bg-[#fbfdfb] p-3">
+                      <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Pixels encontrados na conta conectada</p>
+                      <div className="flex flex-wrap gap-2">
+                        {detectedPixels.map((pixel: any) => {
+                          const pixelId = String(pixel?.id || '');
+                          const selected = tracking.facebookPixelId === pixelId;
+                          return (
+                            <Button
+                              key={pixelId}
+                              type="button"
+                              size="sm"
+                              variant={selected ? 'default' : 'outline'}
+                              className={selected ? 'bg-[#063c2d] text-white hover:bg-[#052f24]' : ''}
+                              onClick={() => setTracking((previous) => ({ ...previous, facebookPixelId: pixelId }))}
+                            >
+                              {pixel?.name || 'Pixel'} · {pixelId}
+                            </Button>
+                          );
+                        })}
+                      </div>
+                      {detectedPixels.length > 1 ? <p className="text-xs text-amber-700">Selecione o Pixel correto da loja e salve. Nenhum foi escolhido automaticamente porque há mais de um ativo.</p> : null}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-semibold">Pixel + Conversions API</p>
+                    <Badge className={conversionsApiReady && !pixelHasUnsavedChanges ? 'bg-emerald-700 text-white hover:bg-emerald-700' : 'bg-amber-100 text-amber-900 hover:bg-amber-100'}>
+                      {pixelHasUnsavedChanges ? 'Salvar para ativar' : conversionsApiReady ? 'Pronto' : 'Aguardando Pixel'}
+                    </Badge>
+                  </div>
+                  <p className="mt-1 text-xs leading-relaxed">Visita ao cardápio, pesquisa, visualização de produto, adição ao carrinho, início do checkout, forma de pagamento e compra confirmada são enviados pelo navegador e pelo servidor com o mesmo identificador para evitar contagem duplicada.</p>
+                </div>
+                <div className="space-y-2"><Label>Google Tag</Label><Input value={tracking.googleTagId} onChange={(event) => setTracking((previous) => ({ ...previous, googleTagId: event.target.value.toUpperCase() }))} placeholder="GTM-XXXXXX, G-XXXXXX ou AW-XXXXXX" /><p className="text-xs text-muted-foreground">Com o GTM, os mesmos eventos ficam disponíveis no dataLayer com o prefixo <code>popsystem_</code>.</p></div>
+                <Button onClick={saveTrackingSettings} disabled={savingTracking} className="w-full bg-[#063c2d] text-white hover:bg-[#052f24]">
+                  {savingTracking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />} Salvar rastreamento
+                </Button>
+              </CardContent>
+            </Card>
+            <Alert className="border-emerald-200 bg-emerald-50 text-emerald-950">
+              <ShieldCheck className="h-4 w-4" />
+              <AlertTitle>Publicação segura</AlertTitle>
+              <AlertDescription>As campanhas novas continuam sendo enviadas pausadas. Nenhum anúncio começa a gastar sem sua ativação.</AlertDescription>
+            </Alert>
+          </div>
+        </div>
+      ) : null}
+
+      {workspaceTab === 'create' || workspaceTab === 'campaigns' ? (
+        <Alert>
+          <CheckCircle2 className="h-4 w-4" />
+          <AlertTitle>Campanha pronta para sua revisão</AlertTitle>
+          <AlertDescription>
+            As campanhas são planejadas com IA e as artes usam modelos prontos com foto real do produto. Tudo é enviado pausado para você revisar antes de ativar.
+          </AlertDescription>
+        </Alert>
+      ) : null}
     </div>
   );
 }

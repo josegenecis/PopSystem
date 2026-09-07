@@ -9,6 +9,7 @@ import { applyEffectivePrices, type PricingChannel } from '@/services/pricingEng
 interface Product {
   id: string;
   name: string;
+  display_order?: number;
   description: string;
   price: number;
   original_price?: number;
@@ -88,7 +89,19 @@ interface UseMenuDataOptions {
   pricingChannel?: PricingChannel;
 }
 
-const CACHE_PREFIX = 'boracume_menu_data_v5';
+const CACHE_PREFIX = 'boracume_menu_data_v6';
+
+function compareProductsByDisplayOrder(a: Product, b: Product) {
+  const aOrder = a.display_order !== undefined && a.display_order !== null
+    ? Number(a.display_order)
+    : Number.MAX_SAFE_INTEGER;
+  const bOrder = b.display_order !== undefined && b.display_order !== null
+    ? Number(b.display_order)
+    : Number.MAX_SAFE_INTEGER;
+
+  if (aOrder !== bOrder) return aOrder - bOrder;
+  return String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR');
+}
 
 function safeParse<T>(value: string | null): T | null {
   if (!value) return null;
@@ -181,10 +194,10 @@ async function fetchMenuDataDirect(userId: string): Promise<MenuPayload> {
       ]);
 
     const productSelectAttempts = [
-      'id, name, description, price, original_price, discount_percentage, image_url, available, is_available, show_in_delivery, is_highlight, highlight_order, order_count, category_id, track_stock, stock_quantity, low_stock_threshold',
-      'id, name, description, price, original_price, discount_percentage, image_url, available, show_in_delivery, is_highlight, highlight_order, order_count, category_id, track_stock, stock_quantity, low_stock_threshold',
-      'id, name, description, price, original_price, discount_percentage, image_url, is_available, show_in_delivery, is_highlight, highlight_order, order_count, category_id, track_stock, stock_quantity, low_stock_threshold',
-      'id, name, description, price, image_url, available, show_in_delivery, category_id'
+      'id, name, description, price, original_price, discount_percentage, image_url, available, is_available, show_in_delivery, is_highlight, highlight_order, order_count, category_id, track_stock, stock_quantity, low_stock_threshold, display_order',
+      'id, name, description, price, original_price, discount_percentage, image_url, available, show_in_delivery, is_highlight, highlight_order, order_count, category_id, track_stock, stock_quantity, low_stock_threshold, display_order',
+      'id, name, description, price, original_price, discount_percentage, image_url, is_available, show_in_delivery, is_highlight, highlight_order, order_count, category_id, track_stock, stock_quantity, low_stock_threshold, display_order',
+      'id, name, description, price, image_url, available, show_in_delivery, category_id, display_order'
     ];
     let productsData: any[] | null = null;
     let productsError: any = null;
@@ -194,6 +207,7 @@ async function fetchMenuDataDirect(userId: string): Promise<MenuPayload> {
         .select(selectClause)
         .eq('user_id', userId)
         .eq('show_in_delivery', true)
+        .order('display_order', { ascending: true, nullsFirst: false })
         .order('name', { ascending: true });
       productsData = res.data as any;
       productsError = res.error as any;
@@ -352,7 +366,7 @@ export const useMenuData = ({ userId, enableCache = false, cacheTTL = 1, pricing
           if (idx >= 0) next[idx] = { ...next[idx], ...newRow };
           else next.unshift(newRow);
 
-          next.sort((a: any, b: any) => String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR'));
+          next.sort(compareProductsByDisplayOrder);
           return { ...prev, products: next as any };
         });
         void queryClient.invalidateQueries({ queryKey: ['menuData', userId, pricingChannel] });

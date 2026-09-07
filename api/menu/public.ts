@@ -49,10 +49,10 @@ function buildLinkedGlobalVariation(link: any, globalVariation: any) {
 
 async function fetchProducts(userId: string) {
   const selectAttempts = [
-    'id,name,description,price,original_price,discount_percentage,image_url,available,is_available,show_in_delivery,is_highlight,highlight_order,order_count,category_id,track_stock,stock_quantity,low_stock_threshold',
-    'id,name,description,price,original_price,discount_percentage,image_url,available,show_in_delivery,is_highlight,highlight_order,order_count,category_id,track_stock,stock_quantity,low_stock_threshold',
-    'id,name,description,price,original_price,discount_percentage,image_url,is_available,show_in_delivery,is_highlight,highlight_order,order_count,category_id,track_stock,stock_quantity,low_stock_threshold',
-    'id,name,description,price,image_url,available,show_in_delivery,category_id'
+    'id,name,description,price,original_price,discount_percentage,image_url,available,is_available,show_in_delivery,is_highlight,highlight_order,order_count,category_id,track_stock,stock_quantity,low_stock_threshold,display_order',
+    'id,name,description,price,original_price,discount_percentage,image_url,available,show_in_delivery,is_highlight,highlight_order,order_count,category_id,track_stock,stock_quantity,low_stock_threshold,display_order',
+    'id,name,description,price,original_price,discount_percentage,image_url,is_available,show_in_delivery,is_highlight,highlight_order,order_count,category_id,track_stock,stock_quantity,low_stock_threshold,display_order',
+    'id,name,description,price,image_url,available,show_in_delivery,category_id,display_order'
   ];
 
   let lastError: any = null;
@@ -62,6 +62,7 @@ async function fetchProducts(userId: string) {
       .select(selectClause)
       .eq('user_id', userId)
       .eq('show_in_delivery', true)
+      .order('display_order', { ascending: true, nullsFirst: false })
       .order('name', { ascending: true });
 
     if (!result.error) {

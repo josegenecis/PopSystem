@@ -48,16 +48,26 @@ export const VariationGroup: React.FC<VariationGroupProps> = ({
   const reachedMax = count >= maxSel;
   const isValid = count >= minSel && count <= maxSel;
 
-  const subtitle =
-    variation.allow_paid_excess && maxSel > baseMax
-      ? `${minSel > 0 ? `Escolha de ${minSel} a ${baseMax}` : `Até ${baseMax} grátis`} • até ${maxSel} com extras pagos`
-      : minSel > 0
-        ? maxSel > 1
-          ? `Escolha de ${minSel} a ${maxSel}`
-          : `Escolha ${minSel}`
-        : maxSel > 1
-          ? `Escolha até ${maxSel}`
-          : 'Opcional';
+  const selectionInstruction = minSel > 0
+    ? maxSel > 1
+      ? `Selecione de ${minSel} a ${maxSel} opções`
+      : 'Selecione 1 opção'
+    : maxSel > 1
+      ? `Selecione até ${maxSel} opções`
+      : 'Opcional';
+  const freeSelectionHint = freeLimit > 0
+    ? freeLimit >= maxSel
+      ? maxSel === 1
+        ? 'esta opção será grátis'
+        : 'todas serão grátis'
+      : freeLimit === 1
+        ? `a primeira será grátis${variation.allow_paid_excess ? '; as demais serão cobradas' : ''}`
+        : `as primeiras ${freeLimit} serão grátis${variation.allow_paid_excess ? '; as demais serão cobradas' : ''}`
+    : '';
+  const paidExcessHint = !freeSelectionHint && variation.allow_paid_excess && maxSel > baseMax
+    ? `até ${baseMax} no limite padrão; as demais serão cobradas`
+    : '';
+  const subtitle = `${selectionInstruction}${freeSelectionHint || paidExcessHint ? ` (${freeSelectionHint || paidExcessHint})` : ''}`;
   const pricingHint =
     variation.pricing_mode === 'free'
       ? 'Sem custo neste produto'

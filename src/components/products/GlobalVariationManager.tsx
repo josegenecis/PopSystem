@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -41,7 +41,9 @@ const GlobalVariationManager: React.FC = () => {
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
   const [assigningVariation, setAssigningVariation] = useState<GlobalVariation | null>(null);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
+  const [loadingAssignments, setLoadingAssignments] = useState(false);
   const [assigningProducts, setAssigningProducts] = useState(false);
+  const assignmentRequestRef = useRef(0);
   const { toast } = useToast();
   const { user } = useAuth();
   const confirm = useConfirmDialog();
@@ -224,32 +226,104 @@ const GlobalVariationManager: React.FC = () => {
     }
   };
 
-  const openAssignDialog = (variation: GlobalVariation) => {
+  const openAssignDialog = async (variation: GlobalVariation) => {
+    const requestId = assignmentRequestRef.current + 1;
+    assignmentRequestRef.current = requestId;
     setAssigningVariation(variation);
     setSelectedProductIds([]);
     setAssignDialogOpen(true);
+
+    if (!variation.id) return;
+
+    try {
+      setLoadingAssignments(true);
+      const { data, error } = await supabase
+        .from('product_global_variation_links')
+        .select('product_id')
+        .eq('global_variation_id', variation.id);
+
+      if (error) throw error;
+
+      if (assignmentRequestRef.current !== requestId) return;
+
+      setSelectedProductIds(Array.from(new Set(
+        (data || [])
+          .map((link: any) => String(link?.product_id || ''))
+          .filter(Boolean)
+      )));
+    } catch {
+      if (assignmentRequestRef.current !== requestId) return;
+      toast({
+        title: 'Erro',
+        description: 'Não foi possível carregar os produtos já vinculados.',
+        variant: 'destructive'
+      });
+      setAssignDialogOpen(false);
+      setAssigningVariation(null);
+    } finally {
+      if (assignmentRequestRef.current === requestId) {
+        setLoadingAssignments(false);
+      }
+    }
+  };
+
+  const closeAssignDialog = () => {
+    assignmentRequestRef.current += 1;
+    setLoadingAssignments(false);
+    setAssignDialogOpen(false);
+    setAssigningVariation(null);
+    setSelectedProductIds([]);
   };
 
   const handleAssignProducts = async () => {
-    if (!assigningVariation?.id || selectedProductIds.length === 0) {
+    if (!assigningVariation?.id) {
       setAssignDialogOpen(false);
       return;
     }
 
     try {
       setAssigningProducts(true);
-      const payload = selectedProductIds.map((productId) => ({
+      const { data: currentLinks, error: currentLinksError } = await supabase
+        .from('product_global_variation_links')
+        .select('product_id')
+        .eq('global_variation_id', assigningVariation.id);
+
+      if (currentLinksError) throw currentLinksError;
+
+      const currentProductIds = Array.from(new Set(
+        (currentLinks || [])
+          .map((link: any) => String(link?.product_id || ''))
+          .filter(Boolean)
+      ));
+      const selectedSet = new Set(selectedProductIds);
+      const currentSet = new Set(currentProductIds);
+      const productIdsToAdd = selectedProductIds.filter((productId) => !currentSet.has(productId));
+      const productIdsToRemove = currentProductIds.filter((productId) => !selectedSet.has(productId));
+
+      const payload = productIdsToAdd.map((productId) => ({
         product_id: productId,
         global_variation_id: assigningVariation.id
       }));
 
-      const { error } = await supabase
-        .from('product_global_variation_links')
-        .upsert(payload as any, { onConflict: 'product_id,global_variation_id', ignoreDuplicates: true });
+      if (payload.length > 0) {
+        const { error } = await supabase
+          .from('product_global_variation_links')
+          .upsert(payload as any, { onConflict: 'product_id,global_variation_id', ignoreDuplicates: true });
 
-      if (error) throw error;
+        if (error) throw error;
+      }
 
-      toast({ title: 'Sucesso', description: 'Grupo atribuído aos produtos selecionados.' });
+      if (productIdsToRemove.length > 0) {
+        const { error } = await supabase
+          .from('product_global_variation_links')
+          .delete()
+          .eq('global_variation_id', assigningVariation.id)
+          .in('product_id', productIdsToRemove);
+
+        if (error) throw error;
+      }
+
+      toast({ title: 'Sucesso', description: 'Produtos vinculados ao grupo foram atualizados.' });
       setAssignDialogOpen(false);
       setAssigningVariation(null);
       setSelectedProductIds([]);
@@ -366,7 +440,16 @@ const GlobalVariationManager: React.FC = () => {
           )}
         </div>
       )}
-      <Dialog open={assignDialogOpen} onOpenChange={setAssignDialogOpen}>
+      <Dialog
+        open={assignDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeAssignDialog();
+          } else {
+            setAssignDialogOpen(true);
+          }
+        }}
+      >
         <DialogContent className="max-w-2xl rounded-[28px] border border-[#FF6400]/12 bg-gradient-to-br from-[#FFF8F2] via-white to-[#F5EBE1]/65 shadow-[0_28px_70px_-35px_rgba(0,50,35,0.22)]">
           <DialogHeader>
             <DialogTitle className="text-slate-900">Atribuir grupo a produtos</DialogTitle>
@@ -376,13 +459,20 @@ const GlobalVariationManager: React.FC = () => {
               {assigningVariation ? `Selecione os produtos que devem receber o grupo ${assigningVariation.name}.` : 'Selecione os produtos.'}
             </div>
             <div className="grid max-h-[60vh] gap-3 overflow-y-auto pr-2 sm:grid-cols-2">
-              {products.map((product) => (
+              {loadingAssignments ? (
+                <div className="col-span-full flex items-center justify-center py-10 text-sm text-[#003223]/60">
+                  <div className="mr-3 h-5 w-5 animate-spin rounded-full border-2 border-[#8CC850] border-t-transparent" />
+                  Carregando produtos vinculados...
+                </div>
+              ) : products.map((product) => (
                 <div key={product.id} className="flex items-start space-x-3 rounded-2xl border border-[#FF6400]/10 bg-white/90 p-4 shadow-sm">
                   <Checkbox
                     id={`assign-product-${product.id}`}
                     checked={selectedProductIds.includes(product.id)}
                     onCheckedChange={(checked) => {
-                      setSelectedProductIds((prev) => checked ? [...prev, product.id] : prev.filter((id) => id !== product.id));
+                      setSelectedProductIds((prev) => checked
+                        ? Array.from(new Set([...prev, product.id]))
+                        : prev.filter((id) => id !== product.id));
                     }}
                   />
                   <Label htmlFor={`assign-product-${product.id}`} className="cursor-pointer font-medium text-slate-900">
@@ -393,11 +483,11 @@ const GlobalVariationManager: React.FC = () => {
             </div>
           </div>
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" className="h-9 rounded-xl border-[#003223]/12 bg-white/85 px-4 text-[#003223] hover:bg-[#F5EBE1]" onClick={() => setAssignDialogOpen(false)}>
+            <Button type="button" variant="outline" className="h-9 rounded-xl border-[#003223]/12 bg-white/85 px-4 text-[#003223] hover:bg-[#F5EBE1]" onClick={closeAssignDialog}>
               Cancelar
             </Button>
-            <Button type="button" className="h-9 rounded-xl bg-[#8CC850] px-4 text-[#003223] hover:bg-[#79b541]" disabled={assigningProducts || selectedProductIds.length === 0} onClick={handleAssignProducts}>
-              {assigningProducts ? 'Atribuindo...' : 'Atribuir grupo'}
+            <Button type="button" className="h-9 rounded-xl bg-[#8CC850] px-4 text-[#003223] hover:bg-[#79b541]" disabled={assigningProducts || loadingAssignments} onClick={handleAssignProducts}>
+              {assigningProducts ? 'Salvando...' : 'Salvar atribuições'}
             </Button>
           </div>
         </DialogContent>

@@ -37,6 +37,7 @@ import {
   Network,
   Download,
   Megaphone,
+  BookOpenCheck,
   X
 } from 'lucide-react';
 
@@ -126,6 +127,14 @@ const CollapsibleSidebar = () => {
         { to: '/despesas', label: 'Contas a Pagar', feature: 'finance', area: 'finance' },
         { to: '/pagamentos', label: 'Formas de Pagamento', feature: 'pix', area: 'pix' },
         { to: '/pix', label: 'PIX / Mercado Pago', feature: 'pix', area: 'pix' },
+      ]
+    },
+    {
+      id: 'contabilidade',
+      icon: BookOpenCheck,
+      label: 'Contabilidade',
+      items: [
+        { to: '/contador', label: 'Central do Contador', feature: 'finance', area: 'finance' },
       ]
     },
     {

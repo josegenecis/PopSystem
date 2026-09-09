@@ -1395,6 +1395,7 @@ async function listCatalog(supabase: any, restaurantId: string) {
   if (productError) throw productError
 
   const productIds = (productRows ?? []).map((row: any) => row.id)
+  const effectivePrices = await resolveWaiterPrices(supabase, restaurantId, productIds)
 
   const { data: specificRows, error: specificError } = productIds.length
     ? await supabase
@@ -1430,7 +1431,7 @@ async function listCatalog(supabase: any, restaurantId: string) {
     name: row.name,
     description: row.description,
     imageUrl: row.image_url,
-    price: normalizeAmount(row.price),
+    price: effectivePrices.get(String(row.id)) ?? normalizeAmount(row.price),
     featured: Boolean(row.featured ?? row.is_featured),
     sendToKds: Boolean(row.send_to_kds ?? true),
     variations: buildProductVariationGroups(row.id, specificRows ?? [], linkRows ?? [], globalRows ?? []),
@@ -1449,6 +1450,31 @@ async function listCatalog(supabase: any, restaurantId: string) {
   }
 
   return favorites.products.length ? [favorites, ...categories] : categories
+}
+
+async function resolveWaiterPrices(supabase: any, restaurantId: string, productIds: string[]) {
+  const prices = new Map<string, number>()
+  if (!productIds.length) return prices
+
+  const { data, error } = await supabase.rpc('resolve_product_prices', {
+    p_user_id: restaurantId,
+    p_channel: 'waiter',
+    p_product_ids: productIds,
+    p_at: new Date().toISOString(),
+  })
+
+  // Price rules are an enhancement. A temporary resolver failure must not stop
+  // the waiter from opening a table or adding products.
+  if (error) {
+    console.warn('[waiter-web] promotional price resolver unavailable:', error?.message || error)
+    return prices
+  }
+
+  for (const row of data ?? []) {
+    const price = Number(row?.effective_price)
+    if (row?.product_id && Number.isFinite(price)) prices.set(String(row.product_id), Math.max(0, price))
+  }
+  return prices
 }
 
 async function ensureTableIsFree(supabase: any, tableId: string, restaurantId: string, ignoreSessionId?: string) {
@@ -2301,6 +2327,13 @@ Deno.serve(async (req: Request) => {
 
       if (productError) throw productError
 
+      const effectivePrices = await resolveWaiterPrices(
+        supabase,
+        waiterSession.profile.restaurantId,
+        [String(productRow.id)],
+      )
+      const unitPrice = effectivePrices.get(String(productRow.id)) ?? normalizeAmount(productRow.price)
+
       const { error: itemError } = await supabase
         .from('order_items')
         .insert({
@@ -2309,7 +2342,7 @@ Deno.serve(async (req: Request) => {
           product_id: productRow.id,
           product_name: productRow.name,
           quantity,
-          unit_price: normalizeAmount(productRow.price),
+          unit_price: unitPrice,
           notes,
           status: 'draft',
         })

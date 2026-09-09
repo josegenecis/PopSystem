@@ -1,6 +1,6 @@
 import { supabase } from '@/integrations/supabase/client';
 
-export type PricingChannel = 'all' | 'pdv' | 'delivery' | 'totem' | 'whatsapp' | 'dine_in' | 'pickup';
+export type PricingChannel = 'all' | 'pdv' | 'delivery' | 'waiter' | 'totem' | 'whatsapp' | 'dine_in' | 'pickup';
 
 export type EffectivePriceMetadata = {
   base_price: number;
@@ -78,4 +78,3 @@ export async function applyEffectivePrices<T extends PriceAwareProduct>(
     return fallback;
   }
 }
-

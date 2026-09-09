@@ -9,4 +9,6 @@ contextBridge.exposeInMainWorld('bridgeAPI', {
   listPrinters: () => ipcRenderer.invoke('bridge:listPrinters'),
   getPrinterSelection: () => ipcRenderer.invoke('bridge:getPrinterSelection'),
   setPrinterSelection: (printerName) => ipcRenderer.invoke('bridge:setPrinterSelection', { printerName }),
+  getBiometricConfig: () => ipcRenderer.invoke('bridge:getBiometricConfig'),
+  setBiometricConfig: (config) => ipcRenderer.invoke('bridge:setBiometricConfig', config),
 })

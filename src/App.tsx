@@ -205,6 +205,7 @@ function AppContent() {
           <Route path="/equipe" element={<OperatorRoute area="team"><FeatureRoute feature="team"><Equipe /></FeatureRoute></OperatorRoute>} />
           <Route path="/garcons" element={<Navigate to="/equipe?tab=collaborators" replace />} />
           <Route path="/ponto" element={<Navigate to="/equipe?tab=timeclock" replace />} />
+          <Route path="/controle-ponto" element={<Navigate to="/equipe?tab=timeclock" replace />} />
           <Route path="/fiscal" element={<OperatorRoute area="fiscal"><FeatureRoute feature="fiscal"><Fiscal /></FeatureRoute></OperatorRoute>} />
           <Route path="/nfce" element={<Navigate to="/fiscal" replace />} />
           <Route path="/caixa" element={<OperatorRoute area="cash"><FeatureRoute feature="finance"><Financeiro /></FeatureRoute></OperatorRoute>} />

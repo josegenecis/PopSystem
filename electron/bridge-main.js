@@ -35,6 +35,11 @@ const startBridge = (token) => {
     PRINT_AGENT_TOKEN: token,
     PRINT_TRANSPORT: 'system',
     PRINT_ADDRESS: cfg?.printerName || '',
+    POP_CONNECT_DATA_DIR: app.getPath('userData'),
+    POP_CONNECT_BIOMETRIC_PROVIDER: cfg?.biometricProvider || 'not_configured',
+    POP_CONNECT_BIOMETRIC_SIDECAR: cfg?.biometricSidecar || '',
+    POP_CONNECT_BIOMETRIC_DEVICE_ID: cfg?.biometricDeviceId || '',
+    POP_CONNECT_ALLOW_BIOMETRIC_SIMULATION: cfg?.biometricProvider === 'simulator' ? 'true' : 'false',
   }
 
   const serverPath = path.join(__dirname, '..', 'native-bridge', 'server.js')
@@ -53,8 +58,10 @@ const functionsBase = () => `${SUPABASE_URL.replace(/\/+$/, '')}/functions/v1`
 const createWindow = () => {
   win = new BrowserWindow({
     width: 520,
-    height: 520,
-    resizable: false,
+    height: 760,
+    minWidth: 520,
+    minHeight: 620,
+    resizable: true,
     webPreferences: {
       preload: path.join(__dirname, 'bridge-preload.js')
     }
@@ -177,6 +184,32 @@ ipcMain.handle('bridge:setPrinterSelection', async (_ev, payload) => {
   const cfg = readConfig()
   const printerName = payload?.printerName ? String(payload.printerName) : ''
   writeConfig({ ...cfg, printerName })
+  if (cfg?.token) startBridge(cfg.token)
+  return { ok: true }
+})
+
+ipcMain.handle('bridge:getBiometricConfig', async () => {
+  const cfg = readConfig()
+  return {
+    ok: true,
+    provider: cfg?.biometricProvider || 'not_configured',
+    sidecarPath: cfg?.biometricSidecar || '',
+    deviceId: cfg?.biometricDeviceId || '',
+  }
+})
+
+ipcMain.handle('bridge:setBiometricConfig', async (_ev, payload) => {
+  const cfg = readConfig()
+  const provider = ['not_configured', 'simulator', 'sdk_sidecar'].includes(payload?.provider)
+    ? payload.provider
+    : 'not_configured'
+  const next = {
+    ...cfg,
+    biometricProvider: provider,
+    biometricSidecar: String(payload?.sidecarPath || '').trim(),
+    biometricDeviceId: String(payload?.deviceId || '').trim(),
+  }
+  writeConfig(next)
   if (cfg?.token) startBridge(cfg.token)
   return { ok: true }
 })

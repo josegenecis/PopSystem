@@ -13,6 +13,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { getLocalOperatorSession } from '@/services/operatorAuth';
+import { BiometricTimeClockPanel } from '@/components/timeclock/BiometricTimeClockPanel';
 
 type TimeClockSettings = {
   enabled: boolean;
@@ -65,6 +66,7 @@ type WaiterRow = {
   id: string;
   name?: string | null;
   role?: string | null;
+  cpf?: string | null;
 };
 
 type OccurrenceRow = {
@@ -217,7 +219,7 @@ export default function ControlePonto() {
 
       const { data: waiterRows, error: waiterError } = await supabase
         .from('waiters' as any)
-        .select('id, name, role')
+        .select('id, name, role, cpf')
         .eq('user_id', user.id)
         .order('name', { ascending: true });
       if (waiterError) throw waiterError;
@@ -543,6 +545,14 @@ export default function ControlePonto() {
             </Button>
           </CardContent>
         </Card>
+
+        {user?.id && (
+          <BiometricTimeClockPanel
+            userId={user.id}
+            waiters={waiters}
+            onRegistered={loadData}
+          />
+        )}
 
         <div className="grid gap-4 md:grid-cols-3">
           <Card className="rounded-[22px] border-[#E6E0D5]">

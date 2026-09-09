@@ -15,7 +15,9 @@
       .muted { color: #a4a4b8; font-size: 13px; }
       .code { font-size: 34px; letter-spacing: 6px; font-weight: 800; text-align: center; padding: 12px; background: #0f0f18; border-radius: 12px; border: 1px solid #25253a; }
       .badge { display: inline-block; padding: 4px 8px; border-radius: 999px; font-size: 12px; background: #23233a; border: 1px solid #2f2f4a; }
-      select { width: 100%; background: #0f0f18; color: #f2f2f2; border: 1px solid #25253a; border-radius: 10px; padding: 10px 12px; }
+      select, input { box-sizing: border-box; width: 100%; background: #0f0f18; color: #f2f2f2; border: 1px solid #25253a; border-radius: 10px; padding: 10px 12px; }
+      label { display: block; margin: 10px 0 6px; font-size: 13px; font-weight: 650; }
+      .warning { color: #fbbf24; }
     </style>
   </head>
   <body>
@@ -57,6 +59,25 @@
         </div>
         <div class="muted" style="margin-top:10px" id="printerHelp"></div>
       </div>
+
+      <div class="card">
+        <div style="font-weight:700; margin-bottom:8px">Leitor biométrico</div>
+        <div class="muted">Use o SDK fornecido pelo fabricante. O PopConnect não envia imagem ou template bruto para a nuvem.</div>
+        <label for="biometricProvider">Modo do leitor</label>
+        <select id="biometricProvider">
+          <option value="not_configured">Não configurado</option>
+          <option value="sdk_sidecar">Driver/SDK homologado</option>
+          <option value="simulator">Simulador (somente homologação)</option>
+        </select>
+        <label for="biometricSidecar">Executável do adaptador do fabricante</label>
+        <input id="biometricSidecar" placeholder="C:\\PopSystem\\drivers\\leitor.exe" />
+        <label for="biometricDeviceId">Identificação do coletor</label>
+        <input id="biometricDeviceId" placeholder="RECEPCAO-01" maxlength="80" />
+        <div class="row" style="margin-top:12px">
+          <button id="btnSaveBiometric">Salvar leitor</button>
+        </div>
+        <div class="muted warning" style="margin-top:10px" id="biometricHelp">Selecione o SDK homologado para uso real.</div>
+      </div>
     </div>
 
     <script>
@@ -72,6 +93,11 @@
       const btnRefreshPrinters = $('btnRefreshPrinters')
       const btnSavePrinter = $('btnSavePrinter')
       const printerHelp = $('printerHelp')
+      const biometricProvider = $('biometricProvider')
+      const biometricSidecar = $('biometricSidecar')
+      const biometricDeviceId = $('biometricDeviceId')
+      const btnSaveBiometric = $('btnSaveBiometric')
+      const biometricHelp = $('biometricHelp')
 
       let polling = null
 
@@ -117,6 +143,18 @@
         printerHelp.textContent = current ? `Selecionada: ${current}` : 'Selecione uma impressora e clique em Salvar.'
       }
 
+      const loadBiometricConfig = async () => {
+        const cfg = await window.bridgeAPI.getBiometricConfig()
+        biometricProvider.value = cfg?.provider || 'not_configured'
+        biometricSidecar.value = cfg?.sidecarPath || ''
+        biometricDeviceId.value = cfg?.deviceId || ''
+        biometricHelp.textContent = cfg?.provider === 'simulator'
+          ? 'Simulador ativo. Não use este modo para registrar jornada real.'
+          : cfg?.provider === 'sdk_sidecar'
+            ? 'Adaptador configurado. Valide o leitor pelo módulo Controle de ponto.'
+            : 'Selecione o SDK homologado para uso real.'
+      }
+
       btnStart.onclick = async () => { await window.bridgeAPI.start(); await refresh() }
       btnStop.onclick = async () => { await window.bridgeAPI.stop(); await refresh() }
       btnPair.onclick = async () => {
@@ -143,8 +181,26 @@
         printerHelp.textContent = name ? `Selecionada: ${name}` : 'Selecione uma impressora e clique em Salvar.'
       }
 
+
+      btnSaveBiometric.onclick = async () => {
+        const provider = biometricProvider.value
+        if (provider === 'sdk_sidecar' && !biometricSidecar.value.trim()) {
+          biometricHelp.textContent = 'Informe o executável do adaptador fornecido para o modelo do leitor.'
+          return
+        }
+        await window.bridgeAPI.setBiometricConfig({
+          provider,
+          sidecarPath: biometricSidecar.value,
+          deviceId: biometricDeviceId.value,
+        })
+        biometricHelp.textContent = provider === 'simulator'
+          ? 'Simulador salvo. Reinicie o terminal de homologação.'
+          : 'Leitor salvo e PopConnect reiniciado.'
+      }
+
       refresh()
       loadPrinters()
+      loadBiometricConfig()
     </script>
   </body>
 </html>

@@ -2,11 +2,20 @@ import { WebSocketServer } from 'ws'
 import os from 'os'
 import net from 'net'
 import printerLib from '@thiagoelg/node-printer'
+import { BiometricService } from './biometric-service.js'
 
 const wss = new WebSocketServer({ port: 8766 })
 
 let systemPrinterName = null
 let networkAddress = null
+
+const biometricService = new BiometricService({
+  provider: process.env.POP_CONNECT_BIOMETRIC_PROVIDER || 'not_configured',
+  sidecarPath: process.env.POP_CONNECT_BIOMETRIC_SIDECAR || '',
+  deviceId: process.env.POP_CONNECT_BIOMETRIC_DEVICE_ID || '',
+  dataDir: process.env.POP_CONNECT_DATA_DIR || process.cwd(),
+  simulationAllowed: process.env.POP_CONNECT_ALLOW_BIOMETRIC_SIMULATION === 'true',
+})
 
 const getEnv = (...keys) => {
   for (const k of keys) {
@@ -204,6 +213,35 @@ wss.on('connection', (ws) => {
           }
           break
         }
+        case 'list_biometric_devices': {
+          const result = await biometricService.listDevices()
+          ws.send(JSON.stringify({ ...result, event: 'biometric_devices_listed' }))
+          break
+        }
+        case 'enroll_biometric': {
+          const result = await biometricService.enroll(payload)
+          ws.send(JSON.stringify({ ...result, event: 'biometric_enrolled' }))
+          break
+        }
+        case 'identify_biometric': {
+          const result = await biometricService.identify(payload)
+          ws.send(JSON.stringify({ ...result, event: 'biometric_identified' }))
+          break
+        }
+        case 'remove_biometric': {
+          const result = await biometricService.remove(payload)
+          ws.send(JSON.stringify({ ...result, event: 'biometric_removed' }))
+          break
+        }
+        case 'get_status': {
+          ws.send(JSON.stringify({
+            ok: true,
+            event: 'status',
+            printer: { connected: Boolean(systemPrinterName || networkAddress), systemPrinterName, networkAddress },
+            biometric: biometricService.status(),
+          }))
+          break
+        }
         default:
           ws.send(JSON.stringify({ ok: false, error: 'unknown_action' }))
       }
@@ -214,7 +252,7 @@ wss.on('connection', (ws) => {
   ws.send(JSON.stringify({ ok: true, event: 'connected' }))
 })
 
-console.log('Native Bridge listening on ws://localhost:8766')
+console.log('Pop Connect listening on ws://localhost:8766')
 
 const supabaseUrl = getEnv('SUPABASE_URL', 'BORACUME_SUPABASE_URL')
 const supabaseAnonKey = getEnv('SUPABASE_ANON_KEY', 'BORACUME_SUPABASE_ANON_KEY', 'VITE_SUPABASE_ANON_KEY')

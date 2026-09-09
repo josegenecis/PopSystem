@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 import { Mail, MapPin, MessageCircle } from 'lucide-react';
 import { trackMarketing } from '@/lib/marketingAnalytics';
 
-const SUPPORT_PHONE = '5585992918273';
+const SUPPORT_PHONE = '5585984570267';
 const WHATSAPP_URL = `https://wa.me/${SUPPORT_PHONE}?text=${encodeURIComponent('Olá! Quero conhecer o PopSystem.')}`;
 
 const Footer = () => (

@@ -15,7 +15,7 @@ const menuItems = [
   { href: '#duvidas', label: 'Suporte' },
 ];
 
-const WHATSAPP_URL = `https://wa.me/5585992918273?text=${encodeURIComponent('Olá! Quero falar com um especialista do PopSystem.')}`;
+const WHATSAPP_URL = `https://wa.me/5585984570267?text=${encodeURIComponent('Olá! Quero falar com um especialista do PopSystem.')}`;
 
 const Header = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);

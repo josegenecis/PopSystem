@@ -37,7 +37,7 @@ import ProductProofSection from '@/components/landing/ProductProofSection';
 import { ScrollToTop } from '@/components/landing/ScrollToTop';
 import { trackMarketing } from '@/lib/marketingAnalytics';
 
-const SUPPORT_PHONE = '5585992918273';
+const SUPPORT_PHONE = '5585984570267';
 const WHATSAPP_URL = `https://wa.me/${SUPPORT_PHONE}?text=${encodeURIComponent('Olá! Quero conhecer o PopSystem e testar por 14 dias.')}`;
 const SIGNUP_URL = '/login?tab=register';
 

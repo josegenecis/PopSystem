@@ -69,6 +69,12 @@ export class WebSocketPrinterFallback {
   private url: string;
   private ws: WebSocket | null = null;
   constructor(url: string) { this.url = url; }
+  setUrl(url: string) {
+    if (url === this.url) return;
+    try { this.ws?.close(); } catch {}
+    this.ws = null;
+    this.url = url;
+  }
   async connect(transport: 'network' | 'usb' | 'bluetooth' = 'network', address?: string): Promise<boolean> {
     try {
       this.ws = new WebSocket(this.url);
@@ -85,6 +91,43 @@ export class WebSocketPrinterFallback {
   async testPrint(): Promise<boolean> { if (!this.ws) return false; this.ws.send(JSON.stringify({ action: 'test_print' })); return true; }
   async printReceipt(data: any): Promise<boolean> { if (!this.ws) return false; this.ws.send(JSON.stringify({ action: 'print_receipt', payload: data })); return true; }
   async disconnect() { try { if (this.ws) this.ws.close(); } catch {} }
+  private async request<T = any>(action: string, event: string, payload?: any, timeoutMs = 5000): Promise<T | null> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return null;
+    return await new Promise<T | null>((resolve) => {
+      const timeout = window.setTimeout(() => {
+        this.ws?.removeEventListener('message', handler);
+        resolve(null);
+      }, timeoutMs);
+      const handler = (ev: MessageEvent) => {
+        try {
+          const response = JSON.parse(ev.data);
+          if (response?.event === event) {
+            window.clearTimeout(timeout);
+            this.ws?.removeEventListener('message', handler);
+            resolve(response as T);
+          }
+        } catch {}
+      };
+      this.ws.addEventListener('message', handler);
+      this.ws.send(JSON.stringify({ action, payload }));
+    });
+  }
+  async getStatus(): Promise<any | null> {
+    return this.request('get_status', 'status');
+  }
+  async readScaleWeight(): Promise<{ weight: number; unit: string; stable: boolean } | null> {
+    const response: any = await this.request('read_weight', 'weight_read', { timeoutMs: 2500 }, 4000);
+    if (!response?.ok || !response?.reading) return null;
+    return {
+      weight: Number(response.reading.weight || 0),
+      unit: response.reading.unit || 'kg',
+      stable: response.reading.stable !== false,
+    };
+  }
+  async disconnectScale(): Promise<boolean> {
+    const response: any = await this.request('disconnect_scale', 'scale_disconnected');
+    return !!response?.ok;
+  }
   async scanNetwork(subnets?: string[]): Promise<Array<{ ip: string }>> {
     if (!this.ws) return [] as any
     return await new Promise((resolve) => {

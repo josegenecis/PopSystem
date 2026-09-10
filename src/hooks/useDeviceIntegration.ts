@@ -1,11 +1,12 @@
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { PrinterService, PrinterDevice } from '@/services/PrinterService';
 import { pwaScaleService, ScaleDevice } from '@/services/ScaleService';
 import { WebSocketPrinterFallback } from '@/services/hardwareFallback';
 import { ElectronDeviceService, ElectronDevice } from '@/services/ElectronDeviceService';
 import { loadPrinterConfig, savePrinterConfig, type PrinterTransport } from '@/services/printerConfig';
+import { discoverBridgeWebsocketUrl } from '@/services/bridgeDiscovery';
 
 export interface Device {
   id: string;
@@ -30,13 +31,17 @@ export const useDeviceIntegration = () => {
     transport: initialCfg.bridge.transport,
     address: initialCfg.bridge.address || '',
   }));
-  const bridgePrinter = useMemo(() => new WebSocketPrinterFallback(bridgeConfig.websocketUrl), [bridgeConfig.websocketUrl]);
+  const [bridgeConnected, setBridgeConnected] = useState(false);
+  const autoConnectAttemptedRef = useRef(false);
+  const bridgePrinter = useMemo(() => new WebSocketPrinterFallback(initialCfg.bridge.websocketUrl), [initialCfg.bridge.websocketUrl]);
   const electronService = new ElectronDeviceService();
   const isElectron = electronService.isElectronEnvironment();
 
-  const connectBridgePrinter = useCallback(async (cfg?: { websocketUrl?: string; transport?: PrinterTransport; address?: string }) => {
+  const connectBridgePrinter = useCallback(async (cfg?: { websocketUrl?: string; transport?: PrinterTransport; address?: string }, options?: { silent?: boolean }) => {
     const config = { ...bridgeConfig, ...(cfg || {}) };
+    bridgePrinter.setUrl(config.websocketUrl);
     const ok = await bridgePrinter.connect(config.transport as any, config.address);
+    setBridgeConnected(ok);
     if (ok) {
       setDevices(prev => prev.map(d => d.id === 'bridge_printer' ? { ...d, status: 'connected' } : d));
       const saved = loadPrinterConfig()
@@ -44,12 +49,27 @@ export const useDeviceIntegration = () => {
         ...saved,
         bridge: { ...saved.bridge, websocketUrl: config.websocketUrl, transport: config.transport, address: config.address || '' },
       })
-      toast({ title: 'Bridge conectada', description: `Transporte: ${config.transport}${config.address ? `, endereço: ${config.address}` : ''}` });
+      if (!options?.silent) toast({ title: 'Pop Connect conectado', description: 'A conexão local com os dispositivos está pronta.' });
     } else {
-      toast({ title: 'Falha ao conectar bridge', description: `Verifique se o servidor está rodando (${config.websocketUrl})`, variant: 'destructive' });
+      if (!options?.silent) toast({ title: 'Pop Connect não encontrado', description: 'Abra o Pop Connect neste computador e tente novamente.', variant: 'destructive' });
     }
     return ok;
   }, [bridgeConfig, bridgePrinter, toast]);
+
+  useEffect(() => {
+    if (isElectron || autoConnectAttemptedRef.current) return;
+    autoConnectAttemptedRef.current = true;
+    let active = true;
+    const connectAutomatically = async () => {
+      const found = await discoverBridgeWebsocketUrl({ timeoutMs: 900 });
+      if (!active || !found) return;
+      const config = { ...bridgeConfig, websocketUrl: found };
+      setBridgeConfig(config);
+      await connectBridgePrinter(config, { silent: true });
+    };
+    void connectAutomatically();
+    return () => { active = false; };
+  }, [bridgeConfig, connectBridgePrinter, isElectron]);
 
   // (moved above)
 
@@ -77,7 +97,7 @@ export const useDeviceIntegration = () => {
         deviceList = [
           {
             id: 'bridge_printer',
-            name: 'Bridge Printer (Local)',
+            name: 'Impressora via Pop Connect',
             type: 'printer',
             connectionType: 'wifi',
             status: 'disconnected'
@@ -119,6 +139,17 @@ export const useDeviceIntegration = () => {
           for (const p of netPrinters) deviceList.push({ id: `bridge_net_${p.ip}`, name: `Impressora ${p.ip}`, type: 'printer', connectionType: 'wifi', status: 'disconnected', address: p.ip })
           for (const u of usbPrinters) deviceList.push({ id: `bridge_usb_${u.vendorId}_${u.productId}`, name: `USB ${u.vendorId}:${u.productId}`, type: 'printer', connectionType: 'usb', status: 'disconnected' })
           for (const s of osPrinters) deviceList.push({ id: `bridge_os_${s.name}`, name: s.isDefault ? `${s.name} (padrão)` : s.name, type: 'printer', connectionType: 'wifi', status: 'disconnected', address: s.name })
+          const bridgeStatus = await bridgePrinter.getStatus()
+          if (bridgeStatus?.scale?.connected) {
+            deviceList.push({
+              id: 'bridge_scale',
+              name: `Balança via Pop Connect${bridgeStatus.scale.config?.portPath ? ` (${bridgeStatus.scale.config.portPath})` : ''}`,
+              type: 'scale',
+              connectionType: 'usb',
+              status: 'connected',
+              address: bridgeStatus.scale.config?.portPath || '',
+            })
+          }
         } catch {}
       }
 
@@ -190,10 +221,13 @@ export const useDeviceIntegration = () => {
             }
           }
         } else if (device.type === 'scale') {
-          const scales = await scaleService.scanForScales();
-          const scale = scales.find(s => s.id === deviceId);
-          if (scale) {
-            success = await scaleService.connectToScale(scale);
+          if (deviceId === 'bridge_scale') {
+            const status = await bridgePrinter.getStatus();
+            success = !!status?.scale?.connected;
+          } else {
+            const scales = await scaleService.scanForScales();
+            const scale = scales.find(s => s.id === deviceId);
+            if (scale) success = await scaleService.connectToScale(scale);
           }
         }
       }
@@ -239,7 +273,8 @@ export const useDeviceIntegration = () => {
         if (device.type === 'printer') {
           await printerService.disconnectPrinter();
         } else if (device.type === 'scale') {
-          await scaleService.disconnectScale();
+          if (deviceId === 'bridge_scale') await bridgePrinter.disconnectScale();
+          else await scaleService.disconnectScale();
         }
       }
 
@@ -272,6 +307,11 @@ export const useDeviceIntegration = () => {
       if (isElectron) {
         return await electronService.readWeight();
       } else {
+        if (connectedScale.id === 'bridge_scale') {
+          const reading = await bridgePrinter.readScaleWeight();
+          if (!reading) throw new Error('A balança não respondeu');
+          return reading.unit === 'g' ? reading.weight / 1000 : reading.weight;
+        }
         return await scaleService.getWeight();
       }
     } catch (error) {
@@ -285,8 +325,14 @@ export const useDeviceIntegration = () => {
       const weight = await electronService.readWeight();
       return { weight, unit: 'kg' as const, stable: true };
     }
+    const connectedScale = devices.find(d => d.type === 'scale' && d.status === 'connected');
+    if (connectedScale?.id === 'bridge_scale') {
+      const reading = await bridgePrinter.readScaleWeight();
+      if (!reading) throw new Error('A balança não respondeu');
+      return reading;
+    }
     return scaleService.getReading();
-  }, [isElectron]);
+  }, [bridgePrinter, devices, isElectron]);
 
   const printReceipt = useCallback(async (orderData: any, opts?: { transport?: 'network' | 'usb' | 'bluetooth' | 'system', address?: string }): Promise<void> => {
     const connectedPrinter = devices.find(d => d.type === 'printer' && d.status === 'connected');
@@ -346,6 +392,7 @@ export const useDeviceIntegration = () => {
     getScaleReading,
     printReceipt,
     bridgeConfig,
+    bridgeConnected,
     setBridgeConfig,
     connectBridgePrinter
   };

@@ -49,6 +49,7 @@ export const discoverBridgeWebsocketUrl = async (opts?: { timeoutMs?: number }) 
   const candidates = [
     'ws://localhost:8766',
     'ws://127.0.0.1:8766',
+    'ws://pop-connect.local:8766',
     'ws://boracume-bridge.local:8766',
     'ws://bridge.local:8766',
   ]
@@ -59,4 +60,3 @@ export const discoverBridgeWebsocketUrl = async (opts?: { timeoutMs?: number }) 
   }
   return ''
 }
-

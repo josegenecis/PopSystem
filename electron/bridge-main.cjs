@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } = require('electron')
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const { spawn, exec } = require('child_process')
@@ -34,6 +34,24 @@ let bridgeProc = null
 let tray = null
 let win = null
 
+const startupLogPath = () => path.join(app.getPath('userData'), 'startup.log')
+const logStartupError = (context, error) => {
+  const message = error instanceof Error ? `${error.message}\n${error.stack || ''}` : String(error)
+  try {
+    fs.mkdirSync(path.dirname(startupLogPath()), { recursive: true })
+    fs.appendFileSync(startupLogPath(), `[${new Date().toISOString()}] ${context}\n${message}\n\n`)
+  } catch {}
+  return message
+}
+
+const showStartupError = (context, error) => {
+  const message = logStartupError(context, error)
+  try { dialog.showErrorBox('Pop Connect não pôde iniciar', `${message}\n\nLog: ${startupLogPath()}`) } catch {}
+}
+
+process.on('uncaughtException', (error) => showStartupError('uncaughtException', error))
+process.on('unhandledRejection', (error) => showStartupError('unhandledRejection', error))
+
 const nativeBridgePath = (...segments) => app.isPackaged
   ? path.join(process.resourcesPath, 'native-bridge', ...segments)
   : path.join(__dirname, '..', 'native-bridge', ...segments)
@@ -61,6 +79,10 @@ const startBridge = (token) => {
 
   const serverPath = nativeBridgePath('server.js')
   bridgeProc = spawn(process.execPath, [serverPath], { env, stdio: 'ignore' })
+  bridgeProc.on('error', (error) => {
+    logStartupError('native bridge process', error)
+    bridgeProc = null
+  })
   bridgeProc.on('exit', () => { bridgeProc = null })
 }
 
@@ -125,10 +147,10 @@ const bridgeCommand = async (action, payload = {}, expectedEvent, timeoutMs = 60
 
 const createWindow = () => {
   win = new BrowserWindow({
-    width: 900,
-    height: 760,
-    minWidth: 780,
-    minHeight: 680,
+    width: 1040,
+    height: 700,
+    minWidth: 1040,
+    minHeight: 700,
     resizable: false,
     autoHideMenuBar: true,
     backgroundColor: '#f5f7f4',
@@ -267,8 +289,7 @@ ipcMain.handle('bridge:pollPairing', async () => {
 
 ipcMain.handle('bridge:start', async () => {
   const cfg = readConfig()
-  if (!cfg.token) return { ok: false, error: 'not_paired' }
-  startBridge(cfg.token)
+  startBridge(cfg.token || '')
   return { ok: true }
 })
 
@@ -315,7 +336,7 @@ ipcMain.handle('bridge:setPrinterSelection', async (_ev, payload) => {
   const cfg = readConfig()
   const printerName = payload?.printerName ? String(payload.printerName) : ''
   writeConfig({ ...cfg, printerName })
-  if (cfg?.token) startBridge(cfg.token)
+  startBridge(cfg?.token || '')
   return { ok: true }
 })
 
@@ -391,11 +412,16 @@ ipcMain.handle('bridge:setAutoStart', async (_event, payload) => {
 
 app.whenReady().then(() => {
   if (!hasSingleInstanceLock) return
-  const cfg = readConfig()
-  if (cfg?.token) startBridge(cfg.token)
-  app.setLoginItemSettings({ openAtLogin: true })
-  createTray()
-  createWindow()
+  try {
+    createWindow()
+    createTray()
+    const cfg = readConfig()
+    startBridge(cfg?.token || '')
+    app.setLoginItemSettings({ openAtLogin: true })
+  } catch (error) {
+    showStartupError('startup', error)
+    if (!win) app.quit()
+  }
 })
 
 app.on('second-instance', () => {

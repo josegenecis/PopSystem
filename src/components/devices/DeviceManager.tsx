@@ -3,7 +3,7 @@ import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Scale, Printer, Bluetooth, Wifi, Usb, Search, Power, PowerOff, Link as LinkIcon, ScanBarcode } from 'lucide-react';
+import { Scale, Printer, Bluetooth, Wifi, Usb, Search, Power, PowerOff, Link as LinkIcon, ScanBarcode, ArchiveRestore } from 'lucide-react';
 import { useDeviceIntegration, Device } from '@/hooks/useDeviceIntegration';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -14,7 +14,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { createPrintAgentToken, enqueuePrintJob } from '@/services/printRelay';
 import { supabase } from '@/integrations/supabase/client';
-import { claimBridgePairing } from '@/services/printPairing';
 import { getLatestBridgeWindowsExe } from '@/services/bridgeDownload';
 import { PrinterService as PdvPrinterService } from '@/utils/printerService';
 
@@ -30,23 +29,23 @@ const DeviceManager = () => {
     getScaleReading,
     printReceipt,
     bridgeConfig,
+    bridgeConnected,
     setBridgeConfig,
     connectBridgePrinter
   } = useDeviceIntegration();
 
   const [autoPrintKds, setAutoPrintKds] = React.useState(() => loadPrinterConfig().autoPrintKds);
   const [detectingBridge, setDetectingBridge] = React.useState(false);
-  const [tokenName, setTokenName] = React.useState('Bridge Impressão');
+  const [tokenName, setTokenName] = React.useState('Computador do caixa');
   const [generatedToken, setGeneratedToken] = React.useState<string | null>(null);
   const [generatingToken, setGeneratingToken] = React.useState(false);
   const [cloudPrinters, setCloudPrinters] = React.useState<Array<{ agent_id: string; printer_id: string; name: string; transport: string; address?: string }>>([]);
   const [fetchingCloudPrinters, setFetchingCloudPrinters] = React.useState(false);
   const [selectedCloudPrinterId, setSelectedCloudPrinterId] = React.useState<string>(() => loadPrinterConfig().relay?.selectedPrinter?.printerId || '');
-  const [pairingCode, setPairingCode] = React.useState('');
-  const [claimingPairing, setClaimingPairing] = React.useState(false);
   const [downloadingBridge, setDownloadingBridge] = React.useState(false);
   const [scaleReading, setScaleReading] = React.useState<string>('');
   const [webUsbPrinterConnected, setWebUsbPrinterConnected] = React.useState(false);
+  const [openingDrawer, setOpeningDrawer] = React.useState(false);
 
   React.useEffect(() => {
     if (!user?.id) return;
@@ -272,11 +271,13 @@ const DeviceManager = () => {
                   }}>{webUsbPrinterConnected ? 'USB conectada' : 'Conectar impressora USB'}</Button>
                 </div>
               )}
-              {/* Configuração da Bridge */}
-              <div className="p-3 border rounded-lg">
+              {/* Compatibilidade local avançada do Pop Connect */}
+              <details className="rounded-lg border bg-slate-50/70 p-3">
+                <summary className="cursor-pointer text-sm font-medium text-slate-700">Configuração avançada da conexão local</summary>
+                <div className="mt-3">
                 <div className="flex items-center gap-2 mb-2">
                   <LinkIcon size={18} />
-                  <span className="text-sm">Bridge de impressão (WebSocket)</span>
+                  <span className="text-sm">Conexão local do Pop Connect</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div className="sm:col-span-3">
@@ -328,18 +329,42 @@ const DeviceManager = () => {
                       }
                     }}
                   >
-                    {detectingBridge ? 'Detectando…' : 'Detectar bridge'}
+                    {detectingBridge ? 'Detectando…' : 'Detectar Pop Connect'}
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => connectBridgePrinter({ websocketUrl: bridgeConfig.websocketUrl, transport: bridgeConfig.transport as any, address: bridgeConfig.address })}>Conectar Bridge</Button>
+                  <Button size="sm" variant="outline" onClick={() => connectBridgePrinter({ websocketUrl: bridgeConfig.websocketUrl, transport: bridgeConfig.transport as any, address: bridgeConfig.address })}>Conectar</Button>
                 </div>
-              </div>
+                </div>
+              </details>
 
-              <div className="p-3 border rounded-lg">
-                <div className="text-sm font-medium mb-2">Cloud Relay (sem configurar IP no PWA)</div>
-                <div className="text-sm text-muted-foreground mb-3">
-                  Instale o PopConnect no computador/mini-pc, gere um código e vincule aqui.
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
+                <div className="mb-1 flex items-center gap-2 text-base font-semibold text-emerald-950">
+                  <LinkIcon size={18} /> Pop Connect
                 </div>
-                <div className="flex justify-end mb-3">
+                <div className="mb-3 text-sm text-emerald-900/70">
+                  Instale no computador do caixa. O aplicativo encontra impressoras, balanças e ajuda a testar o leitor de código de barras.
+                </div>
+                <div className="mb-3 flex flex-wrap justify-end gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={openingDrawer}
+                    onClick={async () => {
+                      setOpeningDrawer(true);
+                      try {
+                        const result = await PdvPrinterService.openCashDrawer();
+                        toast({
+                          title: result?.success ? 'Gaveta aberta' : 'Não foi possível abrir a gaveta',
+                          description: result?.success ? 'Comando enviado pela impressora configurada.' : result?.error,
+                          variant: result?.success ? 'default' : 'destructive',
+                        });
+                      } finally {
+                        setOpeningDrawer(false);
+                      }
+                    }}
+                  >
+                    <ArchiveRestore className="mr-2 h-4 w-4" />
+                    {openingDrawer ? 'Abrindo…' : 'Abrir gaveta'}
+                  </Button>
                   <Button
                     size="sm"
                     variant="outline"
@@ -348,55 +373,26 @@ const DeviceManager = () => {
                       try {
                         setDownloadingBridge(true);
                         const exe = await getLatestBridgeWindowsExe();
-                        if (!exe?.url) throw new Error('Instalador indisponível');
-
-                        const download = document.createElement('a');
-                        download.href = exe.url;
-                        download.download = exe.name;
-                        download.style.display = 'none';
-                        document.body.appendChild(download);
-                        download.click();
-                        download.remove();
-                      } catch (error: any) {
-                        toast({
-                          title: 'Download indisponível',
-                          description: error?.message || 'Não foi possível baixar o PopConnect agora.',
-                          variant: 'destructive',
-                        });
+                        if (exe?.url) {
+                          window.open(exe.url, '_blank', 'noopener,noreferrer');
+                        } else {
+                          window.open('https://github.com/josegenecis/boracume-pdv-system/releases', '_blank', 'noopener,noreferrer');
+                        }
                       } finally {
                         setDownloadingBridge(false);
                       }
                     }}
                   >
-                    {downloadingBridge ? 'Baixando…' : 'Baixar PopConnect (Windows .exe)'}
+                    {downloadingBridge ? 'Abrindo…' : 'Baixar Pop Connect para Windows'}
                   </Button>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
-                  <div className="sm:col-span-2">
-                    <Input value={pairingCode} onChange={(e) => setPairingCode(e.target.value)} placeholder="Código do Bridge (6 dígitos)" />
-                  </div>
-                  <div className="sm:col-span-1">
-                    <Button
-                      className="w-full"
-                      disabled={claimingPairing || !user?.id || !pairingCode.trim()}
-                      onClick={async () => {
-                        try {
-                          setClaimingPairing(true);
-                          await claimBridgePairing({ pairingCode: pairingCode.trim(), name: tokenName });
-                          toast({ title: 'Bridge vinculado', description: 'Agora clique em “Buscar impressoras”.' });
-                          setPairingCode('');
-                        } catch (e: any) {
-                          toast({ title: 'Falha ao vincular', description: e?.message || 'Erro desconhecido', variant: 'destructive' });
-                        } finally {
-                          setClaimingPairing(false);
-                        }
-                      }}
-                    >
-                      {claimingPairing ? 'Vinculando…' : 'Vincular'}
-                    </Button>
-                  </div>
+                <div className={`mb-3 rounded-lg border p-3 text-sm ${bridgeConnected ? 'border-emerald-300 bg-emerald-100 text-emerald-950' : 'border-amber-200 bg-amber-50 text-amber-950'}`}>
+                  <div className="font-medium">{bridgeConnected ? 'Pop Connect reconhecido automaticamente' : 'Aguardando o Pop Connect'}</div>
+                  <div className="mt-1 text-xs opacity-75">{bridgeConnected ? 'O PWA já pode usar os dispositivos deste computador. Nenhum código é necessário.' : 'Abra o Pop Connect neste computador. O PWA fará a conexão sozinho.'}</div>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <details className="mt-3 rounded-lg border bg-white/70 p-3">
+                  <summary className="cursor-pointer text-xs font-medium text-muted-foreground">Opções de suporte técnico</summary>
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <div className="sm:col-span-2">
                     <Input value={tokenName} onChange={(e) => setTokenName(e.target.value)} placeholder="Nome do token (ex.: Caixa 1)" />
                   </div>
@@ -409,7 +405,7 @@ const DeviceManager = () => {
                           setGeneratingToken(true);
                           const { token } = await createPrintAgentToken({ restaurantUserId: user?.id || '', name: tokenName });
                           setGeneratedToken(token);
-                          toast({ title: 'Token gerado', description: 'Copie e cole no bridge (PRINT_AGENT_TOKEN).' });
+                          toast({ title: 'Token gerado', description: 'Use apenas com orientação do suporte PopSystem.' });
                         } catch (e: any) {
                           toast({ title: 'Falha ao gerar token', description: e?.message || 'Erro desconhecido', variant: 'destructive' });
                         } finally {
@@ -442,6 +438,7 @@ const DeviceManager = () => {
                     </div>
                   </div>
                 )}
+                </details>
                 <div className="mt-4 border-t pt-3">
                   <div className="flex items-center justify-between mb-2">
                     <div className="text-sm font-medium">Impressoras disponíveis</div>
@@ -508,7 +505,7 @@ const DeviceManager = () => {
                     </Select>
                   ) : (
                     <div className="text-sm text-muted-foreground">
-                      Clique em “Buscar impressoras”. O bridge precisa estar ligado e com token configurado.
+                      Abra o Pop Connect e clique em “Buscar impressoras”. A conexão local não exige código.
                     </div>
                   )}
                 </div>

@@ -1,18 +1,28 @@
 {
   "appId": "com.boracume.bridge",
-  "productName": "BoraCumê Bridge",
+  "productName": "Pop Connect",
+  "artifactName": "Pop-Connect-Setup-${version}-${arch}.${ext}",
+  "asar": true,
   "directories": {
     "output": "dist-bridge"
   },
   "files": [
-    "electron/bridge-*.js",
+    "electron/bridge-*.cjs",
     "electron/bridge-ui.html",
-    "native-bridge/**/*",
-    "native-bridge/node_modules/**/*",
-    "public/icon-512x512.png"
+    "public/icon-512x512.png",
+    "public/LOGOMARCA/Logo pop.png",
+    "public/LOGOMARCA/ICONE DESKTOP.png"
+  ],
+  "extraResources": [
+    {
+      "from": "native-bridge",
+      "to": "native-bridge",
+      "filter": ["**/*"]
+    }
   ],
   "extraMetadata": {
-    "main": "electron/bridge-main.js"
+    "main": "electron/bridge-main.cjs",
+    "type": "commonjs"
   },
   "win": {
     "target": [
@@ -28,7 +38,9 @@
     "oneClick": true,
     "perMachine": false,
     "createDesktopShortcut": true,
-    "createStartMenuShortcut": true
+    "createStartMenuShortcut": true,
+    "shortcutName": "Pop Connect",
+    "runAfterFinish": true
   },
   "mac": {
     "target": "dmg",

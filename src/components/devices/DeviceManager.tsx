@@ -376,7 +376,7 @@ const DeviceManager = () => {
                         if (exe?.url) {
                           window.open(exe.url, '_blank', 'noopener,noreferrer');
                         } else {
-                          window.open('https://github.com/josegenecis/boracume-pdv-system/releases', '_blank', 'noopener,noreferrer');
+                          window.open('https://github.com/josegenecis/PopSystem/releases', '_blank', 'noopener,noreferrer');
                         }
                       } finally {
                         setDownloadingBridge(false);

@@ -1,5 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron')
-const { Tray, Menu } = require('electron')
+const { app, BrowserWindow, ipcMain, Tray, Menu, dialog } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const { spawn, exec } = require('child_process')
@@ -20,10 +19,32 @@ let bridgeProc = null
 let tray = null
 let win = null
 
+const startupLogPath = () => path.join(app.getPath('userData'), 'startup.log')
+const logStartupError = (context, error) => {
+  const message = error instanceof Error ? `${error.message}\n${error.stack || ''}` : String(error)
+  try {
+    fs.mkdirSync(path.dirname(startupLogPath()), { recursive: true })
+    fs.appendFileSync(startupLogPath(), `[${new Date().toISOString()}] ${context}\n${message}\n\n`)
+  } catch {}
+  return message
+}
+
+const showStartupError = (context, error) => {
+  const message = logStartupError(context, error)
+  try { dialog.showErrorBox('PopConnect não pôde iniciar', `${message}\n\nLog: ${startupLogPath()}`) } catch {}
+}
+
+process.on('uncaughtException', (error) => showStartupError('uncaughtException', error))
+process.on('unhandledRejection', (error) => showStartupError('unhandledRejection', error))
+
 const stopBridge = () => {
   try { bridgeProc?.kill() } catch {}
   bridgeProc = null
 }
+
+const nativeBridgePath = (...segments) => app.isPackaged
+  ? path.join(process.resourcesPath, 'native-bridge', ...segments)
+  : path.join(__dirname, '..', 'native-bridge', ...segments)
 
 const startBridge = (token) => {
   stopBridge()
@@ -35,10 +56,15 @@ const startBridge = (token) => {
     PRINT_AGENT_TOKEN: token,
     PRINT_TRANSPORT: 'system',
     PRINT_ADDRESS: cfg?.printerName || '',
+    ELECTRON_RUN_AS_NODE: '1',
   }
 
-  const serverPath = path.join(__dirname, '..', 'native-bridge', 'server.js')
+  const serverPath = nativeBridgePath('server.js')
   bridgeProc = spawn(process.execPath, [serverPath], { env, stdio: 'ignore' })
+  bridgeProc.on('error', (error) => {
+    logStartupError('native bridge process', error)
+    bridgeProc = null
+  })
   bridgeProc.on('exit', () => { bridgeProc = null })
 }
 
@@ -67,7 +93,7 @@ const createWindow = () => {
 }
 
 const createTray = () => {
-  const iconPath = path.join(__dirname, '..', 'public', 'LOGOMARCA', 'ICONE DESKTOP.png')
+  const iconPath = path.join(__dirname, '..', 'public', 'icon-512x512.png')
   tray = new Tray(iconPath)
   tray.setToolTip('PopConnect')
   tray.on('double-click', () => {
@@ -181,17 +207,31 @@ ipcMain.handle('bridge:setPrinterSelection', async (_ev, payload) => {
   return { ok: true }
 })
 
-app.whenReady().then(() => {
-  const cfg = readConfig()
-  if (cfg?.token) startBridge(cfg.token)
-  app.setLoginItemSettings({ openAtLogin: true })
-  if (!app.requestSingleInstanceLock()) {
-    app.quit()
-    return
-  }
-  createTray()
-  createWindow()
-})
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+
+if (!hasSingleInstanceLock) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    if (!win) return
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+  })
+
+  app.whenReady().then(() => {
+    try {
+      createWindow()
+      createTray()
+      const cfg = readConfig()
+      if (cfg?.token) startBridge(cfg.token)
+      app.setLoginItemSettings({ openAtLogin: true })
+    } catch (error) {
+      showStartupError('startup', error)
+      if (!win) app.quit()
+    }
+  })
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

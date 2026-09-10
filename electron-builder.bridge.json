@@ -7,9 +7,14 @@
   "files": [
     "electron/bridge-*.cjs",
     "electron/bridge-ui.html",
-    "native-bridge/**/*",
-    "native-bridge/node_modules/**/*",
     "public/icon-512x512.png"
+  ],
+  "extraResources": [
+    {
+      "from": "native-bridge",
+      "to": "native-bridge",
+      "filter": ["**/*"]
+    }
   ],
   "extraMetadata": {
     "main": "electron/bridge-main.cjs",

@@ -41,6 +41,14 @@ if (process.platform !== 'win32') {
 }
 
 run('npm', ['install', '--no-audit', '--no-fund'], nativeBridgeDir, env)
+
+if (process.platform === 'win32') {
+  const printerSource = path.join(nativeBridgeDir, 'node_modules', '@thiagoelg', 'node-printer', 'src', 'node_printer_win.cc')
+  const source = fs.readFileSync(printerSource, 'utf8')
+  const patched = source.replace(/\b_value\b/g, 'this->_value')
+  if (patched !== source) fs.writeFileSync(printerSource, patched)
+}
+
 const electronVersion = require(path.join(root, 'node_modules', 'electron', 'package.json')).version
 run('npx', ['electron-rebuild', '-f', '-m', nativeBridgeDir, '-v', electronVersion, '-w', 'serialport,@thiagoelg/node-printer'], root, env)
 const extra = process.argv.includes('--dir') ? ['--dir'] : []

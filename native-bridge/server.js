@@ -2,11 +2,138 @@ import { WebSocketServer } from 'ws'
 import os from 'os'
 import net from 'net'
 import printerLib from '@thiagoelg/node-printer'
+import { SerialPort } from 'serialport'
 
-const wss = new WebSocketServer({ port: 8766 })
+const bridgePort = Number(process.env.POP_CONNECT_PORT || process.env.BRIDGE_PORT || 8766)
+const bridgeHost = process.env.POP_CONNECT_HOST || process.env.BRIDGE_HOST || '127.0.0.1'
+const wss = new WebSocketServer({ port: bridgePort, host: bridgeHost })
 
 let systemPrinterName = null
 let networkAddress = null
+let scalePort = null
+let scaleConfig = null
+let scaleBuffer = ''
+let latestScaleReading = null
+
+const SCALE_PROTOCOLS = {
+  toledo: { name: 'Toledo Prix', baudRate: 9600, request: Buffer.from([0x05]), tare: Buffer.from('T'), zero: Buffer.from('Z') },
+  filizola: { name: 'Filizola', baudRate: 9600, request: Buffer.from([0x05]), tare: Buffer.from([0x02, 0x54, 0x03]), zero: Buffer.from([0x02, 0x5a, 0x03]) },
+  urano: { name: 'Urano', baudRate: 4800, request: Buffer.from([0x05]), tare: Buffer.from('T\r\n'), zero: Buffer.from('Z\r\n') },
+  magna: { name: 'Magna', baudRate: 9600, request: Buffer.from([0x05]), tare: Buffer.from('TARE\r'), zero: Buffer.from('ZERO\r') },
+  elgin: { name: 'Elgin', baudRate: 9600, request: Buffer.from([0x05]), tare: Buffer.from('T'), zero: Buffer.from('Z') },
+  generic: { name: 'Genérica', baudRate: 9600, request: Buffer.from([0x05]), tare: Buffer.from('T'), zero: Buffer.from('Z') },
+}
+
+function parseWeight(raw) {
+  const clean = String(raw || '').replace(/[\u0000-\u001f]/g, ' ').trim().toLowerCase()
+  if (!clean) return null
+  const match = clean.match(/([-+]?\s*\d+(?:[.,]\d+)?)\s*(kg|kgs|g|gramas?)?/i)
+  if (!match) return null
+  const value = Number(match[1].replace(/\s/g, '').replace(',', '.'))
+  if (!Number.isFinite(value)) return null
+  const unit = String(match[2] || '').toLowerCase()
+  const weightKg = unit.startsWith('g') ? value / 1000 : (unit.startsWith('kg') || /[.,]/.test(match[1]) ? value : value / 1000)
+  return {
+    weight: weightKg,
+    unit: 'kg',
+    stable: !/\b(us|unst|motion|inst)\b/i.test(clean),
+    raw: clean,
+    readAt: Date.now(),
+  }
+}
+
+function closeScale() {
+  return new Promise((resolve) => {
+    const current = scalePort
+    scalePort = null
+    scaleConfig = null
+    scaleBuffer = ''
+    latestScaleReading = null
+    if (!current?.isOpen) return resolve(true)
+    current.close(() => resolve(true))
+  })
+}
+
+async function listSerialPorts() {
+  const ports = await SerialPort.list()
+  return ports.map((port) => ({
+    path: port.path,
+    name: port.friendlyName || port.manufacturer || port.path,
+    manufacturer: port.manufacturer || '',
+    vendorId: port.vendorId || '',
+    productId: port.productId || '',
+    serialNumber: port.serialNumber || '',
+  }))
+}
+
+async function connectScale(payload = {}) {
+  const portPath = String(payload.portPath || payload.path || '').trim()
+  if (!portPath) return { ok: false, error: 'scale_port_required' }
+  await closeScale()
+  const protocolId = SCALE_PROTOCOLS[payload.protocol] ? payload.protocol : 'generic'
+  const protocol = SCALE_PROTOCOLS[protocolId]
+  const options = {
+    path: portPath,
+    baudRate: Number(payload.baudRate || protocol.baudRate),
+    dataBits: Number(payload.dataBits || 8),
+    stopBits: Number(payload.stopBits || 1),
+    parity: payload.parity || 'none',
+    autoOpen: false,
+  }
+  const port = new SerialPort(options)
+  const opened = await new Promise((resolve) => {
+    const timeout = setTimeout(() => resolve({ ok: false, error: 'scale_connection_timeout' }), 8000)
+    port.open((error) => {
+      clearTimeout(timeout)
+      resolve(error ? { ok: false, error: error.message } : { ok: true })
+    })
+  })
+  if (!opened.ok) {
+    try { port.destroy() } catch {}
+    return opened
+  }
+  scalePort = port
+  scaleConfig = { portPath, protocol: protocolId, ...options }
+  port.on('data', (chunk) => {
+    scaleBuffer = `${scaleBuffer}${chunk.toString('latin1')}`.slice(-256)
+    const parsed = parseWeight(scaleBuffer)
+    if (parsed) {
+      latestScaleReading = parsed
+      scaleBuffer = ''
+    }
+  })
+  port.on('close', () => {
+    if (scalePort === port) scalePort = null
+  })
+  port.on('error', () => {})
+  return { ok: true, scale: scaleConfig }
+}
+
+async function writeScaleCommand(command) {
+  if (!scalePort?.isOpen) return false
+  return await new Promise((resolve) => scalePort.write(command, (error) => resolve(!error)))
+}
+
+async function readScaleWeight(timeoutMs = 2200) {
+  if (!scalePort?.isOpen || !scaleConfig) return { ok: false, error: 'scale_not_connected' }
+  const protocol = SCALE_PROTOCOLS[scaleConfig.protocol] || SCALE_PROTOCOLS.generic
+  const startedAt = Date.now()
+  await writeScaleCommand(protocol.request)
+  return await new Promise((resolve) => {
+    const poll = setInterval(() => {
+      if (latestScaleReading?.readAt >= startedAt) {
+        clearInterval(poll)
+        clearTimeout(timeout)
+        resolve({ ok: true, reading: latestScaleReading })
+      }
+    }, 40)
+    const timeout = setTimeout(() => {
+      clearInterval(poll)
+      if (latestScaleReading) resolve({ ok: true, reading: latestScaleReading, cached: true })
+      else resolve({ ok: false, error: 'scale_read_timeout' })
+    }, Math.max(400, Number(timeoutMs) || 2200))
+  })
+}
 
 const getEnv = (...keys) => {
   for (const k of keys) {
@@ -79,6 +206,20 @@ async function printReceipt(data) {
   }
   if (networkAddress) return await printRawNetwork(escposData)
   return false
+}
+
+async function openCashDrawer(payload = {}) {
+  if (!systemPrinterName && !networkAddress) return false
+
+  // ESC/POS: ESC p m t1 t2. A maioria das gavetas usa o conector 2 (m = 0).
+  // O conector 5 pode ser informado pelo cliente quando necessário.
+  const connector = Number(payload.connector) === 1 ? 1 : 0
+  const pulseOn = Math.min(255, Math.max(1, Number(payload.pulseOn) || 25))
+  const pulseOff = Math.min(255, Math.max(1, Number(payload.pulseOff) || 250))
+  const command = Buffer.from([0x1b, 0x70, connector, pulseOn, pulseOff]).toString('binary')
+
+  if (systemPrinterName) return await printRawSystem(command)
+  return await printRawNetwork(command)
 }
 
 function buildEscpos({ header = 'BORA CUME HUB', customer_name, customer_phone, items = [], total = 0, order_number }) {
@@ -180,6 +321,15 @@ wss.on('connection', (ws) => {
           ws.send(JSON.stringify({ ok, event: 'printed_receipt' }))
           break
         }
+        case 'open_cash_drawer': {
+          const ok = await openCashDrawer(payload)
+          ws.send(JSON.stringify({
+            ok,
+            event: 'cash_drawer_opened',
+            error: ok ? undefined : 'printer_not_configured_or_unavailable',
+          }))
+          break
+        }
         case 'scan_network_printers': {
           const subnets = payload?.subnets && Array.isArray(payload.subnets) && payload.subnets.length > 0 ? payload.subnets : getLocalSubnets()
           const results = []
@@ -204,6 +354,52 @@ wss.on('connection', (ws) => {
           }
           break
         }
+        case 'list_serial_ports': {
+          const ports = await listSerialPorts()
+          ws.send(JSON.stringify({ ok: true, event: 'serial_ports_listed', ports }))
+          break
+        }
+        case 'list_scale_protocols': {
+          const protocols = Object.entries(SCALE_PROTOCOLS).map(([id, config]) => ({ id, name: config.name, baudRate: config.baudRate }))
+          ws.send(JSON.stringify({ ok: true, event: 'scale_protocols_listed', protocols }))
+          break
+        }
+        case 'connect_scale': {
+          const result = await connectScale(payload)
+          ws.send(JSON.stringify({ ...result, event: 'scale_connected' }))
+          break
+        }
+        case 'disconnect_scale': {
+          await closeScale()
+          ws.send(JSON.stringify({ ok: true, event: 'scale_disconnected' }))
+          break
+        }
+        case 'read_weight': {
+          const result = await readScaleWeight(payload?.timeoutMs)
+          ws.send(JSON.stringify({ ...result, event: 'weight_read' }))
+          break
+        }
+        case 'tare_scale': {
+          const protocol = SCALE_PROTOCOLS[scaleConfig?.protocol] || SCALE_PROTOCOLS.generic
+          const ok = await writeScaleCommand(protocol.tare)
+          ws.send(JSON.stringify({ ok, event: 'scale_tared' }))
+          break
+        }
+        case 'zero_scale': {
+          const protocol = SCALE_PROTOCOLS[scaleConfig?.protocol] || SCALE_PROTOCOLS.generic
+          const ok = await writeScaleCommand(protocol.zero)
+          ws.send(JSON.stringify({ ok, event: 'scale_zeroed' }))
+          break
+        }
+        case 'get_status': {
+          ws.send(JSON.stringify({
+            ok: true,
+            event: 'status',
+            printer: { connected: Boolean(systemPrinterName || networkAddress), systemPrinterName, networkAddress },
+            scale: { connected: Boolean(scalePort?.isOpen), config: scaleConfig, reading: latestScaleReading },
+          }))
+          break
+        }
         default:
           ws.send(JSON.stringify({ ok: false, error: 'unknown_action' }))
       }
@@ -214,7 +410,7 @@ wss.on('connection', (ws) => {
   ws.send(JSON.stringify({ ok: true, event: 'connected' }))
 })
 
-console.log('Native Bridge listening on ws://localhost:8766')
+console.log(`Pop Connect listening on ws://${bridgeHost}:${bridgePort}`)
 
 const supabaseUrl = getEnv('SUPABASE_URL', 'BORACUME_SUPABASE_URL')
 const supabaseAnonKey = getEnv('SUPABASE_ANON_KEY', 'BORACUME_SUPABASE_ANON_KEY', 'VITE_SUPABASE_ANON_KEY')
@@ -304,6 +500,15 @@ async function reportPrinters() {
 try {
   openPrinter(relayTransport, relayAddress || undefined)
 } catch {
+}
+
+const configuredScalePort = getEnv('SCALE_PORT', 'POP_CONNECT_SCALE_PORT')
+if (configuredScalePort) {
+  connectScale({
+    portPath: configuredScalePort,
+    protocol: getEnv('SCALE_PROTOCOL', 'POP_CONNECT_SCALE_PROTOCOL') || 'generic',
+    baudRate: Number(getEnv('SCALE_BAUD_RATE', 'POP_CONNECT_SCALE_BAUD_RATE') || 0) || undefined,
+  }).catch(() => {})
 }
 
 if (supabaseUrl && supabaseAnonKey && printAgentToken) {

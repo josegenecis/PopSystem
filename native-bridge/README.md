@@ -1,29 +1,22 @@
-BoraCumê Native Bridge
+# Pop Connect
 
-O Native Bridge permite imprimir em impressoras térmicas (USB, Bluetooth clássico e rede TCP 9100) e ler balanças via Serial/USB, usando Node.js no computador local.
+O Pop Connect é o aplicativo auxiliar do PopSystem para integrar o navegador e o PDV com os dispositivos instalados no computador.
 
-Pré‑requisitos
-- Node.js 18+
-- Impressora suportando ESC/POS (ex.: Epson TM‑T20/T88, Bematech, Daruma, Elgin)
+## Dispositivos suportados
 
-Instalação
-1. Abra o terminal nesta pasta `native-bridge/`
-2. Instale as dependências:
-   npm install
-3. Inicie o servidor:
-   npm run start
+- Impressoras térmicas instaladas no Windows, macOS ou Linux, além de modelos ESC/POS em rede TCP 9100.
+- Balanças USB/seriais compatíveis com Toledo, Filizola, Urano, Magna, Elgin e protocolo genérico.
+- Leitores USB de código de barras configurados no modo teclado, com Enter após a leitura.
 
-Por padrão o servidor abre em `ws://localhost:8766`.
+## Uso pelo restaurante
 
-Conexão da impressora
-- Rede (TCP 9100): defina o IP da impressora ao conectar pelo app (ex.: 192.168.0.50)
-- USB: requer módulos do sistema instalados; plugue a impressora via USB
-- Bluetooth clássico: emparelhe a impressora no sistema operacional antes
+1. Instale o Pop Connect no computador do caixa.
+2. Abra o aplicativo, gere o código e informe-o em **Configurações → Dispositivos** no PopSystem.
+3. Escolha a impressora e faça uma impressão de teste.
+4. Se houver balança, selecione a porta e a marca e teste a leitura do peso.
 
-Testes
-- Na aplicação BoraCumê, abra Configurações → Dispositivos, escaneie e conecte na “Bridge Printer (Local)”, clique “Imprimir teste”.
+O aplicativo inicia junto com o computador e continua ativo ao fechar a janela.
 
-Observações
-- Em ambiente web, o app se conecta ao Native Bridge via WebSocket e envia os dados do cupom.
-- Se você usa uma impressora de rede, este é o caminho mais simples e confiável.
+## Compatibilidade técnica
 
+Para não interromper instalações existentes, o serviço local continua disponível em `ws://127.0.0.1:8766` e mantém as ações antigas de impressão. A comunicação em nuvem continua usando o pareamento e a fila de impressão já existentes.

@@ -28,15 +28,20 @@ if (process.platform !== 'win32') {
 const env = {
   ...process.env,
   PATH: `${shimDir}${path.delimiter}${process.env.PATH || ''}`,
-  PYTHON: process.platform === 'win32' ? 'python' : 'python3',
+  PYTHON: process.platform === 'darwin' ? '/usr/bin/python3' : (process.platform === 'win32' ? 'python' : 'python3'),
 }
+env.npm_config_python = env.PYTHON
 
 if (process.platform !== 'win32') {
   env.CXXFLAGS = env.CXXFLAGS ? `${env.CXXFLAGS} -std=c++20` : '-std=c++20'
   env.CFLAGS = env.CFLAGS ? `${env.CFLAGS} -std=c++20` : '-std=c++20'
   env.npm_config_cxxflags = env.CXXFLAGS
+} else {
+  env.CL = env.CL ? `${env.CL} /std:c++20` : '/std:c++20'
 }
 
 run('npm', ['install', '--no-audit', '--no-fund'], nativeBridgeDir, env)
+const electronVersion = require(path.join(root, 'node_modules', 'electron', 'package.json')).version
+run('npx', ['electron-rebuild', '-f', '-m', nativeBridgeDir, '-v', electronVersion, '-w', 'serialport,@thiagoelg/node-printer'], root, env)
 const extra = process.argv.includes('--dir') ? ['--dir'] : []
 run('npx', ['electron-builder', '--config', 'electron-builder.bridge.json', '--publish=never', ...extra], root, env)

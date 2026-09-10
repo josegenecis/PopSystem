@@ -40,7 +40,8 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
     ) ?? []
     const installer = executableAssets.find((asset) => {
       const name = asset.name?.toLowerCase() ?? ''
-      return name.startsWith('popconnect') && name.includes('setup')
+      const normalizedName = name.replace(/[^a-z0-9]/g, '')
+      return normalizedName.startsWith('popconnectsetup')
     })
 
     if (!installer?.browser_download_url) {

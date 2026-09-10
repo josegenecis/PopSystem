@@ -5,14 +5,15 @@
     "output": "dist-bridge"
   },
   "files": [
-    "electron/bridge-*.js",
+    "electron/bridge-*.cjs",
     "electron/bridge-ui.html",
     "native-bridge/**/*",
     "native-bridge/node_modules/**/*",
     "public/icon-512x512.png"
   ],
   "extraMetadata": {
-    "main": "electron/bridge-main.js"
+    "main": "electron/bridge-main.cjs",
+    "type": "commonjs"
   },
   "win": {
     "target": [

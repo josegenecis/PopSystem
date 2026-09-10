@@ -56,7 +56,7 @@ const createWindow = () => {
     height: 520,
     resizable: false,
     webPreferences: {
-      preload: path.join(__dirname, 'bridge-preload.js')
+      preload: path.join(__dirname, 'bridge-preload.cjs')
     }
   })
   win.loadFile(path.join(__dirname, 'bridge-ui.html'))

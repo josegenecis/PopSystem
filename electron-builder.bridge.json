@@ -3,6 +3,7 @@
   "productName": "Pop Connect",
   "artifactName": "Pop-Connect-Setup-${version}-${arch}.${ext}",
   "asar": true,
+  "afterPack": "scripts/after-pack-bridge.cjs",
   "directories": {
     "output": "dist-bridge"
   },

@@ -2,6 +2,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { getOrderItemDetailGroups } from '@/lib/orderDetails';
 import { toast } from 'sonner';
 import { getPublicWebBaseUrl } from '@/utils/publicUrl';
+import { bridgePrintReceipt } from '@/services/bridgePrinterClient';
+import { discoverBridgeWebsocketUrl } from '@/services/bridgeDiscovery';
+import { loadPrinterConfig } from '@/services/printerConfig';
 
 // ESC/POS Commands
 const ESC = '\x1B';
@@ -1559,6 +1562,70 @@ async function openDrawerElectron() {
   return { success: true };
 }
 
+function buildPopConnectReceiptPayload(order: any) {
+  return {
+    store: order.store || null,
+    order_number: order.order_number,
+    customer_name: order.customer_name || 'Balcão',
+    customer_phone: order.customer_phone || '',
+    customer_address: order.customer_address || '',
+    customer_address_display: resolveCustomerAddressLine(order),
+    delivery_zone_name: order.delivery_zone_name || '',
+    order_type: order.order_type || '',
+    date: order.created_at,
+    items: (Array.isArray(order.items) ? order.items : []).map((it: any) => ({
+      product_name: it.product_name || it.name,
+      name: it.product_name || it.name,
+      quantity: Number(it.quantity || 1),
+      price: Number(it.price || it.unit_price || 0),
+      subtotal: Number(it.subtotal || it.total || (Number(it.price || 0) * Number(it.quantity || 1)) || 0),
+      notes: it.notes || it.observations || '',
+      variations: [
+        ...(Array.isArray(it.receiptDescriptionLines) && it.receiptDescriptionLines.length > 0
+          ? [`Ingredientes: ${it.receiptDescriptionLines.join(', ')}`]
+          : []),
+        ...(Array.isArray(it.variations) ? it.variations : []),
+      ],
+    })),
+    total: Number(order.total || 0),
+    subtotal: Number(order.total || 0) - Number(order.delivery_fee || 0),
+    discount: Number(order.discount || 0),
+    delivery_fee: Number(order.delivery_fee || 0),
+    payment_method: formatPaymentMethodLabel(order.payment_method, order),
+    nfce: normalizeNfcePrintData(order),
+  };
+}
+
+async function printPopConnect(order: any, config: NormalizedPrintConfig) {
+  const printerConfig = loadPrinterConfig();
+  const configuredUrl = String(printerConfig.bridge.websocketUrl || 'ws://localhost:8766').trim();
+  const urls = configuredUrl ? [configuredUrl] : [];
+  const discoveredUrl = await discoverBridgeWebsocketUrl({ timeoutMs: 650 });
+  if (discoveredUrl && !urls.includes(discoveredUrl)) urls.push(discoveredUrl);
+  if (urls.length === 0) return { available: false, printed: false, printerConnected: false };
+
+  const payload = buildPopConnectReceiptPayload(order);
+  const copies = Math.max(1, Number(config.copies || 1) || 1);
+
+  for (const websocketUrl of urls) {
+    let lastResult = { available: false, printed: false, printerConnected: false };
+    for (let copy = 0; copy < copies; copy += 1) {
+      const result = await bridgePrintReceipt({
+        websocketUrl,
+        transport: printerConfig.bridge.transport,
+        address: printerConfig.bridge.address,
+        payload,
+      });
+      lastResult = result;
+      if (!result.printed) break;
+    }
+    if (lastResult.printed) return lastResult;
+    if (lastResult.available) return lastResult;
+  }
+
+  return { available: false, printed: false, printerConnected: false };
+}
+
 export const PrinterService = {
   // NF-e modelo 55 nunca passa pela rotina de cupom térmico. Este método
   // existe de forma explícita para impedir fallback acidental para NFC-e.
@@ -1754,7 +1821,20 @@ export const PrinterService = {
       return;
     }
 
-    // 2. Tentar impressão via USB (Silenciosa)
+    // 2. O Pop Connect usa a impressora salva no aplicativo e imprime sem
+    // abrir o diálogo nativo do navegador.
+    const popConnectResult = await printPopConnect(enrichedOrder, config);
+    if (popConnectResult.printed) return;
+    if (popConnectResult.available) {
+      toast.error(
+        popConnectResult.printerConnected
+          ? 'O Pop Connect não conseguiu imprimir. Confira se a impressora está ligada e disponível.'
+          : 'Selecione e salve uma impressora no Pop Connect antes de imprimir.'
+      );
+      return;
+    }
+
+    // 3. Tentar impressão via USB (Silenciosa)
     if (usbDevice && usbDevice.opened) {
       try {
         await this.printUsb(enrichedOrder, config);
@@ -1765,7 +1845,7 @@ export const PrinterService = {
       }
     }
 
-    // 3. Fallback: Janela de Impressão HTML (Navegador)
+    // 4. Fallback: Janela de Impressão HTML (Navegador)
     this.printHtml(enrichedOrder, config);
   },
 

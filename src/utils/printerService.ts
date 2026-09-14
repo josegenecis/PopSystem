@@ -2,7 +2,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { getOrderItemDetailGroups } from '@/lib/orderDetails';
 import { toast } from 'sonner';
 import { getPublicWebBaseUrl } from '@/utils/publicUrl';
-import { bridgeOpenCashDrawer, bridgePrintReceipt } from '@/services/bridgePrinterClient';
+import { bridgeOpenCashDrawer, bridgePrintReceipt, bridgePrintReport } from '@/services/bridgePrinterClient';
 import { discoverBridgeWebsocketUrl } from '@/services/bridgeDiscovery';
 import { loadPrinterConfig } from '@/services/printerConfig';
 
@@ -2013,6 +2013,37 @@ export const PrinterService = {
       `<script>window.onload=function(){window.print();}</script></body>`
     );
 
+    const bridgeConfig = loadPrinterConfig().bridge;
+    const configuredUrl = String(bridgeConfig.websocketUrl || 'ws://localhost:8766').trim();
+    const bridgeUrls = configuredUrl ? [configuredUrl] : [];
+    const discoveredUrl = await discoverBridgeWebsocketUrl({ timeoutMs: 650 });
+    if (discoveredUrl && !bridgeUrls.includes(discoveredUrl)) bridgeUrls.push(discoveredUrl);
+    let bridgeWasAvailable = false;
+    for (const websocketUrl of bridgeUrls) {
+      const result = await bridgePrintReport({
+        websocketUrl,
+        transport: bridgeConfig.transport,
+        address: bridgeConfig.address,
+        payload: {
+          title: report.title,
+          lines: safeLines,
+          paper_width: config.paper_width,
+          hide_store_header: Boolean(report.hideStoreHeader),
+          footer: report.footerText,
+          store: store ? {
+            ...store,
+            receipt_logo_url: config.receipt_logo_url,
+          } : null,
+          receipt: {
+            paper_width: config.paper_width,
+            logo_url: resolveReceiptLogoUrl(store, config),
+          },
+        },
+      });
+      bridgeWasAvailable = bridgeWasAvailable || result.available;
+      if (result.printed) return;
+    }
+
     if (isElectron) {
       let resp = await printRawReportElectron(buildRawCashReportText(safeLines));
       if (!resp.success) {
@@ -2024,13 +2055,9 @@ export const PrinterService = {
       return;
     }
 
-    const printWindow = window.open('', '_blank', 'width=420,height=600');
-    if (printWindow) {
-      printWindow.document.write(htmlContent);
-      printWindow.document.close();
-    } else {
-      toast.error('Pop-up bloqueado! Permita pop-ups para imprimir.');
-    }
+    toast.error(bridgeWasAvailable
+      ? 'O Pop Connect não conseguiu imprimir o relatório do caixa. Confira a impressora selecionada.'
+      : 'Abra o Pop Connect para imprimir o relatório do caixa.');
   },
 
   // Impressão USB (ESC/POS)

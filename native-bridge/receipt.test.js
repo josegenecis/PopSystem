@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildEscposReceipt, buildReceiptLogoHtml, normalizePrinterText } from './receipt.js'
+import { buildEscposReceipt, buildEscposReport, buildReceiptLogoHtml, normalizePrinterText } from './receipt.js'
 
 const readable = (value) => value.replace(/[\x00-\x1f]/g, '')
 
@@ -138,4 +138,19 @@ test('normalizes Portuguese accents for printers with incompatible code pages', 
   assert.match(readable(receipt), /Obrigado pela preferencia!/)
   assert.equal([...receipt].some((character) => character.charCodeAt(0) > 127), false)
   assert.ok(receipt.includes('Sistema PopSystem\n\x1D\x21\x00\n\n\n\n\n\n'))
+})
+
+test('builds a cash report for silent ESC/POS printing', () => {
+  const report = buildEscposReport({
+    title: 'Abertura de Caixa',
+    paper_width: '80mm',
+    store: { restaurant_name: 'Loja Teste' },
+    lines: ['Data/Hora: 14/09/2026 15:00', 'Valor inicial: R$ 100,00'],
+  })
+  const text = readable(report)
+
+  assert.match(text, /Loja Teste/)
+  assert.match(text, /Abertura de Caixa/)
+  assert.match(text, /Valor inicial: R\$ 100,00/)
+  assert.ok(report.endsWith('\n\n\n\n\n\n\x1d\x56\x00'))
 })

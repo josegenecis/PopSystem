@@ -3,7 +3,7 @@ import os from 'os'
 import net from 'net'
 import printerLib from '@thiagoelg/node-printer'
 import { SerialPort } from 'serialport'
-import { buildEscposReceipt, buildReceiptLogoHtml } from './receipt.js'
+import { buildEscposReceipt, buildEscposReport, buildReceiptLogoHtml } from './receipt.js'
 
 const bridgePort = Number(process.env.POP_CONNECT_PORT || process.env.BRIDGE_PORT || 8766)
 const bridgeHost = process.env.POP_CONNECT_HOST || process.env.BRIDGE_HOST || '127.0.0.1'
@@ -270,6 +270,18 @@ async function printReceipt(data) {
   return false
 }
 
+async function printReport(data) {
+  const escposData = buildEscposReport(data)
+  const logoHtml = data?.hide_store_header ? '' : buildReceiptLogoHtml(data)
+  const logoBytes = logoHtml ? await renderReceiptHtml(logoHtml, { fragment: true }) : null
+  const printData = logoBytes?.length
+    ? Buffer.concat([logoBytes, Buffer.from(escposData, 'binary')])
+    : escposData
+  if (systemPrinterName) return await printRawSystem(printData)
+  if (networkAddress) return await printRawNetwork(printData)
+  return false
+}
+
 async function openCashDrawer(payload = {}) {
   if (!systemPrinterName && !networkAddress) return false
 
@@ -356,6 +368,16 @@ wss.on('connection', (ws) => {
           restoreConfiguredPrinter()
           const ok = (systemPrinterName || networkAddress) ? await printReceipt(payload) : false
           ws.send(JSON.stringify({ ok, event: 'printed_receipt' }))
+          break
+        }
+        case 'print_report': {
+          restoreConfiguredPrinter()
+          const ok = (systemPrinterName || networkAddress) ? await printReport(payload) : false
+          ws.send(JSON.stringify({
+            ok,
+            event: 'printed_report',
+            error: ok ? undefined : 'printer_not_configured_or_unavailable',
+          }))
           break
         }
         case 'open_cash_drawer': {

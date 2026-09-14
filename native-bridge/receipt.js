@@ -98,6 +98,53 @@ export function buildReceiptLogoHtml(data = {}) {
   return `<!doctype html><html data-paper-width="${paperWidth}"><head><meta charset="utf-8"><style>*{box-sizing:border-box}html,body{width:${paperWidth};margin:0;padding:0;background:#fff}body{display:flex;justify-content:center;align-items:flex-start}img{display:block;max-width:34mm;max-height:20mm;object-fit:contain;margin:1mm auto 2mm}</style></head><body><img src="${safeLogoUrl}" alt="Logo"></body></html>`
 }
 
+export function buildEscposReport(data = {}) {
+  const width = data?.paper_width === '58mm' || data?.receipt?.paper_width === '58mm' ? 30 : 46
+  const separator = '-'.repeat(width)
+  const store = data.store || {}
+  const output = [`${ESC}\x40`, FONT_A, SIZE_NORMAL]
+  const appendReportLine = (value = '') => {
+    const raw = normalizePrinterText(value).replace(/\r/g, '').trimEnd()
+    if (!raw) {
+      output.push('\n')
+      return
+    }
+    if (/^[=\-_]+$/.test(raw.trim())) {
+      output.push(`${raw.trim()[0].repeat(width)}\n`)
+      return
+    }
+    const leadingSpaces = raw.length - raw.trimStart().length
+    const prefix = ' '.repeat(Math.min(leadingSpaces, Math.floor(width / 2)))
+    appendWrapped(output, raw.trimStart(), width, prefix)
+  }
+
+  if (!data.hide_store_header) {
+    output.push(`${ESC}\x61\x01${ESC}\x45\x01`)
+    appendWrapped(output, resolveStoreName(data), width)
+    output.push(`${ESC}\x45\x00`)
+    appendWrapped(output, store.address, width)
+    if (store.phone) appendWrapped(output, `Tel: ${store.phone}`, width)
+    if (store.cnpj) appendWrapped(output, `CNPJ: ${store.cnpj}`, width)
+    output.push(`${separator}\n`)
+  }
+
+  if (data.title) {
+    output.push(`${ESC}\x61\x01${ESC}\x45\x01`)
+    appendWrapped(output, data.title, width)
+    output.push(`${ESC}\x45\x00${separator}\n`)
+  }
+
+  output.push(`${ESC}\x61\x00`)
+  for (const line of Array.isArray(data.lines) ? data.lines : []) appendReportLine(line)
+
+  if (data.footer) {
+    output.push(`${separator}\n${ESC}\x61\x01`)
+    appendWrapped(output, data.footer, width)
+  }
+  output.push(`${ESC}\x61\x00\n\n\n\n\n\n${GS}\x56\x00`)
+  return output.join('')
+}
+
 export function buildEscposReceipt(data = {}) {
   const width = data?.receipt?.paper_width === '58mm' || data?.paper_width === '58mm' ? 32 : 48
   const separator = '-'.repeat(width)

@@ -224,6 +224,58 @@ export const bridgePrintReceipt = async (params: {
   }
 }
 
+export const bridgePrintReport = async (params: {
+  websocketUrl: string
+  transport: PrinterTransport
+  address?: string
+  payload: unknown
+  timeoutMs?: number
+}): Promise<BridgePrintResult> => {
+  const timeoutMs = Math.max(1000, params.timeoutMs ?? 10000)
+  const { ws, opened } = await openBridgeSocket(params.websocketUrl, timeoutMs)
+
+  if (!opened) {
+    try { ws.close() } catch { /* Socket did not finish opening. */ }
+    return { available: false, printerConnected: false, printed: false, error: 'bridge_unavailable' }
+  }
+
+  try {
+    const status = await sendAndWait(ws, 'get_status', {}, 'status', timeoutMs)
+    const printerConnected = Boolean(status?.printer?.connected)
+    if (!printerConnected) {
+      const address = String(params.address || '').trim()
+      if (!address) return { available: true, printerConnected: false, printed: false, error: 'printer_not_configured' }
+      const connected = await sendAndWait(
+        ws,
+        'connect_printer',
+        { transport: params.transport, address },
+        'printer_connected',
+        timeoutMs,
+      )
+      if (!connected?.ok) {
+        return { available: true, printerConnected: false, printed: false, error: connected?.error || 'printer_connection_failed' }
+      }
+    }
+
+    const printed = await sendAndWait(ws, 'print_report', params.payload, 'printed_report', timeoutMs)
+    return {
+      available: true,
+      printerConnected: true,
+      printed: !!printed?.ok,
+      error: printed?.ok ? undefined : printed?.error || 'print_failed',
+    }
+  } catch (error: unknown) {
+    return {
+      available: true,
+      printerConnected: false,
+      printed: false,
+      error: error instanceof Error ? error.message : 'bridge_command_failed',
+    }
+  } finally {
+    try { ws.close() } catch { /* Connection cleanup is best effort. */ }
+  }
+}
+
 export const bridgeOpenCashDrawer = async (params: {
   websocketUrl: string
   timeoutMs?: number

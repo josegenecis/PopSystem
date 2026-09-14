@@ -15,6 +15,36 @@ let scalePort = null
 let scaleConfig = null
 let scaleBuffer = ''
 let latestScaleReading = null
+let renderRequestSequence = 0
+const pendingRenderRequests = new Map()
+
+process.on('message', (message) => {
+  if (message?.type !== 'render_receipt_result' || !message?.requestId) return
+  const pending = pendingRenderRequests.get(message.requestId)
+  if (!pending) return
+  pendingRenderRequests.delete(message.requestId)
+  clearTimeout(pending.timeout)
+  pending.resolve(message?.ok && message?.data ? Buffer.from(message.data, 'base64') : null)
+})
+
+async function renderReceiptHtml(html) {
+  if (!process.send || !String(html || '').trim()) return null
+  const requestId = `receipt-${process.pid}-${Date.now()}-${++renderRequestSequence}`
+  return await new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      pendingRenderRequests.delete(requestId)
+      resolve(null)
+    }, 12000)
+    pendingRenderRequests.set(requestId, { resolve, timeout })
+    try {
+      process.send({ type: 'render_receipt', requestId, html: String(html) })
+    } catch {
+      clearTimeout(timeout)
+      pendingRenderRequests.delete(requestId)
+      resolve(null)
+    }
+  })
+}
 
 const SCALE_PROTOCOLS = {
   toledo: { name: 'Toledo Prix', baudRate: 9600, request: Buffer.from([0x05]), tare: Buffer.from('T'), zero: Buffer.from('Z') },
@@ -219,6 +249,14 @@ async function printTest() {
 }
 
 async function printReceipt(data) {
+  const rendered = await renderReceiptHtml(data?.rendered_html)
+  if (rendered?.length) {
+    if (systemPrinterName) return await printRawSystem(rendered)
+    if (networkAddress) return await printRawNetwork(rendered)
+  }
+
+  // Compatibilidade com versões antigas do aplicativo/PWA e contingência caso
+  // o renderizador visual não esteja disponível.
   const escposData = buildEscposReceipt(data)
   if (systemPrinterName) {
     return await printRawSystem(escposData)

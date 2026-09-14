@@ -1610,6 +1610,9 @@ function buildPopConnectReceiptPayload(order: any, config: NormalizedPrintConfig
   }, 0);
   return {
     store: order.store || null,
+    // O Pop Connect renderiza este HTML e envia o bitmap em RAW para manter
+    // exatamente o mesmo layout térmico usado pelo aplicativo desktop.
+    rendered_html: buildOrderHtml(order, config, order.store),
     receipt: {
       paper_width: config.paper_width,
       font_size: config.font_size,

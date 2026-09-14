@@ -34,6 +34,118 @@ let bridgeProc = null
 let tray = null
 let win = null
 
+function bitmapToEscPos(bitmap, width, height) {
+  const safeWidth = Math.max(1, Number(width) || 1)
+  const safeHeight = Math.max(1, Number(height) || 1)
+  const bytesPerLine = Math.ceil(safeWidth / 8)
+  const raster = Buffer.alloc(bytesPerLine * safeHeight)
+  const bandHeightLimit = 128
+  const bayer4x4 = [
+    [0, 8, 2, 10],
+    [12, 4, 14, 6],
+    [3, 11, 1, 9],
+    [15, 7, 13, 5],
+  ]
+
+  for (let y = 0; y < safeHeight; y += 1) {
+    for (let x = 0; x < safeWidth; x += 1) {
+      const offset = (y * safeWidth + x) * 4
+      const blue = bitmap[offset] ?? 255
+      const green = bitmap[offset + 1] ?? 255
+      const red = bitmap[offset + 2] ?? 255
+      const alpha = bitmap[offset + 3] ?? 255
+      const luminance = (red * 299 + green * 587 + blue * 114) / 1000
+      const threshold = 80 + bayer4x4[y % 4][x % 4] * 8
+      if (alpha > 24 && luminance < threshold) {
+        const byteIndex = y * bytesPerLine + Math.floor(x / 8)
+        raster[byteIndex] |= 0x80 >> (x % 8)
+      }
+    }
+  }
+
+  const bands = []
+  for (let startRow = 0; startRow < safeHeight; startRow += bandHeightLimit) {
+    const bandHeight = Math.min(bandHeightLimit, safeHeight - startRow)
+    const bandStart = startRow * bytesPerLine
+    const bandEnd = bandStart + bandHeight * bytesPerLine
+    bands.push(
+      Buffer.from([
+        0x1d, 0x76, 0x30, 0x00,
+        bytesPerLine & 0xff, (bytesPerLine >> 8) & 0xff,
+        bandHeight & 0xff, (bandHeight >> 8) & 0xff,
+      ]),
+      raster.subarray(bandStart, bandEnd),
+    )
+  }
+
+  return Buffer.concat([
+    Buffer.from([0x1b, 0x40, 0x1b, 0x61, 0x01]),
+    ...bands,
+    Buffer.from([0x1b, 0x61, 0x00, 0x0a, 0x0a, 0x0a, 0x1d, 0x56, 0x41, 0x00]),
+  ])
+}
+
+async function renderReceiptHtml(html) {
+  let renderWindow
+  try {
+    renderWindow = new BrowserWindow({
+      show: false,
+      width: 380,
+      height: 800,
+      backgroundColor: '#ffffff',
+      webPreferences: { nodeIntegration: false, contextIsolation: true },
+    })
+    await renderWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(String(html || ''))}`)
+    const metrics = await renderWindow.webContents.executeJavaScript(`
+      (async () => {
+        try {
+          if (document.fonts?.ready) await document.fonts.ready;
+          await Promise.all(Array.from(document.images || []).map((image) => {
+            if (image.complete) return Promise.resolve();
+            return new Promise((resolve) => {
+              image.addEventListener('load', resolve, { once: true });
+              image.addEventListener('error', resolve, { once: true });
+            });
+          }));
+        } catch {}
+        const root = document.documentElement;
+        const body = document.body;
+        const paperWidth = String(root.dataset.paperWidth || '80mm').toLowerCase();
+        const paperWidthMm = paperWidth === '58mm' ? 58 : 80;
+        const bodyRect = body.getBoundingClientRect();
+        const bodyTop = Number(bodyRect.top || 0);
+        const childBottom = Math.max(
+          Number(bodyRect.bottom || 0),
+          ...Array.from(body.children || []).map((element) => Number(element.getBoundingClientRect?.().bottom || 0))
+        );
+        return {
+          paperWidth,
+          width: Math.ceil((paperWidthMm / 25.4) * 96),
+          height: Math.ceil(Math.max(bodyRect.height, childBottom - bodyTop, 1))
+        };
+      })()
+    `, true)
+    const viewportWidth = Math.max(220, Math.min(1000, Number(metrics?.width) || 302))
+    const viewportHeight = Math.max(32, Math.min(12000, Number(metrics?.height) || 32))
+    renderWindow.setContentSize(viewportWidth, viewportHeight)
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    const image = await renderWindow.webContents.capturePage({
+      x: 0,
+      y: 0,
+      width: viewportWidth,
+      height: viewportHeight,
+    })
+    const targetWidth = metrics?.paperWidth === '58mm' ? 384 : 576
+    const resized = image.resize({ width: targetWidth, quality: 'best' })
+    const size = resized.getSize()
+    return bitmapToEscPos(resized.toBitmap(), size.width, size.height)
+  } finally {
+    try {
+      if (renderWindow && !renderWindow.isDestroyed()) renderWindow.close()
+    } catch {}
+  }
+}
+
 const startupLogPath = () => path.join(app.getPath('userData'), 'startup.log')
 const logStartupError = (context, error) => {
   const message = error instanceof Error ? `${error.message}\n${error.stack || ''}` : String(error)
@@ -81,8 +193,30 @@ const startBridge = (token) => {
   }
 
   const serverPath = nativeBridgePath('server.js')
-  const child = spawn(process.execPath, [serverPath], { env, stdio: 'ignore' })
+  const child = spawn(process.execPath, [serverPath], {
+    env,
+    stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+  })
   bridgeProc = child
+  child.on('message', async (message) => {
+    if (message?.type !== 'render_receipt' || !message?.requestId) return
+    try {
+      const bytes = await renderReceiptHtml(message.html)
+      if (child.connected) {
+        child.send({
+          type: 'render_receipt_result',
+          requestId: message.requestId,
+          ok: true,
+          data: bytes.toString('base64'),
+        })
+      }
+    } catch (error) {
+      logStartupError('receipt renderer', error)
+      if (child.connected) {
+        child.send({ type: 'render_receipt_result', requestId: message.requestId, ok: false })
+      }
+    }
+  })
   child.on('error', (error) => {
     logStartupError('native bridge process', error)
     if (bridgeProc === child) bridgeProc = null

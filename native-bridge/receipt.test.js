@@ -14,6 +14,7 @@ test('uses the restaurant identity and prints the complete operational order', (
     },
     receipt: { paper_width: '80mm', footer: 'Volte sempre!' },
     order_number: 'PED596698',
+    ticket_code: true,
     order_type: 'delivery',
     customer_name: 'Diana Karla Lima da Costa',
     customer_phone: '85986620784',
@@ -35,14 +36,44 @@ test('uses the restaurant identity and prints the complete operational order', (
   assert.match(receipt, /Sorveteria da Diana/)
   assert.doesNotMatch(receipt, /BORA CUME/i)
   assert.match(receipt, /Tipo: Entrega/)
-  assert.match(receipt, /Endereco: Rua do Cliente, 20/)
+  assert.match(receipt, /SENHA: 6698/)
+  assert.match(receipt, /CLIENTE:/)
+  assert.match(receipt, /End: Rua do Cliente, 20/)
+  assert.match(receipt, /ITENS:/)
+  assert.match(receipt, /R\$ 46,00/)
   assert.match(receipt, /Sabores: Chocolate, Morango/)
   assert.match(receipt, /Adicionais: Granulado/)
   assert.match(receipt, /Obs: Sem colher/)
-  assert.match(receipt, /Desconto: -R\$ 2,00/)
-  assert.match(receipt, /Taxa de entrega: R\$ 3,00/)
+  assert.match(receipt, /Desconto:\s+-R\$ 2,00/)
+  assert.match(receipt, /Taxa Entrega:\s+R\$ 3,00/)
   assert.match(receipt, /Pagamento: PIX/)
   assert.match(receipt, /Volte sempre!/)
+  assert.match(receipt, /Sistema PopSystem/)
+})
+
+test('uses the larger legacy-style hierarchy for the operational receipt', () => {
+  const receipt = buildEscposReceipt({
+    store: { restaurant_name: 'The place Acai' },
+    receipt: { paper_width: '80mm', font_size: 'normal' },
+    order_number: '4739',
+    ticket_code: true,
+    customer_name: 'Venda Balcao',
+    items: [{ name: 'ACAI PESO', quantity: 0.364, price: 49.99, subtotal: 18.2 }],
+    subtotal: 18.2,
+    total: 18.2,
+    payment_method: 'CREDITO',
+  })
+
+  assert.ok(receipt.includes(`${String.fromCharCode(0x1b)}M${String.fromCharCode(0)}`), 'selects ESC/POS font A')
+  assert.ok(receipt.includes(`${String.fromCharCode(0x1d)}!${String.fromCharCode(0x10)}`), 'uses taller body text')
+  assert.ok(receipt.includes(`${String.fromCharCode(0x1d)}!${String.fromCharCode(0x11)}`), 'uses double-size highlights')
+  const text = readable(receipt)
+  assert.match(text, /SENHA: 4739/)
+  assert.match(text, /CLIENTE:/)
+  assert.match(text, /ITENS:/)
+  assert.match(text, /R\$ 49,99 x 0.364/)
+  assert.match(text, /Subtotal:\s+R\$ 18,20/)
+  assert.match(text, /TOTAL:\s+R\$ 18,20/)
 })
 
 test('uses PopSystem instead of the removed legacy brand when identity is missing', () => {

@@ -1642,6 +1642,7 @@ function buildPopConnectReceiptPayload(order: any, config: NormalizedPrintConfig
       footer: normalizeEscPosText(config.print_footer),
     },
     order_number: normalizeEscPosText(order.order_number),
+    ticket_code: shouldPrintTicketCode(order),
     customer_name: normalizeEscPosText(order.customer_name || 'Balcao'),
     customer_phone: normalizeEscPosText(order.customer_phone || ''),
     customer_address: normalizeEscPosText(order.customer_address || ''),

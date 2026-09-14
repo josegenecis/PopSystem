@@ -223,3 +223,31 @@ export const bridgePrintReceipt = async (params: {
     try { ws.close() } catch { /* Connection cleanup is best effort. */ }
   }
 }
+
+export const bridgeOpenCashDrawer = async (params: {
+  websocketUrl: string
+  timeoutMs?: number
+}): Promise<boolean> => {
+  const timeoutMs = Math.max(1000, params.timeoutMs ?? 5000)
+  const { ws, opened } = await openBridgeSocket(params.websocketUrl, timeoutMs)
+
+  if (!opened) {
+    try { ws.close() } catch { /* Socket did not finish opening. */ }
+    return false
+  }
+
+  try {
+    const result = await sendAndWait(
+      ws,
+      'open_cash_drawer',
+      { connector: 'auto' },
+      'cash_drawer_opened',
+      timeoutMs,
+    )
+    return !!result?.ok
+  } catch {
+    return false
+  } finally {
+    try { ws.close() } catch { /* Connection cleanup is best effort. */ }
+  }
+}

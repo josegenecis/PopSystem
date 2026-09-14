@@ -2,7 +2,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { getOrderItemDetailGroups } from '@/lib/orderDetails';
 import { toast } from 'sonner';
 import { getPublicWebBaseUrl } from '@/utils/publicUrl';
-import { bridgePrintReceipt } from '@/services/bridgePrinterClient';
+import { bridgeOpenCashDrawer, bridgePrintReceipt } from '@/services/bridgePrinterClient';
 import { discoverBridgeWebsocketUrl } from '@/services/bridgeDiscovery';
 import { loadPrinterConfig } from '@/services/printerConfig';
 
@@ -1560,6 +1560,46 @@ async function openDrawerElectron() {
   const resp = await api.openCashDrawer(serialDeviceId);
   if (!resp?.success) return { success: false, error: resp?.error || resp?.message || 'Falha ao abrir gaveta' };
   return { success: true };
+}
+
+async function openDrawerWebUsb() {
+  if (!usbDevice?.opened) return { success: false, error: 'Impressora USB não conectada' };
+  try {
+    // Aciona as duas saídas ESC/POS usadas pelas gavetas (pinos 2 e 5).
+    const command = new Uint8Array([
+      0x1b, 0x70, 0x00, 0x19, 0xfa,
+      0x1b, 0x70, 0x01, 0x19, 0xfa,
+    ]);
+    await usbDevice.transferOut(1, command);
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error?.message || 'Falha ao acionar a gaveta pela impressora USB' };
+  }
+}
+
+async function openDrawerPopConnect() {
+  const configuredUrl = String(loadPrinterConfig().bridge.websocketUrl || 'ws://localhost:8766').trim();
+  if (configuredUrl && await bridgeOpenCashDrawer({ websocketUrl: configuredUrl })) {
+    return { success: true };
+  }
+
+  const discoveredUrl = await discoverBridgeWebsocketUrl({ timeoutMs: 650 });
+  if (discoveredUrl && discoveredUrl !== configuredUrl) {
+    const opened = await bridgeOpenCashDrawer({ websocketUrl: discoveredUrl });
+    if (opened) return { success: true };
+  }
+
+  return {
+    success: false,
+    error: 'Abra o Pop Connect e selecione a impressora conectada à gaveta',
+  };
+}
+
+async function openDrawerConnected() {
+  const api = typeof window !== 'undefined' ? (window as any)?.electronAPI : null;
+  if (api?.openCashDrawer) return openDrawerElectron();
+  if (usbDevice?.opened) return openDrawerWebUsb();
+  return openDrawerPopConnect();
 }
 
 function buildPopConnectReceiptPayload(order: any, config: NormalizedPrintConfig) {

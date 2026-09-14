@@ -230,12 +230,16 @@ async function printReceipt(data) {
 async function openCashDrawer(payload = {}) {
   if (!systemPrinterName && !networkAddress) return false
 
-  // ESC/POS: ESC p m t1 t2. A maioria das gavetas usa o conector 2 (m = 0).
-  // O conector 5 pode ser informado pelo cliente quando necessário.
-  const connector = Number(payload.connector) === 1 ? 1 : 0
+  // ESC/POS: ESC p m t1 t2. Há gavetas ligadas no pino 2 (m = 0) e outras
+  // no pino 5 (m = 1). No modo automático pulsamos as duas saídas para que
+  // o cliente não dependa de uma configuração oculta do modelo da impressora.
+  const requestedConnector = payload.connector
+  const connectors = requestedConnector === 'auto' || requestedConnector == null
+    ? [0, 1]
+    : [Number(requestedConnector) === 1 ? 1 : 0]
   const pulseOn = Math.min(255, Math.max(1, Number(payload.pulseOn) || 25))
   const pulseOff = Math.min(255, Math.max(1, Number(payload.pulseOff) || 250))
-  const command = Buffer.from([0x1b, 0x70, connector, pulseOn, pulseOff]).toString('binary')
+  const command = Buffer.from(connectors.flatMap((connector) => [0x1b, 0x70, connector, pulseOn, pulseOff])).toString('binary')
 
   if (systemPrinterName) return await printRawSystem(command)
   return await printRawNetwork(command)

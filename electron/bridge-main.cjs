@@ -227,7 +227,7 @@ const createTray = () => {
         const cfg = readConfig()
         if (!cfg?.printerName) return win && win.show()
         const connected = await bridgeCommand('connect_printer', { transport: 'system', address: cfg.printerName }, 'printer_connected')
-        if (connected?.ok) await bridgeCommand('open_cash_drawer', { connector: 0 }, 'cash_drawer_opened')
+        if (connected?.ok) await bridgeCommand('open_cash_drawer', { connector: 'auto' }, 'cash_drawer_opened')
       },
     },
     { type: 'separator' },
@@ -352,7 +352,7 @@ ipcMain.handle('bridge:openCashDrawer', async () => {
   if (!cfg?.printerName) return { ok: false, error: 'printer_not_selected' }
   const connected = await bridgeCommand('connect_printer', { transport: 'system', address: cfg.printerName }, 'printer_connected')
   if (!connected?.ok) return connected
-  return await bridgeCommand('open_cash_drawer', { connector: 0 }, 'cash_drawer_opened')
+  return await bridgeCommand('open_cash_drawer', { connector: 'auto' }, 'cash_drawer_opened')
 })
 
 ipcMain.handle('bridge:listSerialPorts', async () => {

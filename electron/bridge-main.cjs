@@ -34,7 +34,7 @@ let bridgeProc = null
 let tray = null
 let win = null
 
-function bitmapToEscPos(bitmap, width, height) {
+function bitmapToEscPos(bitmap, width, height, options = {}) {
   const safeWidth = Math.max(1, Number(width) || 1)
   const safeHeight = Math.max(1, Number(height) || 1)
   const bytesPerLine = Math.ceil(safeWidth / 8)
@@ -78,14 +78,17 @@ function bitmapToEscPos(bitmap, width, height) {
     )
   }
 
+  const finish = options.fragment
+    ? Buffer.from([0x1b, 0x61, 0x00, 0x0a])
+    : Buffer.from([0x1b, 0x61, 0x00, 0x0a, 0x0a, 0x0a, 0x1d, 0x56, 0x41, 0x00])
   return Buffer.concat([
     Buffer.from([0x1b, 0x40, 0x1b, 0x61, 0x01]),
     ...bands,
-    Buffer.from([0x1b, 0x61, 0x00, 0x0a, 0x0a, 0x0a, 0x1d, 0x56, 0x41, 0x00]),
+    finish,
   ])
 }
 
-async function renderReceiptHtml(html) {
+async function renderReceiptHtml(html, options = {}) {
   let renderWindow
   try {
     renderWindow = new BrowserWindow({
@@ -138,7 +141,7 @@ async function renderReceiptHtml(html) {
     const targetWidth = metrics?.paperWidth === '58mm' ? 384 : 576
     const resized = image.resize({ width: targetWidth, quality: 'best' })
     const size = resized.getSize()
-    return bitmapToEscPos(resized.toBitmap(), size.width, size.height)
+    return bitmapToEscPos(resized.toBitmap(), size.width, size.height, options)
   } finally {
     try {
       if (renderWindow && !renderWindow.isDestroyed()) renderWindow.close()
@@ -201,7 +204,7 @@ const startBridge = (token) => {
   child.on('message', async (message) => {
     if (message?.type !== 'render_receipt' || !message?.requestId) return
     try {
-      const bytes = await renderReceiptHtml(message.html)
+      const bytes = await renderReceiptHtml(message.html, { fragment: Boolean(message.fragment) })
       if (child.connected) {
         child.send({
           type: 'render_receipt_result',

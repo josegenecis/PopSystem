@@ -1640,6 +1640,7 @@ function buildPopConnectReceiptPayload(order: any, config: NormalizedPrintConfig
       font_size: config.font_size,
       header: normalizeEscPosText(config.print_header),
       footer: normalizeEscPosText(config.print_footer),
+      logo_url: normalizeEscPosText(resolveReceiptLogoUrl(order.store, config)),
     },
     order_number: normalizeEscPosText(order.order_number),
     ticket_code: shouldPrintTicketCode(order),

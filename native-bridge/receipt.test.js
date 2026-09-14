@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildEscposReceipt, normalizePrinterText } from './receipt.js'
+import { buildEscposReceipt, buildReceiptLogoHtml, normalizePrinterText } from './receipt.js'
 
 const readable = (value) => value.replace(/[\x00-\x1f]/g, '')
 
@@ -82,6 +82,16 @@ test('uses PopSystem instead of the removed legacy brand when identity is missin
   assert.doesNotMatch(receipt, /BORA CUME/i)
 })
 
+test('renders only a safe establishment logo before the text receipt', () => {
+  const html = buildReceiptLogoHtml({
+    store: { logo_url: 'https://cdn.example.com/logo.png?size=large&theme=light' },
+    receipt: { paper_width: '80mm' },
+  })
+  assert.match(html, /data-paper-width="80mm"/)
+  assert.match(html, /https:\/\/cdn\.example\.com\/logo\.png\?size=large&amp;theme=light/)
+  assert.equal(buildReceiptLogoHtml({ store: { logo_url: 'javascript:alert(1)' } }), '')
+})
+
 test('normalizes Portuguese accents for printers with incompatible code pages', () => {
   assert.equal(
     normalizePrinterText('Açaí da Júlia — Água sem gás, balcão e preferência'),
@@ -103,4 +113,5 @@ test('normalizes Portuguese accents for printers with incompatible code pages', 
   assert.match(readable(receipt), /Agua sem gas 500 ml/)
   assert.match(readable(receipt), /Obrigado pela preferencia!/)
   assert.equal([...receipt].some((character) => character.charCodeAt(0) > 127), false)
+  assert.ok(receipt.includes('Sistema PopSystem\n\x1D\x21\x00\n\n\n\n\n\n'))
 })

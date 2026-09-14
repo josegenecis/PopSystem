@@ -3,7 +3,7 @@ import os from 'os'
 import net from 'net'
 import printerLib from '@thiagoelg/node-printer'
 import { SerialPort } from 'serialport'
-import { buildEscposReceipt } from './receipt.js'
+import { buildEscposReceipt, buildReceiptLogoHtml } from './receipt.js'
 
 const bridgePort = Number(process.env.POP_CONNECT_PORT || process.env.BRIDGE_PORT || 8766)
 const bridgeHost = process.env.POP_CONNECT_HOST || process.env.BRIDGE_HOST || '127.0.0.1'
@@ -27,7 +27,7 @@ process.on('message', (message) => {
   pending.resolve(message?.ok && message?.data ? Buffer.from(message.data, 'base64') : null)
 })
 
-async function renderReceiptHtml(html) {
+async function renderReceiptHtml(html, options = {}) {
   if (!process.send || !String(html || '').trim()) return null
   const requestId = `receipt-${process.pid}-${Date.now()}-${++renderRequestSequence}`
   return await new Promise((resolve) => {
@@ -37,7 +37,7 @@ async function renderReceiptHtml(html) {
     }, 12000)
     pendingRenderRequests.set(requestId, { resolve, timeout })
     try {
-      process.send({ type: 'render_receipt', requestId, html: String(html) })
+      process.send({ type: 'render_receipt', requestId, html: String(html), fragment: Boolean(options.fragment) })
     } catch {
       clearTimeout(timeout)
       pendingRenderRequests.delete(requestId)
@@ -258,10 +258,15 @@ async function printReceipt(data) {
   // Compatibilidade com versões antigas do aplicativo/PWA e contingência caso
   // o renderizador visual não esteja disponível.
   const escposData = buildEscposReceipt(data)
+  const logoHtml = buildReceiptLogoHtml(data)
+  const logoBytes = logoHtml ? await renderReceiptHtml(logoHtml, { fragment: true }) : null
+  const printData = logoBytes?.length
+    ? Buffer.concat([logoBytes, Buffer.from(escposData, 'binary')])
+    : escposData
   if (systemPrinterName) {
-    return await printRawSystem(escposData)
+    return await printRawSystem(printData)
   }
-  if (networkAddress) return await printRawNetwork(escposData)
+  if (networkAddress) return await printRawNetwork(printData)
   return false
 }
 

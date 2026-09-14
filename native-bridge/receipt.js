@@ -81,6 +81,23 @@ const resolveStoreName = (data) => normalizeLine(
     || 'POPSYSTEM',
 )
 
+export function buildReceiptLogoHtml(data = {}) {
+  const logoUrl = String(
+    data?.receipt?.logo_url
+      || data?.store?.receipt_logo_url
+      || data?.store?.logo_url
+      || '',
+  ).trim()
+  if (!/^(https?:\/\/|data:image\/)/i.test(logoUrl)) return ''
+  const safeLogoUrl = logoUrl
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+  const paperWidth = data?.receipt?.paper_width === '58mm' || data?.paper_width === '58mm' ? '58mm' : '80mm'
+  return `<!doctype html><html data-paper-width="${paperWidth}"><head><meta charset="utf-8"><style>*{box-sizing:border-box}html,body{width:${paperWidth};margin:0;padding:0;background:#fff}body{display:flex;justify-content:center;align-items:flex-start}img{display:block;max-width:34mm;max-height:20mm;object-fit:contain;margin:1mm auto 2mm}</style></head><body><img src="${safeLogoUrl}" alt="Logo"></body></html>`
+}
+
 export function buildEscposReceipt(data = {}) {
   const width = data?.receipt?.paper_width === '58mm' || data?.paper_width === '58mm' ? 32 : 48
   const separator = '-'.repeat(width)
@@ -164,7 +181,9 @@ export function buildEscposReceipt(data = {}) {
   appendWrapped(output, data?.receipt?.footer || data.print_footer || 'Obrigado pela preferência!', width)
   output.push('Sistema PopSystem\n')
   output.push(SIZE_NORMAL)
-  output.push('\n\n\n')
+  // Seis linhas deixam o rodape livre da serrilha/guilhotina, inclusive nas
+  // termicas em que o corte acontece muito perto da ultima linha impressa.
+  output.push('\n\n\n\n\n\n')
   output.push(`${GS}\x56\x00`)
   return output.join('')
 }

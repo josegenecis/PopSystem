@@ -117,6 +117,7 @@ export type OperatorArea =
   | 'pdv'
   | 'tables'
   | 'orders'
+  | 'customers'
   | 'kds'
   | 'products'
   | 'stock'
@@ -192,6 +193,7 @@ const defaultOperatorRoutes: Array<{ area: OperatorArea; path: string }> = [
   { area: 'pdv', path: '/pdv' },
   { area: 'tables', path: '/mesas' },
   { area: 'orders', path: '/pedidos' },
+  { area: 'customers', path: '/clientes' },
   { area: 'kds', path: '/cozinha' },
   { area: 'products', path: '/produtos' },
   { area: 'stock', path: '/estoque' },
@@ -218,6 +220,7 @@ const pathOperatorAreas: Array<{ area: OperatorArea; paths: string[] }> = [
   { area: 'pdv', paths: ['/pdv'] },
   { area: 'tables', paths: ['/mesas'] },
   { area: 'orders', paths: ['/pedidos', '/orders'] },
+  { area: 'customers', paths: ['/clientes'] },
   { area: 'kds', paths: ['/cozinha'] },
   { area: 'products', paths: ['/produtos', '/cardapio'] },
   { area: 'stock', paths: ['/estoque', '/inteligencia/cmv', '/inteligencia/curva-abc'] },

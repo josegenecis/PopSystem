@@ -9,7 +9,7 @@ export const formatBRL = (value: number | string | null | undefined) => {
     currency: 'BRL',
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  }).format(Number(numericValue));
+  }).format(Number(numericValue)).replace(/\u00a0/g, ' ');
 };
 
 export const formatBRLFromCents = (value: number | string | null | undefined) => {

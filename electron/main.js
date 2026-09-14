@@ -859,7 +859,7 @@ ipcMain.handle('print-system', async (event, { deviceName, html, silent = true }
           deviceName: deviceName || undefined,
           printBackground: true,
           margins: { marginType: isA4 ? 'default' : 'none' },
-          pageSize: isA4 ? 'A4' : undefined,
+          pageSize: isA4 ? 'A4' : receiptPageSize,
           scaleFactor: 100
         },
         (success, failureReason) => resolve({ success, failureReason })

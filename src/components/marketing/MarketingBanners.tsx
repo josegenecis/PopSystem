@@ -6,12 +6,14 @@ export default function MarketingBanners({
   restaurantId,
   onSelectProductId,
   onQuickAddProduct,
-  linkedProducts
+  linkedProducts,
+  fallbackImage
 }: {
   restaurantId?: string;
   onSelectProductId?: (productId: string) => void;
   onQuickAddProduct?: (productId: string) => Promise<void> | void;
   linkedProducts?: Record<string, StoryLinkedProduct>;
+  fallbackImage?: string;
 }) {
   return (
     <div className="space-y-3">
@@ -21,6 +23,7 @@ export default function MarketingBanners({
         onSelectProductId={onSelectProductId}
         onQuickAddProduct={onQuickAddProduct}
         linkedProducts={linkedProducts}
+        fallbackImage={fallbackImage}
       />
       <PromotionalBanner
         restaurantId={restaurantId}

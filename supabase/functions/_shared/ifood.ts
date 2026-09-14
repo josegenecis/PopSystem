@@ -166,27 +166,57 @@ const buildOrderNumber = (detail: any) =>
     detail?.id ? `IFOOD-${String(detail.id).slice(0, 8).toUpperCase()}` : '',
   )
 
-const buildBenefitsSummary = (benefits: any[]) =>
+const sponsorshipLabel = (value: unknown) => {
+  const normalized = normalizeString(value).toUpperCase()
+  if (normalized === 'IFOOD') return 'iFood'
+  if (normalized === 'MERCHANT') return 'Loja'
+  if (normalized === 'EXTERNAL') return 'Parceiro externo'
+  if (normalized === 'CHAIN') return 'Rede'
+  return normalizeString(value)
+}
+
+export const buildIfoodBenefitsSummary = (benefits: any[]) =>
   (Array.isArray(benefits) ? benefits : [])
     .map((benefit) => {
       const sponsorshipValues = Array.isArray(benefit?.sponsorshipValues) ? benefit.sponsorshipValues : []
+      const sponsorships = sponsorshipValues
+        .map((item: any) => ({
+          name: normalizeString(item?.name),
+          label: sponsorshipLabel(item?.name),
+          value: Math.max(0, toNumber(item?.value)),
+          description: normalizeString(item?.description),
+        }))
+        .filter((item: any) => item.name || item.value > 0 || item.description)
+
       return {
         value: toNumber(benefit?.value),
+        target: normalizeString(benefit?.target),
+        target_id: normalizeString(benefit?.targetId),
         description: pickFirstString(
-          ...sponsorshipValues.map((item: any) => item?.description),
+          benefit?.campaign?.description,
+          benefit?.campaign?.name,
           benefit?.description,
           benefit?.name,
+          ...sponsorshipValues.map((item: any) => item?.description),
         ),
+        sponsorships,
+        responsibility: sponsorships
+          .filter((item: any) => item.value > 0)
+          .map((item: any) => item.label || item.name)
+          .filter(Boolean)
+          .join(' + '),
       }
     })
     .filter((benefit) => benefit.value > 0 || benefit.description)
 
-const parsePaymentSummary = (payments: any[]) => {
-  const methods = Array.isArray(payments?.[0]?.methods)
-    ? payments[0].methods
-    : Array.isArray(payments)
-      ? payments
-      : []
+export const parseIfoodPaymentSummary = (payments: any) => {
+  const methods = Array.isArray(payments?.methods)
+    ? payments.methods
+    : Array.isArray(payments?.[0]?.methods)
+      ? payments[0].methods
+      : Array.isArray(payments)
+        ? payments
+        : []
 
   const primary = methods[0] || {}
   const rawType = pickFirstString(primary?.method, primary?.type, primary?.name).toUpperCase()
@@ -201,10 +231,25 @@ const parsePaymentSummary = (payments: any[]) => {
     payment_method: paymentMethod,
     brand: pickFirstString(primary?.card?.brand, primary?.brand),
     method: rawType,
-    change_amount: Math.max(
+    prepaid: Math.max(0, toNumber(payments?.prepaid ?? payments?.[0]?.prepaid)),
+    pending: Math.max(0, toNumber(payments?.pending ?? payments?.[0]?.pending)),
+    change_amount: methods.reduce(
+      (largest: number, method: any) => Math.max(
+        largest,
+        toNumber(method?.cash?.changeFor ?? method?.changeFor ?? method?.changeAmount),
+      ),
       0,
-      toNumber(primary?.cash?.changeFor ?? primary?.changeFor ?? primary?.changeAmount),
     ),
+    methods: methods.map((method: any) => ({
+      value: Math.max(0, toNumber(method?.value)),
+      type: normalizeString(method?.type).toUpperCase(),
+      method: normalizeString(method?.method || method?.name).toUpperCase(),
+      brand: pickFirstString(method?.card?.brand, method?.brand),
+      wallet: normalizeString(method?.wallet?.name),
+      change_for: Math.max(0, toNumber(method?.cash?.changeFor ?? method?.changeFor ?? method?.changeAmount)),
+      authorization_code: normalizeString(method?.transaction?.authorizationCode),
+      acquirer_document: normalizeString(method?.transaction?.acquirerDocument),
+    })),
   }
 }
 
@@ -383,7 +428,7 @@ export const requestIfoodAccessToken = async (clientId: string, clientSecret: st
   return data
 }
 
-export const ensureIfoodAccessToken = async (supabase: any, settings: any) => {
+export const ensureIfoodAccessToken = async (supabase: any, settings: any, forceRefresh = false) => {
   if (!settings?.client_id || !settings?.client_secret) {
     throw new Error('Credenciais do iFood não configuradas')
   }
@@ -392,7 +437,7 @@ export const ensureIfoodAccessToken = async (supabase: any, settings: any) => {
   const expiresAt = parseDate(meta.access_token_expires_at)
   const fiveMinutesFromNow = Date.now() + 5 * 60 * 1000
 
-  if (settings.access_token && expiresAt && new Date(expiresAt).getTime() > fiveMinutesFromNow) {
+  if (!forceRefresh && settings.access_token && expiresAt && new Date(expiresAt).getTime() > fiveMinutesFromNow) {
     return settings
   }
 
@@ -444,36 +489,58 @@ export const ifoodApiRequest = async (
     expectedStatuses?: number[]
   },
 ) => {
-  const refreshed = await ensureIfoodAccessToken(supabase, settings)
-  const response = await fetch(joinUrl(baseUrl, path, query), {
-    method,
-    headers: {
-      Authorization: `Bearer ${refreshed.access_token}`,
-      'Content-Type': 'application/json',
-      ...headers,
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
+  let refreshed = await ensureIfoodAccessToken(supabase, settings)
 
-  if (expectedStatuses.includes(response.status)) {
-    if (response.status === 204) return { status: response.status, data: null, settings: refreshed }
-    const text = await response.text()
-    try {
-      return { status: response.status, data: text ? JSON.parse(text) : null, settings: refreshed }
-    } catch {
-      return { status: response.status, data: text || null, settings: refreshed }
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const response = await fetch(joinUrl(baseUrl, path, query), {
+      method,
+      headers: {
+        Authorization: `Bearer ${refreshed.access_token}`,
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+
+    if (expectedStatuses.includes(response.status)) {
+      if (response.status === 204) return { status: response.status, data: null, settings: refreshed }
+      const text = await response.text()
+      try {
+        return { status: response.status, data: text ? JSON.parse(text) : null, settings: refreshed }
+      } catch {
+        return { status: response.status, data: text || null, settings: refreshed }
+      }
     }
+
+    if (response.status === 401 && attempt === 0) {
+      await response.text()
+      refreshed = await ensureIfoodAccessToken(supabase, refreshed, true)
+      continue
+    }
+
+    const retryable = response.status === 429 || response.status >= 500
+    if (retryable && attempt < 2) {
+      const retryAfterSeconds = Number(response.headers.get('retry-after') || 0)
+      await response.text()
+      const waitMs = retryAfterSeconds > 0
+        ? Math.min(retryAfterSeconds * 1000, 5_000)
+        : 500 * (2 ** attempt)
+      await new Promise((resolve) => setTimeout(resolve, waitMs))
+      continue
+    }
+
+    const errorText = await response.text()
+    let errorData: any = {}
+    try {
+      errorData = errorText ? JSON.parse(errorText) : {}
+    } catch {
+      errorData = { raw: errorText }
+    }
+
+    throw new Error(errorData?.message || errorData?.error || errorData?.code || `iFood ${method} ${path} ${response.status}`)
   }
 
-  const errorText = await response.text()
-  let errorData: any = {}
-  try {
-    errorData = errorText ? JSON.parse(errorText) : {}
-  } catch {
-    errorData = { raw: errorText }
-  }
-
-  throw new Error(errorData?.message || errorData?.error || errorData?.code || `iFood ${method} ${path} ${response.status}`)
+  throw new Error(`iFood ${method} ${path}: tentativas esgotadas`)
 }
 
 export const listIfoodMerchants = async (supabase: any, settings: any) =>
@@ -559,6 +626,21 @@ export const requestIfoodOrderAction = async (
     method: 'POST',
     body,
     expectedStatuses: [200, 202, 204],
+  })
+
+export const respondIfoodDispute = async (
+  supabase: any,
+  settings: any,
+  disputeId: string,
+  response: 'accept' | 'reject' | 'alternative',
+  body?: any,
+) =>
+  await ifoodApiRequest(supabase, settings, {
+    baseUrl: ORDER_BASE_URL,
+    path: `/disputes/${disputeId}/${response}`,
+    method: 'POST',
+    body,
+    expectedStatuses: [200, 201, 202, 204],
   })
 
 export const buildIfoodWebhookUrl = () => {
@@ -668,10 +750,10 @@ export const persistIfoodEvent = async (
 }
 
 const buildLocalOrderPayload = (userId: string, detail: any, fallbackStatusCode?: string) => {
-  const payments = Array.isArray(detail?.payments) ? detail.payments : []
+  const payments = detail?.payments || {}
   const benefits = Array.isArray(detail?.benefits) ? detail.benefits : []
-  const paymentSummary = parsePaymentSummary(payments)
-  const benefitsSummary = buildBenefitsSummary(benefits)
+  const paymentSummary = parseIfoodPaymentSummary(payments)
+  const benefitsSummary = buildIfoodBenefitsSummary(benefits)
   const localStatus = mapRemoteStatusToLocal(fallbackStatusCode || '', undefined)
   const orderType = mapOrderType(detail?.orderType)
 
@@ -767,6 +849,74 @@ export const upsertLocalIfoodOrder = async (supabase: any, userId: string, detai
   return data
 }
 
+export const buildIfoodEventMetadata = (existing: any, event: any) => {
+  const currentVariations = existing?.variations && typeof existing.variations === 'object'
+    ? existing.variations
+    : {}
+  const currentIntegrationPayload = existing?.integration_payload && typeof existing.integration_payload === 'object'
+    ? existing.integration_payload
+    : {}
+  const variationsIfood = currentVariations?.ifood && typeof currentVariations.ifood === 'object'
+    ? currentVariations.ifood
+    : {}
+  const integrationIfood = currentIntegrationPayload?.ifood && typeof currentIntegrationPayload.ifood === 'object'
+    ? currentIntegrationPayload.ifood
+    : {}
+  const currentIfood = {
+    ...variationsIfood,
+    ...integrationIfood,
+  }
+  const fullCode = pickFirstString(event?.fullCode, event?.code).toUpperCase()
+  const eventMetadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata : {}
+  const disputeMetadata = eventMetadata?.dispute && typeof eventMetadata.dispute === 'object'
+    ? eventMetadata.dispute
+    : eventMetadata
+
+  let negotiation = currentIfood?.negotiation && typeof currentIfood.negotiation === 'object'
+    ? currentIfood.negotiation
+    : null
+
+  if (fullCode === 'HANDSHAKE_DISPUTE') {
+    negotiation = {
+      ...(negotiation || {}),
+      ...disputeMetadata,
+      disputeId: pickFirstString(disputeMetadata?.id, disputeMetadata?.disputeId),
+      status: 'OPEN',
+      eventId: pickFirstString(event?.id),
+      receivedAt: parseDate(event?.createdAt) || new Date().toISOString(),
+    }
+  } else if (fullCode === 'HANDSHAKE_SETTLEMENT') {
+    negotiation = {
+      ...(negotiation || {}),
+      disputeId: pickFirstString(disputeMetadata?.disputeId, negotiation?.disputeId),
+      status: pickFirstString(disputeMetadata?.status, 'SETTLED'),
+      settlement: disputeMetadata,
+      settledAt: parseDate(event?.createdAt) || new Date().toISOString(),
+    }
+  }
+
+  const nextIfood = {
+    ...currentIfood,
+    ...(negotiation ? { negotiation } : {}),
+  }
+  const nextVariations = {
+    ...currentVariations,
+    externalStatus: fullCode,
+    ifood: nextIfood,
+  }
+  const nextIntegrationPayload = {
+    ...currentIntegrationPayload,
+    provider: 'ifood',
+    externalStatus: fullCode,
+    ifood: {
+      ...(currentIntegrationPayload?.ifood || {}),
+      ...nextIfood,
+    },
+  }
+
+  return { fullCode, nextVariations, nextIntegrationPayload }
+}
+
 const applyEventStatusToLocalOrder = async (supabase: any, userId: string, event: any) => {
   const externalOrderId = pickFirstString(event?.orderId)
   const { data: existing, error: existingError } = await supabase
@@ -779,10 +929,8 @@ const applyEventStatusToLocalOrder = async (supabase: any, userId: string, event
   if (existingError) throw existingError
   if (!existing) return null
 
-  const currentVariations = existing?.variations && typeof existing.variations === 'object'
-    ? existing.variations
-    : {}
-  const mapped = mapRemoteStatusToLocal(pickFirstString(event?.fullCode), existing.status)
+  const mapped = mapRemoteStatusToLocal(pickFirstString(event?.fullCode, event?.code).toUpperCase(), existing.status)
+  const { nextVariations, nextIntegrationPayload } = buildIfoodEventMetadata(existing, event)
 
   const { data, error } = await supabase
     .from('orders')
@@ -790,10 +938,8 @@ const applyEventStatusToLocalOrder = async (supabase: any, userId: string, event
       status: mapped.status || existing.status,
       acceptance_status: mapped.acceptance_status || existing.acceptance_status,
       updated_at: new Date().toISOString(),
-      variations: {
-        ...currentVariations,
-        externalStatus: pickFirstString(event?.fullCode, event?.code),
-      },
+      variations: nextVariations,
+      integration_payload: nextIntegrationPayload,
     })
     .eq('id', existing.id)
     .select('*')
@@ -813,7 +959,7 @@ export const processIfoodEvent = async (supabase: any, settings: any, eventRow: 
 
   try {
     let localOrder = null
-    const shouldFetchDetails = ['PLACED', 'CONFIRMED', 'READY_TO_PICKUP', 'DISPATCHED', 'CANCELLED', 'CONCLUDED'].includes(fullCode)
+    const shouldFetchDetails = ['PLACED', 'CONFIRMED', 'READY_TO_PICKUP', 'DISPATCHED', 'CANCELLED', 'CONCLUDED', 'ORDER_PATCHED'].includes(fullCode)
 
     if (orderId && shouldFetchDetails) {
       const { data: detail } = await getIfoodOrderDetails(supabase, settings, orderId)

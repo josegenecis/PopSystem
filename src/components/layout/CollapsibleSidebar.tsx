@@ -37,6 +37,7 @@ import {
   Network,
   Download,
   Megaphone,
+  BookOpenCheck,
   X
 } from 'lucide-react';
 
@@ -129,6 +130,14 @@ const CollapsibleSidebar = () => {
       ]
     },
     {
+      id: 'contabilidade',
+      icon: BookOpenCheck,
+      label: 'Contabilidade',
+      items: [
+        { to: '/contador', label: 'Central do Contador', feature: 'finance', area: 'finance' },
+      ]
+    },
+    {
       id: 'estoque',
       icon: Package,
       label: 'Estoque',
@@ -142,6 +151,7 @@ const CollapsibleSidebar = () => {
       label: 'Gerencial',
       items: [
         { to: '/dashboard', label: 'Visão geral', feature: 'dashboard', area: 'dashboard' },
+        { to: '/clientes', label: 'Cadastro de clientes', area: 'customers' },
         { to: '/relatorios', label: 'Relatórios de vendas', feature: 'reports', area: 'reports' },
         { to: '/inteligencia/cmv', label: 'CMV e rentabilidade', feature: 'cmv', area: 'stock' },
         { to: '/equipe', label: 'Central da Equipe', feature: 'team', area: 'team' },

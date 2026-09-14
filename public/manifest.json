@@ -2,7 +2,7 @@
   "name": "PopSystem - Sistema de Delivery e PDV",
   "short_name": "PopSystem",
   "description": "Plataforma completa de delivery e PDV para restaurantes com gestão de pedidos, cozinha, entregas e financeiro",
-  "start_url": "/",
+  "start_url": "/pwa?source=installed",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#1a1a1a",

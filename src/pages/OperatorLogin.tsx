@@ -70,7 +70,7 @@ const OperatorLogin = () => {
     // A sessão da conta aparece antes de a loja ativa ser resolvida. Consultar
     // nesse intervalo usa o ID da conta (em vez do ID da loja) e produz uma
     // lista vazia falsa para usuários multiloja.
-    if (!user?.id || !activeStoreId || activeStoreId !== user.id) return;
+    if (!user?.id || !activeStoreId) return;
 
     let active = true;
     const loadOperators = async () => {
@@ -131,8 +131,9 @@ const OperatorLogin = () => {
   }
 
   const finishLogin = (operator: WaiterOperator) => {
-    if (!user?.id) return;
-    const payload = buildSessionPayload(operator, user.id);
+    const restaurantUserId = activeStoreId || user?.id;
+    if (!restaurantUserId) return;
+    const payload = buildSessionPayload(operator, restaurantUserId);
     setLocalOperatorSession(payload);
     window.dispatchEvent(new Event('operator-session-changed'));
 

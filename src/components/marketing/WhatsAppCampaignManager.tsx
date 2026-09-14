@@ -150,6 +150,27 @@ export default function WhatsAppCampaignManager() {
   const maxDelaySeconds = useMemo(() => Math.max(minDelayMinutes, maxDelayMinutes) * 60, [maxDelayMinutes, minDelayMinutes]);
 
   useEffect(() => {
+    const rawHandoff = sessionStorage.getItem('popsystem_whatsapp_campaign_handoff');
+    if (!rawHandoff) return;
+    sessionStorage.removeItem('popsystem_whatsapp_campaign_handoff');
+    try {
+      const handoff = JSON.parse(rawHandoff) as { message?: string; phones?: string[]; createdAt?: number };
+      if (!handoff.createdAt || Date.now() - handoff.createdAt > 10 * 60 * 1000 || !handoff.phones?.length) return;
+      setAudienceType('manual');
+      setManualPhones(handoff.phones.join('\n'));
+      setMessage(String(handoff.message || defaultMessage));
+      setTitle(`Atendimento - ${new Date().toLocaleDateString('pt-BR')}`);
+      setImmediateManualTest(handoff.phones.length <= 5);
+      toast({
+        title: 'Campanha preparada para revisão',
+        description: 'Confira destinatários, limites e aviso de risco antes de confirmar o envio.',
+      });
+    } catch (error) {
+      console.error('Handoff de campanha inválido:', error);
+    }
+  }, [toast]);
+
+  useEffect(() => {
     if (!user?.id) return;
     fetchCampaigns();
     fetchProducts();

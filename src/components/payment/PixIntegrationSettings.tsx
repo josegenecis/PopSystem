@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useToast } from '@/hooks/use-toast'
-import { supabase } from '@/integrations/supabase/client'
+import { SUPABASE_URL, supabase } from '@/integrations/supabase/client'
 import { useAuth } from '@/contexts/AuthContext'
 
 interface PixSettingsRow {
@@ -27,7 +27,7 @@ const PixIntegrationSettings: React.FC = () => {
   const [mpWaiterEnabled, setMpWaiterEnabled] = useState(false)
 
   const endpoint = useMemo(() => {
-    const baseUrl = ((import.meta as any).env?.VITE_SUPABASE_URL || 'https://auth.popsystem.com.br').replace(/\/+$/, '')
+    const baseUrl = SUPABASE_URL.replace(/\/+$/, '')
     return `${baseUrl}/functions/v1/pix-webhook`
   }, [])
 

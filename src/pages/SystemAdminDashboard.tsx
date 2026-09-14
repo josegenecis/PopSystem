@@ -39,10 +39,11 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
+import ClientOperationsWorkspace from '@/components/admin/ClientOperationsWorkspace';
 
 type MetricMap = Record<string, number>;
 
-interface AdminClientRow {
+export interface AdminClientRow {
   id: string;
   restaurantName: string;
   email?: string;
@@ -69,6 +70,23 @@ interface AdminClientRow {
   nfceAuthorizedMonth?: number;
   nfceRejectedMonth?: number;
   reasons?: string[];
+  accessStatus?: string;
+  financialStatus?: string;
+  billingAmount?: number;
+  paymentMethod?: string | null;
+  overdueDays?: number;
+  healthScore?: number;
+  healthClassification?: string;
+  healthReasons?: string[];
+  ownerName?: string | null;
+  ownerEmail?: string | null;
+  commercialStage?: string;
+  onboardingStage?: string;
+  priority?: string;
+  nextAction?: string | null;
+  nextActionAt?: string | null;
+  openTickets?: number;
+  latestInvoice?: { status?: string; amount?: number; due_date?: string; invoice_url?: string } | null;
 }
 
 interface ChartPoint {
@@ -93,7 +111,9 @@ interface AdminDashboardData {
     inactiveByAccess: AdminClientRow[];
     neverAccessed: AdminClientRow[];
     paidThisMonth: AdminClientRow[];
+    portfolio: AdminClientRow[];
   };
+  members?: Array<{ id: string; email: string; display_name: string; role: string }>;
   analytics?: {
     cityHeatmap: ChartPoint[];
     stateHeatmap: ChartPoint[];
@@ -422,6 +442,15 @@ export default function SystemAdminDashboard() {
     if (token) loadDashboard(token);
   }, [loadDashboard, token]);
 
+  useEffect(() => {
+    if (token) return;
+    void supabase.functions.invoke('admin-dashboard', { body: { action: 'session_login' } }).then(({ data: response }) => {
+      if (!response?.ok || !response?.token) return;
+      sessionStorage.setItem(SESSION_KEY, response.token);
+      setToken(response.token);
+    });
+  }, [token]);
+
   const handleLogin = async (event: React.FormEvent) => {
     event.preventDefault();
     setLoginLoading(true);
@@ -669,7 +698,18 @@ export default function SystemAdminDashboard() {
           <MetricCard title="MRR previsto" value={formatCurrency(metrics.mrr)} detail="Receita recorrente estimada da PopSystem" icon={DollarSign} tone="emerald" />
           <MetricCard title="Pedidos no mês" value={formatNumber(metrics.ordersMonth)} detail={`${formatNumber(metrics.noOrders7Days)} restaurantes sem pedido há 7 dias`} icon={TrendingUp} tone="slate" />
           <MetricCard title="WhatsApp conectado" value={formatNumber(metrics.whatsappConfigured)} detail={`${formatNumber(metrics.nfceRejectedMonth)} NFC-e rejeitadas no mês`} icon={MessageCircle} tone="blue" />
+          <MetricCard title="Valor vencido" value={formatCurrency(metrics.overdueAmount)} detail="Cobranças vencidas identificadas nos webhooks" icon={DollarSign} tone="red" />
+          <MetricCard title="Chamados abertos" value={formatNumber(metrics.openTickets)} detail={`${formatNumber(metrics.openTasks)} tarefas internas pendentes`} icon={MessageCircle} tone="orange" />
+          <MetricCard title="Clientes críticos" value={formatNumber(metrics.criticalClients)} detail="Acesso, cobrança, uso e suporte combinados" icon={AlertTriangle} tone="red" />
         </section>
+
+        <ClientOperationsWorkspace
+          token={token}
+          clients={lists?.portfolio || []}
+          members={data?.members || []}
+          onRefresh={() => loadDashboard(token)}
+          onRelease24h={releaseClientFor24Hours}
+        />
 
         <section className="grid gap-6 xl:grid-cols-3">
           <ChartCard title="Cadastros recentes" description="Novos restaurantes entrando na base nos últimos 14 dias.">

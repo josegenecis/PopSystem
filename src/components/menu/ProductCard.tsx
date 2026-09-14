@@ -54,10 +54,10 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onProductClick, isAd
         onPointerEnter={prefetchOnIntent}
         onPointerDown={prefetchOnIntent}
         onTouchStart={prefetchOnIntent}
-        className="bg-white rounded-2xl shadow-sm border border-boracume-light overflow-hidden cursor-pointer hover:shadow-md transition-shadow group"
+        className="group cursor-pointer overflow-hidden rounded-2xl border border-white bg-white shadow-[0_12px_30px_-25px_rgba(15,23,42,.7)] transition-all hover:-translate-y-0.5 hover:shadow-lg sm:rounded-[22px]"
       >
         <div className="relative">
-          <div className="aspect-square w-full bg-boracume-light/50">
+          <div className="aspect-[4/3] w-full bg-[#f8f5ef]">
             {imageUrl && !imageError ? (
               isVideoAsset(imageUrl) ? (
                 <AutoplayVideo
@@ -87,25 +87,25 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onProductClick, isAd
             size="icon"
             onClick={handleAddClick}
             disabled={!!isAdding}
-            className="absolute bottom-3 right-3 h-11 w-11 rounded-full text-white hover:scale-110 transition-all shadow-lg border-2 border-white"
+            className="absolute bottom-2 right-2 h-8 w-8 rounded-full border-2 border-white text-white shadow-lg transition-all hover:scale-110 sm:bottom-3 sm:right-3 sm:h-11 sm:w-11"
             style={{ backgroundColor: 'var(--menu-primary, #85C441)' }}
           >
-            {isAdding ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-5 w-5" />}
+            {isAdding ? <Loader2 className="h-3.5 w-3.5 animate-spin sm:h-4 sm:w-4" /> : <Plus className="h-4 w-4 sm:h-5 sm:w-5" />}
           </Button>
         </div>
 
-        <div className="p-4">
-          <h3 className="font-semibold text-sm leading-snug line-clamp-2 transition-colors" style={{ color: 'var(--menu-secondary, #063D2E)' }}>
+        <div className="p-2.5 sm:p-4">
+          <h3 className="line-clamp-2 text-[11px] font-bold leading-snug transition-colors sm:text-sm sm:font-semibold" style={{ color: 'var(--menu-secondary, #063D2E)' }}>
             {product.name}
           </h3>
 
           {product.description && (
-            <p className="text-xs mt-1.5 line-clamp-2" style={{ color: 'var(--menu-secondary, #063D2E)', opacity: 0.7 }}>
+            <p className="mt-1 line-clamp-2 text-[9px] sm:mt-1.5 sm:text-xs" style={{ color: 'var(--menu-secondary, #063D2E)', opacity: 0.7 }}>
               {product.description}
             </p>
           )}
 
-          <div className="mt-3">
+          <div className="mt-2 sm:mt-3">
             {product.name.toLowerCase().includes('fartureia') ? (
               <span className="font-bold" style={{ color: 'var(--menu-accent, #EF6C20)' }}>Pré-venda</span>
             ) : product.original_price && product.discount_percentage ? (
@@ -119,7 +119,7 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onProductClick, isAd
                 </div>
               </div>
             ) : (
-              <span className="text-base font-black tracking-normal" style={{ color: 'var(--menu-price, #EF6C20)' }}>{formatBRL(product.price)}</span>
+              <span className="text-sm font-black tracking-normal sm:text-base" style={{ color: 'var(--menu-price, #EF6C20)' }}>{formatBRL(product.price)}</span>
             )}
           </div>
         </div>

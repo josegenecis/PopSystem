@@ -648,7 +648,7 @@ function safeJsonParse<T>(value: string | null): T | null {
 }
 
 function formatCurrencyValue(value: number) {
-  return `R$ ${Number(value || 0).toFixed(2)}`;
+  return formatBRL(value);
 }
 
 function padRight(value: string, width: number) {
@@ -1850,10 +1850,7 @@ export const PrinterService = {
   },
 
   async openCashDrawer() {
-    const api = typeof window !== 'undefined' ? (window as any)?.electronAPI : null;
-    const isElectron = Boolean(api?.openCashDrawer);
-    if (!isElectron) return { success: false, error: 'Abertura automática da gaveta disponível apenas no app desktop' };
-    return openDrawerElectron();
+    return openDrawerConnected();
   },
 
   async printOrderOnAccept(order: any) {

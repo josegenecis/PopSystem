@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Flame, Plus, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { normalizeImageUrlForDisplay } from '@/utils/normalizeImageUrl';
+import { formatBRL } from '@/lib/currency';
 
 interface TotemProduct {
   id: string;
@@ -77,11 +78,11 @@ export default function TotemProductCard({ product, onSelect }: TotemProductCard
         <div>
           {product.original_price && product.original_price > product.price ? (
             <div className="text-xs font-semibold text-stone-400 line-through">
-              R$ {Number(product.original_price).toFixed(2)}
+              {formatBRL(product.original_price)}
             </div>
           ) : null}
           <div className="text-lg font-extrabold" style={{ color: 'var(--totem-primary)' }}>
-            R$ {Number(product.price || 0).toFixed(2)}
+            {formatBRL(product.price)}
           </div>
         </div>
         <Button

@@ -173,6 +173,17 @@ const Orders = () => {
   const enrichOrder = (order: any): Order => {
     const variations = order?.variations && typeof order.variations === 'object' ? order.variations : {};
     const ifood = variations?.ifood && typeof variations.ifood === 'object' ? variations.ifood : {};
+    const storedIntegration = order?.integration_payload && typeof order.integration_payload === 'object'
+      ? order.integration_payload
+      : {};
+    const integrationPayload = {
+      ...storedIntegration,
+      ...variations,
+      ifood: {
+        ...(storedIntegration?.ifood || {}),
+        ...ifood,
+      },
+    };
 
     return {
       ...order,
@@ -182,7 +193,7 @@ const Orders = () => {
       customer_document: order?.customer_document || variations?.customerDocument || null,
       pickup_code: order?.pickup_code || variations?.pickupCode || ifood?.pickupCode || null,
       scheduled_at: order?.scheduled_at || variations?.scheduledAt || ifood?.deliveryDateTimeStart || null,
-      integration_payload: order?.integration_payload || variations || null,
+      integration_payload: integrationPayload,
     } as Order;
   };
 

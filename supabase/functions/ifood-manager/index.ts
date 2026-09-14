@@ -14,6 +14,7 @@ import {
   persistIfoodEvent,
   processIfoodEvent,
   requestIfoodAccessToken,
+  respondIfoodDispute,
   sanitizeIfoodSettings,
   upsertIfoodSettings,
   acknowledgeIfoodEvents,
@@ -276,9 +277,44 @@ Deno.serve(async (req: Request) => {
       }
 
       const response = await getIfoodCancellationReasons(supabase, settings, orderId)
+      const rawReasons = Array.isArray(response?.data)
+        ? response.data
+        : Array.isArray(response?.data?.reasons)
+          ? response.data.reasons
+          : []
       return okJson({
         ok: true,
-        reasons: Array.isArray(response?.data) ? response.data : [],
+        reasons: rawReasons.map((reason: any) => ({
+          ...reason,
+          cancelCodeId: String(reason?.cancelCodeId || reason?.code || reason?.id || ''),
+          code: String(reason?.code || reason?.cancelCodeId || reason?.id || ''),
+          description: String(reason?.description || reason?.name || ''),
+        })).filter((reason: any) => reason.cancelCodeId),
+      })
+    }
+
+    if (action === 'respond_dispute') {
+      const disputeId = String(body?.disputeId || '').trim()
+      const disputeResponse = String(body?.response || '').trim() as 'accept' | 'reject' | 'alternative'
+      if (!disputeId || !['accept', 'reject', 'alternative'].includes(disputeResponse)) {
+        return okJson({ ok: false, error: 'invalid_dispute_response' }, 400)
+      }
+
+      const responseBody = body?.responseBody && typeof body.responseBody === 'object'
+        ? body.responseBody
+        : undefined
+      const response = await respondIfoodDispute(
+        supabase,
+        settings,
+        disputeId,
+        disputeResponse,
+        responseBody,
+      )
+
+      return okJson({
+        ok: true,
+        status: response?.status || 202,
+        settlement: response?.data || null,
       })
     }
 

@@ -204,6 +204,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [accountUser, activeStore]);
   const canManageStores = Boolean(stores.some((store) => store.can_manage));
 
+  useEffect(() => {
+    if (!user?.id || typeof window === 'undefined') return;
+    const bucket = Math.floor(Date.now() / (30 * 60 * 1000));
+    const key = `popsystem_activity_${user.id}_${bucket}`;
+    if (sessionStorage.getItem(key)) return;
+    sessionStorage.setItem(key, '1');
+    void (supabase as any).rpc('record_client_activity', {
+      p_event_type: 'app_active',
+      p_source: window.matchMedia('(display-mode: standalone)').matches ? 'pwa' : 'web',
+      p_metadata: { path: window.location.pathname, store_user_id: user.id },
+    }).then(({ error }: { error?: { message?: string } | null }) => {
+      if (error) sessionStorage.removeItem(key);
+    });
+  }, [user?.id]);
+
   // Refs para controle de debounce e cleanup
   const initTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const authSubscriptionRef = useRef<any>(null);

@@ -8,6 +8,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { ArrowDown, ArrowUp, RefreshCw } from 'lucide-react';
+import { formatBRL } from '@/lib/currency';
 
 type ProductRow = {
   id: string;
@@ -162,7 +163,7 @@ export default function HighlightsManager() {
                     <TableCell className="font-medium">
                       <div className="flex flex-col">
                         <span>{p.name}</span>
-                        <span className="text-xs text-muted-foreground">R$ {Number(p.price || 0).toFixed(2)}</span>
+                        <span className="text-xs text-muted-foreground">{formatBRL(p.price)}</span>
                       </div>
                     </TableCell>
                     <TableCell className="text-center">
@@ -200,4 +201,3 @@ export default function HighlightsManager() {
     </div>
   );
 }
-

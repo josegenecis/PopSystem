@@ -963,6 +963,33 @@ Deno.serve(async (req) => {
         {
             type: "function",
             function: {
+                name: "create_price_schedule",
+                description: "Cria uma tabela de preço, promoção ou happy hour sem sobrescrever o preço-base. Pode aplicar a um produto, uma categoria ou ao catálogo inteiro, limitar por canal, datas, dias e horários. Só ativa imediatamente quando activate_now for true.",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        name: { type: "string", description: "Nome da tabela ou campanha" },
+                        kind: { type: "string", enum: ["promotion", "happy_hour", "channel", "custom"] },
+                        target_type: { type: "string", enum: ["product", "category", "all"] },
+                        target_name: { type: "string", description: "Nome exato ou aproximado do produto/categoria; omita quando target_type=all" },
+                        channel: { type: "string", enum: ["all", "pdv", "delivery", "totem", "whatsapp", "dine_in", "pickup"] },
+                        adjustment_type: { type: "string", enum: ["fixed_price", "percentage_discount", "percentage_markup", "amount_discount"] },
+                        adjustment_value: { type: "number" },
+                        starts_at: { type: "string", description: "Data/hora inicial ISO, opcional" },
+                        ends_at: { type: "string", description: "Data/hora final ISO, opcional" },
+                        start_time: { type: "string", description: "Horário diário HH:MM, opcional" },
+                        end_time: { type: "string", description: "Horário diário HH:MM, opcional" },
+                        days_of_week: { type: "array", items: { type: "integer", minimum: 0, maximum: 6 }, description: "0 domingo até 6 sábado" },
+                        priority: { type: "integer", minimum: 0, maximum: 10000 },
+                        activate_now: { type: "boolean", description: "Ative somente se o usuário pedir explicitamente para aplicar/ativar" }
+                    },
+                    required: ["name", "kind", "target_type", "adjustment_type", "adjustment_value"]
+                }
+            }
+        },
+        {
+            type: "function",
+            function: {
                 name: "update_product",
                 description: "Edita um produto existente do cardápio com segurança. Use para alterar nome, preço, descrição, categoria, disponibilidade, destaque ou exibição no PDV/delivery. Não cria produto novo.",
                 parameters: {
@@ -1246,6 +1273,7 @@ Deno.serve(async (req) => {
         'create_product_full',
         'create_products',
         'update_product_price',
+        'create_price_schedule',
         'update_product',
         'disable_product',
         'create_variation_group',
@@ -1299,6 +1327,7 @@ Regras:
 - Se houver uma foto anexada e o pedido for cadastrar/criar um produto, extraia dela nome, marca, descrição e outros dados visíveis úteis. Use create_product ou create_product_full: a própria ferramenta salvará a foto original no produto. Não gere outra imagem e não trate a foto como simples análise.
 - Se o pedido envolver cadastro completo de produto com tamanhos/variações e/ou complementos, use create_product_full.
 - Se o pedido envolver mudança em produto já existente (preço, nome, categoria, descrição, disponibilidade, PDV/delivery ou destaque), use update_product. Nunca crie um novo produto quando o usuário pediu para alterar um produto existente.
+- Para promoções, happy hour, preço por canal ou preço agendado, use create_price_schedule. Preserve o preço-base e só ative imediatamente quando o usuário pedir explicitamente para aplicar agora.
 - Se o usuário pedir "vá nos produtos/categoria X e liste todos", use list_products com category: "X". Não transforme categoria em busca por nome.
 - Para alterações de cardápio, preserve todos os campos que o usuário não pediu para mudar. Se houver mais de um produto possível, pare e peça uma confirmação objetiva com as opções encontradas.
 - Se o usuário pedir para listar ou alterar preços de grupos de complementos já existentes, use list_variation_group e adjust_variation_group_prices.
@@ -1325,6 +1354,7 @@ Regras:
 - Se houver uma foto anexada e o pedido for cadastrar/criar um produto, extraia dela nome, marca, descrição e outros dados visíveis úteis. Use create_product ou create_product_full: a própria ferramenta salvará a foto original no produto. Não gere outra imagem e não trate a foto como simples análise.
 - Se o usuário pedir para criar produto com tamanhos/variações de preço e/ou complementos/adicionais, use create_product_full.
 - Se o usuário pedir para alterar produto existente (ex.: mudar preço, nome, categoria, descrição, disponibilidade, destacar, aparecer ou ocultar do delivery/PDV), use update_product e não crie duplicado.
+- Para promoções, happy hour, preço por canal ou preço agendado, use create_price_schedule. Não altere products.price: ele é o preço-base. Só use activate_now=true quando o usuário pedir explicitamente para ativar/aplicar agora.
 - Se o usuário pedir para listar produtos de uma categoria, use list_products com category. Ex.: "vai nos produtos Extras e lista todos" significa category="Extras", não search="Extras".
 - Ao editar cardápio, seja conservador: localize o produto correto, preserve os campos não mencionados e peça confirmação se o nome estiver ambíguo.
 - Se o usuário pedir para listar ou reajustar preços de um grupo de complementos/adicionais já existente, use list_variation_group e adjust_variation_group_prices.
@@ -1704,6 +1734,76 @@ Regras:
                         
                         if (error) throw error;
                         result = { success: true, updated: products[0].name, new_price: next };
+                        }
+                    }
+                }
+
+                else if (fnName === "create_price_schedule") {
+                    const scheduleName = String(args.name || '').trim();
+                    const targetType = String(args.target_type || 'product');
+                    const targetName = String(args.target_name || '').trim();
+                    const adjustmentValue = parseMoney(args.adjustment_value);
+                    if (!scheduleName || !['product', 'category', 'all'].includes(targetType) || !Number.isFinite(adjustmentValue) || adjustmentValue < 0 || (args.adjustment_type === 'percentage_discount' && adjustmentValue > 100)) {
+                        result = { success: false, error: 'Informe nome, alvo e regra de preço válidos.' };
+                    } else {
+                        let targets: Array<{ product_id: string | null; category_id: string | null }> = [];
+                        if (targetType === 'all') {
+                            targets = [{ product_id: null, category_id: null }];
+                        } else if (targetType === 'product') {
+                            const { data: foundProducts, error: productsError } = await supabase
+                                .from('products').select('id,name').eq('user_id', userId).ilike('name', `%${targetName}%`).limit(8);
+                            if (productsError) throw productsError;
+                            const exact = (foundProducts || []).filter((item: any) => normalizeText(item.name) === normalizeText(targetName));
+                            const candidates = exact.length ? exact : (foundProducts || []);
+                            if (candidates.length !== 1) {
+                                result = { success: false, needs_confirmation: true, error: candidates.length ? 'Encontrei mais de um produto parecido.' : 'Produto não encontrado.', options: candidates };
+                            } else targets = [{ product_id: candidates[0].id, category_id: null }];
+                        } else {
+                            const { data: foundCategories, error: categoriesError } = await supabase
+                                .from('product_categories').select('id,name').eq('user_id', userId).ilike('name', `%${targetName}%`).limit(8);
+                            if (categoriesError) throw categoriesError;
+                            const exact = (foundCategories || []).filter((item: any) => normalizeText(item.name) === normalizeText(targetName));
+                            const candidates = exact.length ? exact : (foundCategories || []);
+                            if (candidates.length !== 1) {
+                                result = { success: false, needs_confirmation: true, error: candidates.length ? 'Encontrei mais de uma categoria parecida.' : 'Categoria não encontrada.', options: candidates };
+                            } else targets = [{ product_id: null, category_id: candidates[0].id }];
+                        }
+
+                        if (!result && targets.length === 0) {
+                            result = { success: false, error: 'Nenhum produto foi encontrado para aplicar a tabela.' };
+                        }
+                        if (!result) {
+                            const { data: table, error: tableError } = await supabase.from('price_tables').insert({
+                                user_id: userId,
+                                name: scheduleName,
+                                kind: args.kind || 'custom',
+                                channel: args.channel || 'all',
+                                priority: Number.isFinite(Number(args.priority)) ? Number(args.priority) : 100,
+                                active: Boolean(args.activate_now),
+                                starts_at: args.starts_at || null,
+                                ends_at: args.ends_at || null,
+                                start_time: args.start_time || null,
+                                end_time: args.end_time || null,
+                                days_of_week: Array.isArray(args.days_of_week) && args.days_of_week.length ? args.days_of_week : null,
+                                created_by: userId
+                            }).select('*').single();
+                            if (tableError) throw tableError;
+                            const { error: itemsError } = await supabase.from('price_table_items').insert(targets.map((target) => ({
+                                user_id: userId,
+                                price_table_id: table.id,
+                                ...target,
+                                adjustment_type: args.adjustment_type,
+                                adjustment_value: adjustmentValue
+                            })));
+                            if (itemsError) {
+                                await supabase.from('price_tables').delete().eq('id', table.id).eq('user_id', userId);
+                                throw itemsError;
+                            }
+                            await supabase.from('price_change_audit').insert({
+                                user_id: userId, actor_id: userId, entity_type: 'price_table', entity_id: table.id,
+                                action: table.active ? 'created_and_activated_by_agent' : 'created_by_agent', after_data: table
+                            });
+                            result = { success: true, table, rules_created: targets.length, active: table.active, base_prices_preserved: true };
                         }
                     }
                 }

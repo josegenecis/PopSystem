@@ -1,9 +1,7 @@
-const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://auth.popsystem.com.br';
-const SUPABASE_ANON_KEY =
-  process.env.SUPABASE_ANON_KEY ||
-  process.env.SUPABASE_PUBLISHABLE_KEY ||
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdjZnlyY3B1Z21kdWNwdGt0amljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc5MzAwNjUsImV4cCI6MjA2MzUwNjA2NX0.G9l2LEE6DtnSGChmGx5sTCQhC7yVHZJtq6rTTsti2aE';
-const PUBLIC_BASE_URL = (process.env.PUBLIC_WEB_BASE_URL || process.env.VITE_PUBLIC_WEB_BASE_URL || 'https://popsystem.com.br').replace(/\/+$/, '');
+import { getPublicWebBaseUrl, getSupabaseRuntimeEnv } from '../_lib/runtime-env.js';
+
+const { url: SUPABASE_URL, anonKey: SUPABASE_ANON_KEY } = getSupabaseRuntimeEnv();
+const PUBLIC_BASE_URL = getPublicWebBaseUrl();
 
 function escHtml(v: string) {
   return String(v || '')

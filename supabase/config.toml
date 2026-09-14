@@ -54,6 +54,11 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/whatsapp-campaigns/index.ts"
 
+[functions.whatsapp-copilot]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/whatsapp-copilot/index.ts"
+
 [functions.business-automations]
 enabled = true
 verify_jwt = false
@@ -200,3 +205,8 @@ entrypoint = "./functions/asaas-webhook/index.ts"
 enabled = true
 verify_jwt = true
 entrypoint = "./functions/store-network/index.ts"
+
+[functions.meta-conversions]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/meta-conversions/index.ts"

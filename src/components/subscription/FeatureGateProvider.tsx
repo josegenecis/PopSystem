@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useAuth } from '@/contexts/AuthContext';
+import { formatBRL } from '@/lib/currency';
 import {
   FeatureKey,
   getFeatureDefinition,

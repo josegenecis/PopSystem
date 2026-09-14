@@ -1,4 +1,4 @@
-import { processRestaurantBotMessage } from '../whatsapp-bot.ts';
+import { persistRestaurantInboundMessage, processRestaurantBotMessage } from '../whatsapp-bot.ts';
 import {
   getConversationHistory,
   getOrCreatePopAiCustomer,
@@ -114,6 +114,7 @@ export async function processPopAiMessage(params: PopAiIncomingMessage): Promise
   // Reserve the inbound message before any AI work. WhatsApp providers can
   // deliver the same event simultaneously to more than one webhook/worker;
   // the database function serializes those deliveries per message.
+  let inboundClaimed = false;
   try {
     const { data: claimed, error: claimError } = await supabase.rpc('claim_whatsapp_inbound_message', {
       p_restaurant_id: restaurantId,
@@ -130,9 +131,32 @@ export async function processPopAiMessage(params: PopAiIncomingMessage): Promise
       console.warn('[PopAI] inbound claim unavailable:', claimError.message || claimError);
     } else if (claimed !== true) {
       return { ok: true, skipped: true, reason: 'duplicate_inbound_message' };
+    } else {
+      inboundClaimed = true;
     }
   } catch (claimError) {
     console.warn('[PopAI] inbound claim failed:', claimError);
+  }
+
+  let processingParams = params;
+  if (inboundClaimed) {
+    try {
+      const persistedInbound = await persistRestaurantInboundMessage({
+        supabase,
+        restaurantId,
+      customerPhone: phone,
+      text,
+      media: params.media,
+      providerMessageId: params.providerMessageId,
+      messageType: params.messageType,
+      quotedProviderMessageId: params.quotedProviderMessageId,
+      });
+      if (persistedInbound) processingParams = { ...params, persistedInbound };
+    } catch (persistError) {
+      // Keep the legacy path as a rolling-deploy fallback. It will persist the
+      // message inside processRestaurantBotMessage instead.
+      console.warn('[PopAI] fast inbox persistence failed:', persistError);
+    }
   }
 
   let aiConversation: any = null;
@@ -234,7 +258,7 @@ export async function processPopAiMessage(params: PopAiIncomingMessage): Promise
 
     await sendEvolutionTyping(params.instanceName, phone, 1200).catch(() => null);
 
-    const result = await processRestaurantBotMessage(params);
+    const result = await processRestaurantBotMessage(processingParams);
     const status = classifyAiStatusFromResult(result as PopAiEngineResult);
 
     if (result?.replyText) {
@@ -275,7 +299,7 @@ export async function processPopAiMessage(params: PopAiIncomingMessage): Promise
       errorText.includes('ai_logs') ||
       errorText.includes('schema cache')
     ) {
-      const fallback = await processRestaurantBotMessage(params);
+      const fallback = await processRestaurantBotMessage(processingParams);
       return {
         ...(fallback as PopAiEngineResult),
         status: 'ai_active',

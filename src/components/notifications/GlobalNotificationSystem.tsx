@@ -88,6 +88,7 @@ const GlobalNotificationSystem: React.FC = () => {
   const soundEnabledRef = useRef(soundEnabled);
   const pendingOrdersRef = useRef<PendingOrder[]>([]);
   const pollingRef = useRef<number | null>(null);
+  const realtimeHealthyRef = useRef(false);
   const visibleOrders = pendingOrders.filter((order) => !dismissedOrders.has(order.id));
   const audibleOrders = visibleOrders.filter(isRecentEnoughToRing);
   const isAutoAcceptEnabled = () => Boolean(user?.id && localStorage.getItem(getAutoAcceptKey(user.id)) === 'true');
@@ -326,6 +327,7 @@ const GlobalNotificationSystem: React.FC = () => {
         },
       )
       .subscribe((status) => {
+        realtimeHealthyRef.current = status === 'SUBSCRIBED';
         if (status === 'SUBSCRIBED') {
           loadPendingOrders();
         }
@@ -352,6 +354,7 @@ const GlobalNotificationSystem: React.FC = () => {
     if (pollingRef.current) window.clearInterval(pollingRef.current);
     pollingRef.current = window.setInterval(async () => {
       if (!user?.id) return;
+      if (document.visibilityState !== 'visible' || realtimeHealthyRef.current) return;
       const next = await loadPendingOrders();
       const prev = pendingOrdersRef.current || [];
       const prevIds = new Set(prev.map((order) => order.id));
@@ -361,6 +364,7 @@ const GlobalNotificationSystem: React.FC = () => {
     }, 8000);
 
     return () => {
+      realtimeHealthyRef.current = false;
       supabase.removeChannel(channel);
       soundNotifications.stopAllSounds();
       document.removeEventListener('visibilitychange', handleVisibility);

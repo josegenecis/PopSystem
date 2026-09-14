@@ -10,6 +10,7 @@ import { PrinterService } from '@/utils/printerService';
 import { notifyOrderCreatedById } from '@/utils/orderNotifications';
 import { useToast } from '@/hooks/use-toast';
 import { isConfiguredCartItem } from '@/hooks/useSimpleCart';
+import { formatBRL } from '@/lib/currency';
 
 export interface TotemCartItem {
   product: { id: string; name: string; price: number; image_url?: string };
@@ -294,7 +295,7 @@ export default function TotemCheckoutModal(props: TotemCheckoutModalProps) {
                       {configuredItem ? (
                         <div className="mt-2 text-xs font-semibold text-orange-700">Cada unidade deve ser personalizada separadamente.</div>
                       ) : null}
-                      <div className="text-sm font-bold text-boracume-orange mt-2">R$ {Number(item.totalPrice || 0).toFixed(2)}</div>
+                      <div className="text-sm font-bold text-boracume-orange mt-2">{formatBRL(item.totalPrice)}</div>
                     </div>
 
                     <div className="flex flex-col items-end gap-2">
@@ -322,7 +323,7 @@ export default function TotemCheckoutModal(props: TotemCheckoutModalProps) {
             <Card className="rounded-lg bg-slate-50 p-5">
               <div className="flex items-center justify-between">
                 <div className="text-base font-bold text-muted-foreground">Total</div>
-                <div className="text-4xl font-black">R$ {Number(total || 0).toFixed(2)}</div>
+                <div className="text-4xl font-black">{formatBRL(total)}</div>
               </div>
               <div className="mt-2 text-sm font-semibold text-muted-foreground">Senha do pedido: {senha}</div>
             </Card>

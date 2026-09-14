@@ -29,6 +29,7 @@ import { Badge } from '@/components/ui/badge';
 import { getStoreOpenInfo } from '@/lib/storeHours';
 import { normalizeImageUrlForDisplay } from '@/utils/normalizeImageUrl';
 import { notifyOrderCreatedById } from '@/utils/orderNotifications';
+import { createMarketingContent, trackMarketingEvent } from '@/lib/marketingTracking';
 // import ClubDiscountBanner from '@/components/menu/ClubDiscountBanner';
 
 interface Product {
@@ -85,6 +86,7 @@ const MenuDigital = () => {
   const [activeCategory, setActiveCategory] = useState<string>('');
   const [openingProductId, setOpeningProductId] = useState<string | null>(null);
   const warnedStockRef = useRef<Set<string>>(new Set());
+  const lastTrackedSearchRef = useRef('');
   const navigate = useNavigate();
 
   // Buscar dados do menu
@@ -287,11 +289,58 @@ const MenuDigital = () => {
     }
   }, [categories, activeCategory]);
 
+  useEffect(() => {
+    const search = searchQuery.trim();
+    if (!finalUserId || search.length < 2) return;
+
+    const timer = window.setTimeout(() => {
+      if (lastTrackedSearchRef.current === search) return;
+      lastTrackedSearchRef.current = search;
+      trackMarketingEvent('Search', {
+        search_string: search,
+        content_category: 'cardapio',
+      }, { scope: finalUserId });
+    }, 700);
+
+    return () => window.clearTimeout(timer);
+  }, [finalUserId, searchQuery]);
+
+  const getProductCategoryName = (product: Product) =>
+    categories.find((category) => String(category.id) === String(product.category_id))?.name || 'Cardápio';
+
+  const trackProductView = (product: Product) => {
+    const price = Number(product.price || 0);
+    trackMarketingEvent('ViewContent', {
+      content_ids: [String(product.id)],
+      content_name: product.name,
+      content_category: getProductCategoryName(product),
+      content_type: 'product',
+      contents: [createMarketingContent(product.id, 1, price)],
+      value: price,
+      currency: 'BRL',
+    }, { scope: finalUserId });
+  };
+
+  const trackProductAdded = (product: Product, quantity = 1, variationPrice = 0) => {
+    const unitPrice = Number(product.price || 0) + Number(variationPrice || 0);
+    trackMarketingEvent('AddToCart', {
+      content_ids: [String(product.id)],
+      content_name: product.name,
+      content_category: getProductCategoryName(product),
+      content_type: 'product',
+      contents: [createMarketingContent(product.id, quantity, unitPrice)],
+      value: unitPrice * Math.max(1, Number(quantity) || 1),
+      currency: 'BRL',
+    }, { scope: finalUserId });
+  };
+
   const handleProductClick = async (product: Product) => {
     if (!finalUserId) {
       console.error('❌ MenuDigital - userId não encontrado');
       return;
     }
+
+    trackProductView(product);
 
     const cachedVariationsReady = isSimpleVariationReady(product.id);
     const cachedVariations = cachedVariationsReady ? getCachedSimpleVariations(product.id) : [];
@@ -330,6 +379,7 @@ const MenuDigital = () => {
 
       if (variationPresence === 'none') {
         addToCart(product, 1, [], '', 0);
+        trackProductAdded(product);
         toast({
           title: 'Adicionado ao carrinho',
           description: `${product.name} foi adicionado com sucesso.`,
@@ -361,6 +411,7 @@ const MenuDigital = () => {
         }
 
         addToCart(product, 1, [], '', 0);
+        trackProductAdded(product);
         toast({
           title: 'Adicionado ao carrinho',
           description: `${product.name} foi adicionado com sucesso.`,
@@ -376,6 +427,7 @@ const MenuDigital = () => {
       }
 
       addToCart(product, 1, [], '', 0);
+      trackProductAdded(product);
       toast({
         title: 'Adicionado ao carrinho',
         description: `${product.name} foi adicionado com sucesso.`,
@@ -410,6 +462,7 @@ const MenuDigital = () => {
       }
     }
     addToCart(product, quantity, variations, notes, variationPrice, optionDetails);
+    trackProductAdded(product, quantity, variationPrice);
     setShowVariationModal(false);
     setSelectedProduct(null);
   };
@@ -455,6 +508,7 @@ const MenuDigital = () => {
 
     if (getSimpleVariationPresence(product.id) === 'none') {
       addToCart(product, 1, [], '', 0);
+      trackProductAdded(product);
       toast({
         title: 'Adicionado ao carrinho',
         description: `${product.name} foi adicionado com sucesso.`,
@@ -475,6 +529,7 @@ const MenuDigital = () => {
     }
 
     addToCart(product, 1, [], '', 0);
+    trackProductAdded(product);
     toast({
       title: 'Adicionado ao carrinho',
       description: `${product.name} foi adicionado com sucesso.`,
@@ -627,6 +682,32 @@ const MenuDigital = () => {
       }
 
       if (data?.id) {
+        type PurchasedItem = {
+          product_id?: string | number | null;
+          quantity?: string | number | null;
+          price?: string | number | null;
+          total?: string | number | null;
+        };
+        const purchasedItems = ((Array.isArray(orderData.items) ? orderData.items : []) as PurchasedItem[])
+          .filter((item) => item.product_id !== null && item.product_id !== undefined && String(item.product_id).trim() !== '');
+        const purchaseValue = Number(orderData.total ?? orderData.total_amount ?? 0);
+        trackMarketingEvent('Purchase', {
+          order_id: String(data.id),
+          content_type: 'product',
+          content_ids: purchasedItems.map((item) => String(item.product_id)),
+          contents: purchasedItems.map((item) => createMarketingContent(
+            item.product_id,
+            item.quantity,
+            Number(item.price ?? (Number(item.total || 0) / Math.max(1, Number(item.quantity) || 1))),
+          )),
+          num_items: purchasedItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0),
+          value: purchaseValue,
+          currency: 'BRL',
+        }, {
+          scope: finalUserId,
+          eventId: `popsystem-purchase-${data.id}`,
+        });
+
         void (async () => {
           try {
             await notifyOrderCreatedById(data.id);

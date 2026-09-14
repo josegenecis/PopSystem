@@ -59,14 +59,45 @@ const PERMISSIONS_GROUPS = [
   },
   {
     id: 'management',
-    label: 'Gestão',
+    label: 'Pedidos e produção',
     icon: <Box className="w-4 h-4" />,
     permissions: [
       { id: 'orders_manage', label: 'Gerenciar Pedidos', description: 'Ver e editar pedidos ativos' },
+      { id: 'customers_manage', label: 'Gerenciar Clientes', description: 'Cadastrar e atualizar clientes do PDV, delivery e fiscal' },
+      { id: 'orders_cancel', label: 'Cancelar Pedidos e Vendas', description: 'Pode cancelar pedidos e vendas já lançados' },
       { id: 'kds_access', label: 'Ver KDS', description: 'Acessar a tela de preparo da cozinha' },
       { id: 'menu_manage', label: 'Gerenciar Cardápio', description: 'Criar/Editar produtos' },
       { id: 'stock_manage', label: 'Gerenciar Estoque', description: 'Ajustar quantidades' },
-      { id: 'delivery_manage', label: 'Gerenciar Delivery', description: 'Configurar entrega e áreas atendidas' },
+    ]
+  },
+  {
+    id: 'delivery',
+    label: 'Delivery',
+    icon: <FileText className="w-4 h-4" />,
+    permissions: [
+      { id: 'delivery_areas_manage', label: 'Áreas e Taxas de Entrega', description: 'Configurar bairros, áreas atendidas, taxas e prazos' },
+      { id: 'delivery_drivers_manage', label: 'Gerenciar Motoboys', description: 'Cadastrar e administrar entregadores e entregas' },
+    ]
+  },
+  {
+    id: 'financial',
+    label: 'Financeiro',
+    icon: <CreditCard className="w-4 h-4" />,
+    permissions: [
+      { id: 'financial_view', label: 'Ver Financeiro', description: 'Acessar visão financeira e contas a receber' },
+      { id: 'expenses_manage', label: 'Gerenciar Despesas', description: 'Cadastrar e editar contas a pagar' },
+      { id: 'reports_view', label: 'Ver Relatórios', description: 'Acessar relatórios gerais e históricos' },
+      { id: 'payments_manage', label: 'Formas de Pagamento e PIX', description: 'Configurar pagamentos, PIX e integrações financeiras' },
+    ]
+  },
+  {
+    id: 'communication',
+    label: 'Comunicação e integrações',
+    icon: <Mail className="w-4 h-4" />,
+    permissions: [
+      { id: 'whatsapp_manage', label: 'Gerenciar WhatsApp', description: 'Conectar, configurar e operar o WhatsApp Bot' },
+      { id: 'marketing_manage', label: 'Marketing', description: 'Campanhas, ofertas e disparos autorizados' },
+      { id: 'ifood_manage', label: 'Gerenciar iFood', description: 'Configurar e operar a integração com o iFood' },
     ]
   },
   {
@@ -74,12 +105,14 @@ const PERMISSIONS_GROUPS = [
     label: 'Administrativo',
     icon: <Settings className="w-4 h-4" />,
     permissions: [
-      { id: 'financial_view', label: 'Ver Financeiro', description: 'Relatórios de faturamento' },
-      { id: 'reports_view', label: 'Ver Relatórios', description: 'Relatórios gerais e históricos' },
-      { id: 'marketing_manage', label: 'Marketing', description: 'Campanhas, ofertas e disparos autorizados' },
       { id: 'fiscal_manage', label: 'Fiscal/NFC-e', description: 'Configurações fiscais e emissão de documentos' },
       { id: 'users_manage', label: 'Gerenciar Equipe', description: 'Criar e editar usuários' },
-      { id: 'settings_manage', label: 'Configurações', description: 'Configurações do sistema' },
+      { id: 'timeclock_manage', label: 'Controle de Ponto', description: 'Acessar e administrar o ponto da equipe' },
+      { id: 'hardware_manage', label: 'Impressoras, Balanças e Leitores', description: 'Configurar dispositivos e impressão' },
+      { id: 'desktop_access', label: 'Aplicativo Desktop', description: 'Acessar e baixar o aplicativo desktop' },
+      { id: 'agent_access', label: 'Pop Agente', description: 'Acessar o assistente inteligente' },
+      { id: 'security_view', label: 'Segurança', description: 'Acessar o painel de segurança' },
+      { id: 'settings_manage', label: 'Todas as Configurações', description: 'Acesso administrativo completo às configurações do sistema' },
     ]
   }
 ];

@@ -15,15 +15,24 @@ import { loginSchema, signupSchema, type LoginData, type SignupData } from '@/sc
 import { logSecurityEvent, logSignupEvent } from '@/utils/securityLogger';
 import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import { debugLogger } from '@/utils/debugLogger';
+import { cn } from '@/lib/utils';
 
 import { handleOAuthError } from '../../utils/oauth-errors';
 import { logOAuthLoginAttempt, logOAuthLoginFailure } from '../../utils/oauth-security-logger';
 
 type AuthFormProps = {
   defaultTab?: 'login' | 'register';
+  embedded?: boolean;
+  onTabChange?: (tab: 'login' | 'register') => void;
 };
 
-const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login' }) => {
+const fieldClassName = 'h-12 rounded-2xl border-[#DCE4DE] bg-[#FBFCFA] px-4 text-[#082F23] shadow-none placeholder:text-slate-400 focus-visible:border-[#85C441] focus-visible:ring-[#85C441]/30';
+const passwordFieldClassName = `${fieldClassName} pr-12`;
+const labelClassName = 'text-sm font-semibold text-[#123F33]';
+const getErrorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : 'Erro inesperado';
+
+const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login', embedded = false, onTabChange }) => {
   const { signIn, signUp } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -88,10 +97,11 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login' }) => {
       await signIn(loginData.email, loginData.password);
       void logSecurityEvent('login', `Successful login for ${loginData.email}`, 'low');
       debugLogger.form('login_submission_success', { email: loginData.email });
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = getErrorMessage(error);
       debugLogger.form('login_submission_error', { 
         email: loginData.email,
-        error: error.message 
+        error: message,
       }, 'error');
     } finally {
       // Reset com delay REDUZIDO para 500ms para evitar cliques rápidos
@@ -126,7 +136,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login' }) => {
       await signUp(signupData.email, signupData.password, signupData.restaurantName);
       await logSignupEvent(signupData.email);
       console.log('✅ [AUTH FORM] Cadastro realizado com sucesso');
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('❌ [AUTH FORM] Erro no cadastro:', error);
     } finally {
       // Reset com delay REDUZIDO para 500ms para evitar cliques rápidos
@@ -197,16 +207,21 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login' }) => {
 
       console.log('✅ [AUTH FORM] Redirecionamento para Google OAuth iniciado');
       
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const normalizedError = error instanceof Error ? error : new Error('Erro inesperado durante login');
+      const oauthStatus = typeof error === 'object' && error !== null && 'status' in error
+        ? Number(error.status)
+        : undefined;
       console.error('❌ [AUTH FORM] Erro inesperado no login com Google:', error);
       
       // Log da falha inesperada
       await logOAuthLoginFailure('google', 'Erro inesperado durante login', {
-        error: error.message,
-        stack: error.stack
+        error: normalizedError.message,
+        stack: normalizedError.stack,
+        status: oauthStatus,
       });
       
-      handleOAuthError(error);
+      handleOAuthError(normalizedError);
     } finally {
       // Reset com delay REDUZIDO para 1 segundo para OAuth
       googleTimeoutRef.current = setTimeout(() => {
@@ -240,9 +255,13 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login' }) => {
         title: "Email enviado",
         description: "Enviamos um link seguro para redefinir sua senha. Verifique também a caixa de spam.",
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Erro ao enviar email de recuperação:', error);
-      const isRateLimit = error?.status === 429 || /rate|seconds|segundos|security purposes/i.test(String(error?.message || ''));
+      const errorStatus = typeof error === 'object' && error !== null && 'status' in error
+        ? Number(error.status)
+        : undefined;
+      const message = getErrorMessage(error);
+      const isRateLimit = errorStatus === 429 || /rate|seconds|segundos|security purposes/i.test(message);
       toast({
         title: isRateLimit ? "Aguarde um momento" : "Não foi possível concluir",
         description: isRateLimit
@@ -272,8 +291,11 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login' }) => {
   );
 
   return (
-    <Card className="w-full max-w-md mx-auto">
-      <CardHeader className="space-y-1">
+    <Card className={cn(
+      'mx-auto w-full max-w-md',
+      embedded && 'max-w-none border-0 bg-transparent shadow-none',
+    )}>
+      <CardHeader className={cn('space-y-1', embedded && 'hidden')}>
         <div className="flex justify-center mb-4">
           <Logo />
         </div>
@@ -281,17 +303,31 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login' }) => {
           Sistema completo para seu restaurante
         </CardDescription>
       </CardHeader>
-      <CardContent>
-        <Tabs defaultValue={defaultTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="login">Entrar</TabsTrigger>
-            <TabsTrigger value="register">Cadastrar</TabsTrigger>
+      <CardContent className={cn(embedded && 'p-0')}>
+        <Tabs
+          defaultValue={defaultTab}
+          className="w-full"
+          onValueChange={(value) => onTabChange?.(value as 'login' | 'register')}
+        >
+          <TabsList className="grid h-12 w-full grid-cols-2 rounded-2xl bg-[#F0F3EE] p-1.5">
+            <TabsTrigger
+              value="login"
+              className="h-9 rounded-xl font-bold text-slate-500 data-[state=active]:bg-white data-[state=active]:text-[#0B4A37] data-[state=active]:shadow-[0_5px_14px_-8px_rgba(0,50,35,0.42)]"
+            >
+              Entrar
+            </TabsTrigger>
+            <TabsTrigger
+              value="register"
+              className="h-9 rounded-xl font-bold text-slate-500 data-[state=active]:bg-white data-[state=active]:text-[#0B4A37] data-[state=active]:shadow-[0_5px_14px_-8px_rgba(0,50,35,0.42)]"
+            >
+              Cadastrar
+            </TabsTrigger>
           </TabsList>
           
-          <TabsContent value="login" className="space-y-4">
-            <form onSubmit={handleLoginSubmit} className="space-y-4">
+          <TabsContent value="login" className="mt-6 space-y-5">
+            <form onSubmit={handleLoginSubmit} className="space-y-5">
               <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email" className={labelClassName}>E-mail</Label>
                 <Input
                   id="email"
                   type="email"
@@ -300,6 +336,8 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login' }) => {
                   onChange={(e) => setLoginData({ ...loginData, email: e.target.value })}
                   disabled={isSubmittingLogin}
                   required
+                  autoComplete="email"
+                  className={fieldClassName}
                 />
                 {loginValidation.errors.email && (
                   <p className="text-sm text-red-500">{loginValidation.errors.email}</p>
@@ -307,7 +345,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login' }) => {
               </div>
               
               <div className="space-y-2">
-                <Label htmlFor="password">Senha</Label>
+                <Label htmlFor="password" className={labelClassName}>Senha</Label>
                 <div className="relative">
                   <Input
                     id="password"
@@ -315,17 +353,18 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login' }) => {
                     placeholder="Sua senha"
                     value={loginData.password}
                     onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
-                    disabled={isSubmittingLogin}
-                    required
-                    className="pr-10"
+                  disabled={isSubmittingLogin}
+                  required
+                  autoComplete="current-password"
+                  className={passwordFieldClassName}
                   />
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8"
+                    className="absolute right-2 top-1/2 h-9 w-9 -translate-y-1/2 rounded-xl text-slate-400 hover:bg-[#EEF3EF] hover:text-[#0B4A37]"
                     onClick={() => setShowLoginPassword((v) => !v)}
-                    tabIndex={-1}
+                    aria-label={showLoginPassword ? 'Ocultar senha' : 'Mostrar senha'}
                   >
                     {showLoginPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                   </Button>
@@ -337,7 +376,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login' }) => {
               
               <Button 
                 type="submit" 
-                className="w-full" 
+                className="h-12 w-full rounded-2xl bg-[#FF6400] text-base font-bold text-white shadow-[0_14px_28px_-16px_rgba(255,100,0,0.75)] hover:bg-[#E85B00]"
                 disabled={isSubmittingLogin}
               >
                 {isSubmittingLogin ? (
@@ -353,7 +392,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login' }) => {
               <Button
                 type="button"
                 variant="outline"
-                className="w-full relative"
+                className="relative h-12 w-full rounded-2xl border-[#D9E2DC] bg-white font-bold text-[#123F33] hover:border-[#BFD2C6] hover:bg-[#F6F9F7]"
                 onClick={handleGoogleLogin}
                 disabled={isSubmittingGoogle}
               >
@@ -373,7 +412,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login' }) => {
               <Button
                 type="button"
                 variant="link"
-                className="w-full text-sm"
+                className="h-auto w-full py-1 text-sm font-bold text-[#6CA936] hover:text-[#56882B]"
                 onClick={handleForgotPassword}
                 disabled={isSubmittingLogin}
               >
@@ -382,10 +421,10 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login' }) => {
             </form>
           </TabsContent>
           
-          <TabsContent value="register" className="space-y-4">
+          <TabsContent value="register" className="mt-6 space-y-4">
             <form onSubmit={handleRegisterSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="name">Nome completo</Label>
+                <Label htmlFor="name" className={labelClassName}>Nome completo</Label>
                 <Input
                   id="name"
                   type="text"
@@ -394,6 +433,8 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login' }) => {
                   onChange={(e) => setSignupData({ ...signupData, name: e.target.value })}
                   disabled={isSubmittingSignup}
                   required
+                  autoComplete="name"
+                  className={fieldClassName}
                 />
                 {signupValidation.errors.name && (
                   <p className="text-sm text-red-500">{signupValidation.errors.name}</p>
@@ -401,7 +442,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login' }) => {
               </div>
               
               <div className="space-y-2">
-                <Label htmlFor="restaurantName">Nome do restaurante</Label>
+                <Label htmlFor="restaurantName" className={labelClassName}>Nome do restaurante</Label>
                 <Input
                   id="restaurantName"
                   type="text"
@@ -410,6 +451,8 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login' }) => {
                   onChange={(e) => setSignupData({ ...signupData, restaurantName: e.target.value })}
                   disabled={isSubmittingSignup}
                   required
+                  autoComplete="organization"
+                  className={fieldClassName}
                 />
                 {signupValidation.errors.restaurantName && (
                   <p className="text-sm text-red-500">{signupValidation.errors.restaurantName}</p>
@@ -417,7 +460,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login' }) => {
               </div>
               
               <div className="space-y-2">
-                <Label htmlFor="registerEmail">Email</Label>
+                <Label htmlFor="registerEmail" className={labelClassName}>E-mail</Label>
                 <Input
                   id="registerEmail"
                   type="email"
@@ -426,6 +469,8 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login' }) => {
                   onChange={(e) => setSignupData({ ...signupData, email: e.target.value })}
                   disabled={isSubmittingSignup}
                   required
+                  autoComplete="email"
+                  className={fieldClassName}
                 />
                 {signupValidation.errors.email && (
                   <p className="text-sm text-red-500">{signupValidation.errors.email}</p>
@@ -433,7 +478,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login' }) => {
               </div>
               
               <div className="space-y-2">
-                <Label htmlFor="registerPassword">Senha</Label>
+                <Label htmlFor="registerPassword" className={labelClassName}>Senha</Label>
                 <div className="relative">
                   <Input
                     id="registerPassword"
@@ -441,17 +486,18 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login' }) => {
                     placeholder="Mínimo 6 caracteres"
                     value={signupData.password}
                     onChange={(e) => setSignupData({ ...signupData, password: e.target.value })}
-                    disabled={isSubmittingSignup}
-                    required
-                    className="pr-10"
+                  disabled={isSubmittingSignup}
+                  required
+                  autoComplete="new-password"
+                  className={passwordFieldClassName}
                   />
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8"
+                    className="absolute right-2 top-1/2 h-9 w-9 -translate-y-1/2 rounded-xl text-slate-400 hover:bg-[#EEF3EF] hover:text-[#0B4A37]"
                     onClick={() => setShowSignupPassword((v) => !v)}
-                    tabIndex={-1}
+                    aria-label={showSignupPassword ? 'Ocultar senha' : 'Mostrar senha'}
                   >
                     {showSignupPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                   </Button>
@@ -462,7 +508,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login' }) => {
               </div>
               
               <div className="space-y-2">
-                <Label htmlFor="confirmPassword">Confirmar senha</Label>
+                <Label htmlFor="confirmPassword" className={labelClassName}>Confirmar senha</Label>
                 <div className="relative">
                   <Input
                     id="confirmPassword"
@@ -470,17 +516,18 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login' }) => {
                     placeholder="Confirme sua senha"
                     value={signupData.confirmPassword}
                     onChange={(e) => setSignupData({ ...signupData, confirmPassword: e.target.value })}
-                    disabled={isSubmittingSignup}
-                    required
-                    className="pr-10"
+                  disabled={isSubmittingSignup}
+                  required
+                  autoComplete="new-password"
+                  className={passwordFieldClassName}
                   />
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8"
+                    className="absolute right-2 top-1/2 h-9 w-9 -translate-y-1/2 rounded-xl text-slate-400 hover:bg-[#EEF3EF] hover:text-[#0B4A37]"
                     onClick={() => setShowSignupConfirmPassword((v) => !v)}
-                    tabIndex={-1}
+                    aria-label={showSignupConfirmPassword ? 'Ocultar senha' : 'Mostrar senha'}
                   >
                     {showSignupConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                   </Button>
@@ -492,7 +539,7 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login' }) => {
               
               <Button 
                 type="submit" 
-                className="w-full"
+                className="h-12 w-full rounded-2xl bg-[#FF6400] text-base font-bold text-white shadow-[0_14px_28px_-16px_rgba(255,100,0,0.75)] hover:bg-[#E85B00]"
                 disabled={isSubmittingSignup}
               >
                 {isSubmittingSignup ? (

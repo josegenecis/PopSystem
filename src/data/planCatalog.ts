@@ -64,15 +64,15 @@ const ESSENCIAL_FEATURE_GROUPS: PlanFeatureGroup[] = [
   },
   {
     title: 'Cardápio e pagamentos',
-    features: ['Cardápio digital com link e QR Code', 'PIX e cadastro de formas de pagamento'],
+    features: ['Cardápio digital com link e QR Code', 'PIX e cadastro de formas de pagamento', 'WhatsApp Bot', 'Artes e banners, cupons e fidelidade'],
   },
   {
     title: 'Gestão da operação',
-    features: ['Fechamento de caixa', 'Financeiro básico e despesas', 'Relatórios principais'],
+    features: ['Fechamento de caixa', 'Financeiro básico e despesas', 'Relatórios principais', 'Usuários, equipe e permissões', 'Motoboys e entregas'],
   },
   {
-    title: 'Estoque e acesso',
-    features: ['Controle de estoque essencial', 'Uma loja incluída', 'Suporte PopSystem'],
+    title: 'Estoque, impressão e acesso',
+    features: ['Controle de estoque essencial', 'App desktop', 'Impressoras e balanças', 'Uma loja incluída', 'Suporte PopSystem'],
   },
 ];
 
@@ -83,7 +83,7 @@ const PRO_FEATURE_GROUPS: PlanFeatureGroup[] = [
   },
   {
     title: 'Atendimento e produção',
-    features: ['Mesas, comandas e app garçom', 'KDS, tela de cozinha e impressão', 'App desktop e integração com hardware'],
+    features: ['Mesas, comandas e app garçom', 'KDS e tela de cozinha', 'Recursos avançados de produção'],
   },
   {
     title: 'Estoque e rentabilidade',
@@ -91,7 +91,7 @@ const PRO_FEATURE_GROUPS: PlanFeatureGroup[] = [
   },
   {
     title: 'Relacionamento e crescimento',
-    features: ['WhatsApp e campanhas', 'Marketing, cupons e fidelidade', 'IA para cardápio e produtividade'],
+    features: ['Campanhas e envio em massa', 'Destaques, venda adicional e pixels', 'IA para cardápio e produtividade'],
   },
   {
     title: 'Pagamentos e integrações',
@@ -154,7 +154,13 @@ export const PLAN_CATALOG: PlanCatalogItem[] = [
       'Mesas',
       'Estoque',
       'Financeiro',
-      'Relatórios'
+      'Relatórios',
+      'Usuários e Equipe',
+      'WhatsApp Bot',
+      'Banners, Cupons e Fidelidade',
+      'Motoboys e Entregas',
+      'App Desktop',
+      'Impressoras e Balanças'
     ]
   },
   {

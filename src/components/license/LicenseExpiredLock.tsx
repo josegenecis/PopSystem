@@ -68,7 +68,10 @@ const LicenseExpiredLock: React.FC = () => {
     const refreshWhenVisible = () => {
       if (document.visibilityState === 'visible') void refreshAccess();
     };
-    const interval = window.setInterval(() => void refreshAccess(), 15_000);
+    // A situação também é atualizada ao voltar para a aba/janela. Cinco
+    // minutos aqui servem apenas como contingência e evitam consultar o banco
+    // a cada 15 segundos em todas as telas abertas.
+    const interval = window.setInterval(() => void refreshAccess(), 5 * 60_000);
     window.addEventListener('focus', refreshWhenVisible);
     document.addEventListener('visibilitychange', refreshWhenVisible);
     return () => {

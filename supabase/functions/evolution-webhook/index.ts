@@ -26,7 +26,25 @@ function toTextFromMessage(msg: any): string {
   if (msg.documentMessage?.caption) return String(msg.documentMessage.caption);
   if (msg.buttonsResponseMessage?.selectedDisplayText) return String(msg.buttonsResponseMessage.selectedDisplayText);
   if (msg.listResponseMessage?.title) return String(msg.listResponseMessage.title);
+  if (msg.locationMessage) {
+    const latitude = Number(msg.locationMessage.degreesLatitude ?? msg.locationMessage.latitude);
+    const longitude = Number(msg.locationMessage.degreesLongitude ?? msg.locationMessage.longitude);
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) return `Localização compartilhada: https://maps.google.com/?q=${latitude},${longitude}`;
+  }
+  if (msg.contactMessage) return `Contato compartilhado: ${String(msg.contactMessage.displayName || msg.contactMessage.vcard || '').trim()}`;
+  if (msg.contactsArrayMessage?.contacts?.length) return `Contatos compartilhados: ${msg.contactsArrayMessage.contacts.map((contact: any) => contact.displayName || contact.vcard || '').filter(Boolean).join(', ')}`;
   return '';
+}
+
+function pickStructuredMessageType(msg: any) {
+  if (msg?.locationMessage) return 'location';
+  if (msg?.contactMessage || msg?.contactsArrayMessage) return 'contact';
+  return '';
+}
+
+function pickQuotedProviderMessageId(msg: any) {
+  const context = msg?.extendedTextMessage?.contextInfo || msg?.imageMessage?.contextInfo || msg?.videoMessage?.contextInfo || msg?.documentMessage?.contextInfo || {};
+  return String(context?.stanzaId || context?.quotedMessageId || '').trim();
 }
 
 function pickMediaFromMessage(msg: any) {
@@ -211,6 +229,24 @@ function pickProviderMessageId(data: any): string {
   return candidates.map((value) => String(value || '').trim()).find(Boolean) || '';
 }
 
+function pickDeliveryStatus(body: any, data: any) {
+  const raw = firstDefined(
+    data?.update?.status, data?.status, data?.ack, data?.data?.status,
+    body?.status, body?.ack, body?.data?.update?.status
+  );
+  if (typeof raw === 'number') {
+    if (raw >= 4) return 'read';
+    if (raw === 3) return 'delivered';
+    if (raw >= 1) return 'sent';
+  }
+  const value = String(raw || '').trim().toLowerCase();
+  if (/(read|played)/.test(value)) return 'read';
+  if (/(deliver)/.test(value)) return 'delivered';
+  if (/(error|fail)/.test(value)) return 'failed';
+  if (/(sent|server_ack|pending)/.test(value)) return 'sent';
+  return '';
+}
+
 function pickIncomingEnvelope(body: any) {
   const direct = body?.data && typeof body.data === 'object' && !Array.isArray(body.data) ? body.data : body;
   const list = body?.data?.messages || body?.messages || body?.data;
@@ -223,6 +259,61 @@ function pickIncomingEnvelope(body: any) {
     if (found) return found;
   }
   return direct;
+}
+
+type NormalizedChannelEvent = {
+  provider: 'evolution';
+  channel: 'WHATSAPP';
+  rawEvent: string;
+  event: string;
+  instanceName: string;
+  customerPhone: string;
+  fromMe: boolean;
+  rawFromMe: unknown;
+  providerMessageId: string;
+  deliveryStatus: string;
+  text: string;
+  messageType: string;
+  quotedProviderMessageId: string;
+  media: ReturnType<typeof pickMediaFromMessage>;
+  data: any;
+};
+
+interface ChannelAdapter<TPayload> {
+  normalize(payload: TPayload): NormalizedChannelEvent;
+}
+
+class EvolutionWhatsAppAdapter implements ChannelAdapter<any> {
+  normalize(body: any): NormalizedChannelEvent {
+    const rawEvent = String(body?.event || body?.type || '').trim();
+    const event = rawEvent.toUpperCase().replace(/[.\-\s]+/g, '_');
+    const instanceName = pickInstanceName(body);
+    const data = pickIncomingEnvelope(body);
+    const rawFromMe = getFromMeRaw(data);
+    const fromMe = isMessageFromRestaurant(data);
+    const customerJid = pickCustomerJid(data);
+    const messagePayload = data?.message || data?.text || data?.content || data;
+    const media = pickMediaFromMessage(messagePayload);
+    const structuredMessageType = pickStructuredMessageType(messagePayload);
+
+    return {
+      provider: 'evolution',
+      channel: 'WHATSAPP',
+      rawEvent,
+      event,
+      instanceName,
+      customerPhone: customerJid.includes('@g.us') ? '' : normalizeNumber(customerJid),
+      fromMe,
+      rawFromMe,
+      providerMessageId: pickProviderMessageId(data),
+      deliveryStatus: pickDeliveryStatus(body, data),
+      text: toTextFromMessage(messagePayload) || (media ? `[${media.type === 'audio' ? 'áudio recebido' : media.type === 'image' ? 'imagem recebida' : 'mídia recebida'}]` : ''),
+      messageType: structuredMessageType || media?.type || 'text',
+      quotedProviderMessageId: pickQuotedProviderMessageId(messagePayload),
+      media,
+      data,
+    };
+  }
 }
 
 Deno.serve(async (req: Request) => {
@@ -261,24 +352,10 @@ Deno.serve(async (req: Request) => {
     return json({ success: false, error: 'Invalid JSON' }, 400);
   }
 
-  const rawEvent = String(body?.event || body?.type || '').trim();
-  const event = rawEvent.toUpperCase().replace(/[.\-\s]+/g, '_');
-
-  const instance = pickInstanceName(body);
-  const data = pickIncomingEnvelope(body);
-  const rawFromMe = getFromMeRaw(data);
-  const fromMe = isMessageFromRestaurant(data);
-
-  const remoteJid = pickCustomerJid(data);
-  if (!remoteJid || remoteJid.includes('@g.us')) return json({ success: true, ignored: true });
-
-  const customerPhone = normalizeNumber(remoteJid);
-  const messagePayload = data?.message || data?.text || data?.content || data;
-  const media = pickMediaFromMessage(messagePayload);
-  let text = toTextFromMessage(messagePayload) || (media ? `[${media.type === 'audio' ? 'áudio recebido' : media.type === 'image' ? 'imagem recebida' : 'mídia recebida'}]` : '');
+  const normalizedEvent = new EvolutionWhatsAppAdapter().normalize(body);
+  const { rawEvent, event, instanceName: instance, data, rawFromMe, fromMe, customerPhone, media, messageType, quotedProviderMessageId } = normalizedEvent;
+  let { text } = normalizedEvent;
   if (!customerPhone) return json({ success: true, ignored: true });
-  if (!text && fromMe) text = '[mensagem enviada pelo restaurante]';
-  if (!text) return json({ success: true, ignored: true });
 
   let userId = getMappedUserIdForInstance(instance);
   if (!userId && instance) {
@@ -330,6 +407,38 @@ Deno.serve(async (req: Request) => {
   }
   if (!userId) return json({ success: false, error: 'User not mapped for instance' }, 400);
 
+  const { providerMessageId, deliveryStatus } = normalizedEvent;
+  if (providerMessageId && deliveryStatus && event.includes('UPDATE')) {
+    const deliveryError = deliveryStatus === 'failed'
+      ? String(data?.error || body?.error || 'Falha informada pelo provedor')
+      : null;
+    const { data: messageUpdated, error: receiptError } = await supabase.rpc('record_whatsapp_delivery_receipt', {
+      p_user_id: userId,
+      p_provider_message_id: providerMessageId,
+      p_delivery_status: deliveryStatus,
+      p_delivery_error: deliveryError,
+    });
+
+    if (!receiptError) return json({ success: true, deliveryStatus, messageUpdated: Boolean(messageUpdated) });
+
+    // Compatibilidade durante a publicação gradual, antes da migration chegar ao banco.
+    const { data: storedMessage } = await supabase
+      .from('whatsapp_messages')
+      .select('id, conversation_id, whatsapp_conversations!inner(user_id)')
+      .eq('provider_message_id', providerMessageId)
+      .eq('whatsapp_conversations.user_id', userId)
+      .maybeSingle();
+    if (storedMessage?.id) await supabase.from('whatsapp_messages').update({
+      delivery_status: deliveryStatus,
+      delivered: deliveryStatus === 'delivered' || deliveryStatus === 'read',
+      delivery_error: deliveryError,
+    }).eq('id', storedMessage.id);
+    return json({ success: true, deliveryStatus, messageUpdated: Boolean(storedMessage?.id), receiptFallback: true });
+  }
+
+  if (!text && fromMe) text = '[mensagem enviada pelo restaurante]';
+  if (!text) return json({ success: true, ignored: true });
+
   if (fromMe) {
     if (isLikelyBotEcho(text) || await isRecentAutomatedBotReply({
       supabase,
@@ -380,7 +489,9 @@ Deno.serve(async (req: Request) => {
     customerPhone,
     text,
     media,
-    providerMessageId: pickProviderMessageId(data)
+    providerMessageId,
+    messageType,
+    quotedProviderMessageId,
   });
 
   if (!result.ok) {

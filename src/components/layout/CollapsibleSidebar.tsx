@@ -43,7 +43,7 @@ import {
 const CollapsibleSidebar = () => {
   const { isOpen, isMobile, isPinned, setPinned, toggleSidebar, closeSidebar, openSidebar } = useSidebar();
   const { profile, subscription, user, signOut } = useAuth();
-  const { canAccessFeature, openFeatureDialog } = useFeatureGate();
+  const { canAccessFeature, isFeatureAccessLoading, openFeatureDialog } = useFeatureGate();
   const [ifoodStatus, setIfoodStatus] = useState<'online' | 'offline' | 'paused' | null>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const navigate = useNavigate();
@@ -110,7 +110,7 @@ const CollapsibleSidebar = () => {
       icon: CreditCard,
       label: 'Caixa & PDV',
       items: [
-        { to: '/caixa', label: 'Caixa Geral', feature: 'finance', area: 'finance' },
+        { to: '/caixa', label: 'Caixa Geral', feature: 'finance', area: 'cash' },
         { to: '/pdv', label: 'PDV / Frente de Caixa', feature: 'pdv', area: 'pdv' },
         { to: '/mesas', label: 'Gestão de Mesas', feature: 'tables', area: 'tables' },
         { to: '/mesas/regras', label: 'Regras de Mesa/Comanda', feature: 'tables', area: 'tables' },
@@ -123,7 +123,7 @@ const CollapsibleSidebar = () => {
       items: [
         { to: '/financeiro', label: 'Visão Geral', feature: 'finance', area: 'finance' },
         { to: '/financeiro?section=receivables', label: 'Contas a Receber', feature: 'finance', area: 'finance' },
-        { to: '/despesas', label: 'Contas a Pagar', feature: 'finance', area: 'finance' },
+        { to: '/despesas', label: 'Contas a Pagar', feature: 'finance', area: 'expenses' },
         { to: '/pagamentos', label: 'Formas de Pagamento', feature: 'pix', area: 'pix' },
         { to: '/pix', label: 'PIX / Mercado Pago', feature: 'pix', area: 'pix' },
       ]
@@ -142,11 +142,12 @@ const CollapsibleSidebar = () => {
       label: 'Gerencial',
       items: [
         { to: '/dashboard', label: 'Visão geral', feature: 'dashboard', area: 'dashboard' },
+        { to: '/clientes', label: 'Cadastro de clientes', area: 'customers' },
         { to: '/relatorios', label: 'Relatórios de vendas', feature: 'reports', area: 'reports' },
         { to: '/inteligencia/cmv', label: 'CMV e rentabilidade', feature: 'cmv', area: 'stock' },
         { to: '/configuracoes?tab=users', label: 'Usuários e permissões', feature: 'team', area: 'team' },
         { to: '/garcons', label: 'Equipe operacional', feature: 'team', area: 'team' },
-        { to: '/ponto', label: 'Controle de ponto', feature: 'team', area: 'team' },
+        { to: '/ponto', label: 'Controle de ponto', feature: 'team', area: 'timeclock' },
       ]
     },
     {
@@ -175,14 +176,14 @@ const CollapsibleSidebar = () => {
       icon: Megaphone,
       label: 'Propaganda',
       items: [
-        { to: '/marketing?tab=banners', label: 'Artes e Banners', feature: 'marketing', area: 'marketing' },
-        { to: '/marketing?tab=coupons', label: 'Cupons de Desconto', feature: 'marketing', area: 'marketing' },
+        { to: '/marketing?tab=banners', label: 'Artes e Banners', feature: 'marketingEssential', area: 'marketing' },
+        { to: '/marketing?tab=coupons', label: 'Cupons de Desconto', feature: 'marketingEssential', area: 'marketing' },
         { to: '/marketing?tab=highlights', label: 'Produtos em Destaque', feature: 'marketing', area: 'marketing' },
         { to: '/marketing?tab=upsells', label: 'Venda Mais', feature: 'marketing', area: 'marketing' },
-        { to: '/marketing?tab=loyalty', label: 'Clientes Fiéis', feature: 'marketing', area: 'marketing' },
+        { to: '/marketing?tab=loyalty', label: 'Clientes Fiéis', feature: 'marketingEssential', area: 'marketing' },
         { to: '/marketing?tab=pixels', label: 'Facebook e Instagram', feature: 'marketing', area: 'marketing' },
-        { to: '/marketing?tab=whatsapp', label: 'Envio em massa', feature: 'whatsapp', area: 'marketing' },
-        { to: '/whatsapp-bot', label: 'Robô do WhatsApp', feature: 'whatsapp', area: 'marketing' },
+        { to: '/marketing?tab=whatsapp', label: 'Envio em massa', feature: 'whatsapp', area: 'whatsapp' },
+        { to: '/whatsapp-bot', label: 'Robô do WhatsApp', feature: 'whatsapp', area: 'whatsapp' },
       ]
     },
     {
@@ -193,12 +194,12 @@ const CollapsibleSidebar = () => {
         { to: '/configuracoes?tab=profile', label: 'Perfil', feature: 'settings', area: 'settings' },
         { to: '/configuracoes?tab=appearance', label: 'Aparência', feature: 'settings', area: 'settings' },
         { to: '/configuracoes?tab=notifications', label: 'Notificações', feature: 'settings', area: 'settings' },
-        { to: '/configuracoes?tab=hardware', label: 'Impressoras e Balanças', feature: 'hardware', area: 'settings' },
-        { to: '/configuracoes?tab=whatsapp', label: 'Conectar WhatsApp', feature: 'whatsapp', area: 'settings' },
-        { to: '/configuracoes?tab=delivery', label: 'Delivery', feature: 'delivery', area: 'delivery' },
-        { to: '/entregadores', label: 'Motoboys & Entregas', feature: 'deliveryTeam', area: 'delivery' },
+        { to: '/configuracoes?tab=hardware', label: 'Impressoras e Balanças', feature: 'hardware', area: 'hardware' },
+        { to: '/configuracoes?tab=whatsapp', label: 'Conectar WhatsApp', feature: 'whatsapp', area: 'whatsapp' },
+        { to: '/configuracoes?tab=delivery', label: 'Delivery', feature: 'delivery', area: 'deliveryAreas' },
+        { to: '/entregadores', label: 'Motoboys & Entregas', feature: 'deliveryTeam', area: 'deliveryTeam' },
         { to: '/fiscal', label: 'Configurações fiscais', feature: 'fiscal', area: 'fiscal' },
-        { to: '/configuracoes?tab=ifood', label: <div className="flex items-center"><IfoodLogo className="h-4 w-auto" /></div>, title: 'iFood', feature: 'ifood', area: 'settings' },
+        { to: '/configuracoes?tab=ifood', label: <div className="flex items-center"><IfoodLogo className="h-4 w-auto" /></div>, title: 'iFood', feature: 'ifood', area: 'integrations' },
         { to: '/configuracoes?tab=support', label: 'Suporte', feature: 'settings', area: 'settings' },
       ]
     },
@@ -243,7 +244,7 @@ const CollapsibleSidebar = () => {
   };
 
   const handleFeatureLinkClick = (event: React.MouseEvent, feature?: FeatureKey) => {
-    if (feature && !canAccessFeature(feature)) {
+    if (feature && !isFeatureAccessLoading && !canAccessFeature(feature)) {
       event.preventDefault();
       openFeatureDialog(feature);
       return;
@@ -261,7 +262,7 @@ const CollapsibleSidebar = () => {
             Em breve
           </Badge>
         )}
-        {link.feature && !definition?.comingSoon && !canAccessFeature(link.feature) && (
+        {link.feature && !isFeatureAccessLoading && !definition?.comingSoon && !canAccessFeature(link.feature) && (
           <Lock size={12} className="shrink-0 text-[#F5EBE1]/70" />
         )}
       </span>

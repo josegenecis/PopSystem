@@ -80,6 +80,7 @@ interface AuthContextType {
   session: Session | null;
   profile: Profile | null;
   subscription: Subscription | null;
+  subscriptionLoading: boolean;
   loading: boolean;
   isLoading: boolean;
   stores: StoreAccess[];
@@ -147,12 +148,17 @@ const readCachedAuthSession = (): Session | null => {
 };
 
 const initialCachedSession = readCachedAuthSession();
+const cachedSubscription = initialCachedSession?.user ? SubscriptionCache.getSubscription() : null;
+const initialCachedSubscription = cachedSubscription?.user_id === initialCachedSession?.user?.id
+  ? cachedSubscription
+  : null;
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [accountUser, setAccountUser] = useState<User | null>(() => initialCachedSession?.user || null);
   const [session, setSession] = useState<Session | null>(() => initialCachedSession);
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [subscription, setSubscription] = useState<Subscription | null>(null);
+  const [subscription, setSubscription] = useState<Subscription | null>(() => initialCachedSubscription);
+  const [subscriptionLoading, setSubscriptionLoading] = useState(() => Boolean(initialCachedSession?.user));
   const [loading, setLoading] = useState(() => !initialCachedSession?.user);
   const [stores, setStores] = useState<StoreAccess[]>([]);
   const [activeStoreId, setActiveStoreId] = useState<string | null>(null);
@@ -179,11 +185,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [accountUser, activeStore]);
   const canManageStores = Boolean(stores.some((store) => store.can_manage));
 
+  useEffect(() => {
+    if (!user?.id || typeof window === 'undefined') return;
+    const bucket = Math.floor(Date.now() / (30 * 60 * 1000));
+    const key = `popsystem_activity_${user.id}_${bucket}`;
+    if (sessionStorage.getItem(key)) return;
+    sessionStorage.setItem(key, '1');
+    void (supabase as any).rpc('record_client_activity', {
+      p_event_type: 'app_active',
+      p_source: window.matchMedia('(display-mode: standalone)').matches ? 'pwa' : 'web',
+      p_metadata: { path: window.location.pathname, store_user_id: user.id },
+    }).then(({ error }: { error?: { message?: string } | null }) => {
+      if (error) sessionStorage.removeItem(key);
+    });
+  }, [user?.id]);
+
   // Refs para controle de debounce e cleanup
   const initTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const authSubscriptionRef = useRef<any>(null);
   const isMountedRef = useRef(true);
   const lastInitTimeRef = useRef<number>(0);
+  const subscriptionLoadSequenceRef = useRef(0);
 
   const loadStoreAccess = async (authenticatedUser: User): Promise<StoreAccess> => {
     setStoresLoading(true);
@@ -405,6 +427,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             });
             setAccountUser(session.user);
             setSession(session);
+            setSubscriptionLoading(true);
             // A sessão já é suficiente para renderizar o painel. Loja, perfil e
             // assinatura continuam carregando sem segurar a interface inteira.
             setLoading(false);
@@ -433,6 +456,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               console.log('✅ [AUTH] SIGNED_IN - Processando nova autenticação');
               setAccountUser(session.user);
               setSession(session);
+              if (event !== 'TOKEN_REFRESHED') setSubscriptionLoading(true);
               // Reiniciar auto-refresh quando um novo login ocorrer
               /*
               try {
@@ -445,7 +469,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               // O cliente mantém um lock interno durante este evento e uma nova
               // chamada aqui pode bloquear todas as consultas seguintes.
               // TOKEN_REFRESHED só precisa atualizar a sessão local.
-              if (event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY') {
+              if (event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY' || event === 'INITIAL_SESSION') {
                 const authenticatedUser = session.user;
                 window.setTimeout(() => {
                   if (!isMountedRef.current) return;
@@ -462,6 +486,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               setSession(null);
               setProfile(null);
               setSubscription(null);
+              setSubscriptionLoading(false);
               setStores([]);
               setActiveStoreId(null);
               setBillingOwnerId(null);
@@ -502,6 +527,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Função otimizada para carregar dados do usuário em background
   const loadUserDataInBackground = useCallback(async (storeUserId: string, subscriptionOwnerId?: string) => {
+    const loadSequence = ++subscriptionLoadSequenceRef.current;
+    if (isMountedRef.current) setSubscriptionLoading(true);
     try {
       console.log('📊 [AUTH] Carregando dados do usuário em background...');
       
@@ -528,6 +555,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
     } catch (error) {
       console.error('❌ [AUTH] Erro no carregamento em background:', error);
+    } finally {
+      if (isMountedRef.current && loadSequence === subscriptionLoadSequenceRef.current) {
+        setSubscriptionLoading(false);
+      }
     }
   }, []);
 
@@ -576,9 +607,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       throw error;
     }
     
-    if (data && isMountedRef.current) {
-      setSubscription(data);
-      SubscriptionCache.setSubscription(data);
+    if (isMountedRef.current) {
+      setSubscription(data || null);
+      SubscriptionCache.setSubscription(data || null);
     }
     
     return data;
@@ -602,7 +633,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const refreshSubscription = async () => {
     if (accountUser) {
-      await fetchSubscription(billingOwnerId || accountUser.id);
+      setSubscriptionLoading(true);
+      try {
+        await fetchSubscription(billingOwnerId || accountUser.id);
+      } finally {
+        if (isMountedRef.current) setSubscriptionLoading(false);
+      }
     }
   };
 
@@ -644,6 +680,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (data.session?.user && isMountedRef.current) {
         setAccountUser(data.session.user);
         setSession(data.session);
+        setSubscription(null);
+        setSubscriptionLoading(true);
+        void loadStoreAccess(data.session.user).then((selectedStore) => {
+          if (!isMountedRef.current) return;
+          void loadUserDataInBackground(selectedStore.store_user_id, selectedStore.billing_owner_id);
+        });
         setLoading(false);
       }
       
@@ -729,6 +771,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setSession(null);
       setProfile(null);
       setSubscription(null);
+      setSubscriptionLoading(false);
       setStores([]);
       setActiveStoreId(null);
       setBillingOwnerId(null);
@@ -763,6 +806,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     sessionStorage.removeItem('operator_session');
     sessionStorage.removeItem('waiter_session');
     setProfile(null);
+    setSubscription(null);
+    setSubscriptionLoading(true);
     setActiveStoreId(selected.store_user_id);
     setBillingOwnerId(selected.billing_owner_id || accountUser.id);
     localStorage.setItem('popsystem_active_store_id', selected.store_user_id);
@@ -838,6 +883,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     session,
     profile,
     subscription,
+    subscriptionLoading,
     loading,
     isLoading: loading,
     stores,

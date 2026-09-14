@@ -447,12 +447,12 @@ const TableDetailsModal: React.FC<TableDetailsModalProps> = ({
             <div><strong>${item.quantity}x ${item.product_name}</strong></div>
             ${item.options ? item.options.map(opt => `<div style="margin-left: 10px;">• ${opt}</div>`).join('') : ''}
             ${item.notes ? `<div style="margin-left: 10px; font-style: italic;">Obs: ${item.notes}</div>` : ''}
-            <div style="text-align: right;">R$ ${item.subtotal.toFixed(2)}</div>
+            <div style="text-align: right;">${formatBRL(item.subtotal)}</div>
           </div>
         `).join('')}
         <hr>
         <div style="text-align: right; font-weight: bold;">
-          <p>TOTAL: R$ ${currentOrder.total.toFixed(2)}</p>
+          <p>TOTAL: ${formatBRL(currentOrder.total)}</p>
         </div>
       </div>
     `;

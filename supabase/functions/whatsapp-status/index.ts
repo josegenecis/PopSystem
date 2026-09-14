@@ -100,12 +100,18 @@ const ensureWhatsAppSettingsEnabled = async (supabaseAdmin: any, restaurantId: s
   };
   const existing = await supabaseAdmin
     .from('whatsapp_settings')
-    .select('id')
+    .select('id, enabled, ai_enabled, evolution_url, evolution_api_key')
     .eq('user_id', restaurantId)
     .limit(1)
     .maybeSingle();
 
   if (existing?.data?.id) {
+    const settingsAlreadyEnabled = existing.data.enabled === true &&
+      existing.data.ai_enabled === true &&
+      existing.data.evolution_url === baseUrl &&
+      existing.data.evolution_api_key === globalApiKey;
+    if (settingsAlreadyEnabled) return;
+
     const updated = await supabaseAdmin.from('whatsapp_settings').update(payload).eq('id', existing.data.id);
     if (updated.error && String(updated.error.message || '').includes('ai_enabled')) {
       await supabaseAdmin.from('whatsapp_settings').update({
@@ -247,11 +253,33 @@ serve(async (req) => {
       currentInstance?.instance
     ].filter(Boolean).map((item) => String(item).trim()).filter(Boolean)));
 
-    const webhookResult = newStatus === 'connected'
+    const { data: existingInstances } = providerNames.length
+      ? await supabaseAdmin
+        .from('whatsapp_instances')
+        .select('instance_name, restaurant_id, status, phone')
+        .in('instance_name', providerNames)
+      : { data: [] };
+    const existingByName = new Map(
+      (existingInstances || []).map((instance: any) => [String(instance.instance_name), instance]),
+    );
+    const connectionChanged = providerNames.some((name) => {
+      const existing = existingByName.get(name) as any;
+      return !existing || existing.restaurant_id !== restaurant_id || existing.status !== newStatus;
+    });
+
+    const webhookResult = newStatus === 'connected' && connectionChanged
       ? await configureEvolutionWebhooks(baseUrl, globalApiKey, providerNames, instanceToken)
       : null;
 
     for (const name of providerNames) {
+      const existing = existingByName.get(name) as any;
+      const phoneChanged = Boolean(phone) && String(existing?.phone || '') !== String(phone);
+      const instanceChanged = !existing ||
+        existing.restaurant_id !== restaurant_id ||
+        existing.status !== newStatus ||
+        phoneChanged;
+      if (!instanceChanged) continue;
+
       await supabaseAdmin
         .from('whatsapp_instances')
         .upsert({

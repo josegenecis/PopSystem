@@ -17,6 +17,7 @@ export type FeatureKey =
   | 'cmv'
   | 'deliveryTeam'
   | 'team'
+  | 'marketingEssential'
   | 'marketing'
   | 'whatsapp'
   | 'ifood'
@@ -111,13 +112,13 @@ export const FEATURE_DEFINITIONS: Record<FeatureKey, FeatureDefinition> = {
     key: 'stock',
     name: 'Estoque e insumos',
     description: 'Controle de ingredientes, estoque e ficha técnica.',
-    requiredPlanId: 2,
+    requiredPlanId: 1,
   },
   finance: {
     key: 'finance',
     name: 'Financeiro',
     description: 'Caixa, despesas e visão financeira.',
-    requiredPlanId: 2,
+    requiredPlanId: 1,
   },
   cmv: {
     key: 'cmv',
@@ -129,13 +130,19 @@ export const FEATURE_DEFINITIONS: Record<FeatureKey, FeatureDefinition> = {
     key: 'deliveryTeam',
     name: 'Motoboys e entregas',
     description: 'Gestão de entregadores e rotas operacionais.',
-    requiredPlanId: 2,
+    requiredPlanId: 1,
   },
   team: {
     key: 'team',
-    name: 'Garçons e equipe',
-    description: 'Controle de usuários, garçons e permissões de equipe.',
-    requiredPlanId: 2,
+    name: 'Usuários e equipe',
+    description: 'Controle de usuários, operadores e permissões da equipe.',
+    requiredPlanId: 1,
+  },
+  marketingEssential: {
+    key: 'marketingEssential',
+    name: 'Propaganda essencial',
+    description: 'Artes e banners, cupons de desconto e fidelidade de clientes.',
+    requiredPlanId: 1,
   },
   marketing: {
     key: 'marketing',
@@ -147,7 +154,7 @@ export const FEATURE_DEFINITIONS: Record<FeatureKey, FeatureDefinition> = {
     key: 'whatsapp',
     name: 'WhatsApp com automações',
     description: 'Integrações e mensagens automáticas por WhatsApp.',
-    requiredPlanId: 2,
+    requiredPlanId: 1,
   },
   ifood: {
     key: 'ifood',
@@ -165,13 +172,13 @@ export const FEATURE_DEFINITIONS: Record<FeatureKey, FeatureDefinition> = {
     key: 'desktop',
     name: 'App desktop',
     description: 'Aplicativo desktop com suporte a impressão e hardware.',
-    requiredPlanId: 2,
+    requiredPlanId: 1,
   },
   hardware: {
     key: 'hardware',
-    name: 'Hardware avançado',
+    name: 'Impressão e balanças',
     description: 'Impressoras, balanças e integrações de dispositivos.',
-    requiredPlanId: 2,
+    requiredPlanId: 1,
   },
   security: {
     key: 'security',
@@ -222,6 +229,11 @@ export const FEATURE_DEFINITIONS: Record<FeatureKey, FeatureDefinition> = {
 
 export const getFeatureDefinition = (feature: FeatureKey) => FEATURE_DEFINITIONS[feature];
 
+export const isFeatureAccessPending = (
+  subscriptionLoading: boolean,
+  subscription?: { plan_id?: number | null } | null
+) => subscriptionLoading && !subscription;
+
 // Trials receive the complete PopSystem experience. After the trial, paid accounts
 // are restricted to the features included in the contracted plan.
 export const BILLING_ENFORCEMENT_ENABLED = true;
@@ -239,6 +251,22 @@ const isActiveTrial = (
   return Number.isFinite(trialEnd) && trialEnd >= Date.now();
 };
 
+const hasActiveAccessOverride = (
+  subscription?: { access_override_until?: string | null } | null
+) => {
+  if (!subscription?.access_override_until) return false;
+  const accessOverrideEnd = new Date(subscription.access_override_until).getTime();
+  return Number.isFinite(accessOverrideEnd) && accessOverrideEnd >= Date.now();
+};
+
+const hasEligibleSubscriptionStatus = (
+  subscription?: { status?: string | null; access_override_until?: string | null } | null
+) => {
+  const status = String(subscription?.status || '').toLowerCase();
+  return ['active', 'paid', 'trialing_paid', 'current'].includes(status)
+    || hasActiveAccessOverride(subscription);
+};
+
 export const getRequiredPlan = (feature: FeatureKey) => {
   const definition = getFeatureDefinition(feature);
   return getPlanCatalogItem(definition.requiredPlanId) || PLAN_CATALOG[0];
@@ -246,7 +274,12 @@ export const getRequiredPlan = (feature: FeatureKey) => {
 
 export const hasFeatureAccess = (
   feature: FeatureKey,
-  subscription?: { status?: string | null; plan_id?: number | null; trial_end?: string | null } | null
+  subscription?: {
+    status?: string | null;
+    plan_id?: number | null;
+    trial_end?: string | null;
+    access_override_until?: string | null;
+  } | null
 ) => {
   const definition = getFeatureDefinition(feature);
   if (definition.comingSoon) return false;
@@ -255,15 +288,13 @@ export const hasFeatureAccess = (
   if (isActiveTrial(subscription)) return true;
 
   if (definition.requiresPaidMulti) {
-    const status = String(subscription?.status || '').toLowerCase();
-    return ['active', 'paid', 'trialing_paid', 'current'].includes(status)
+    return hasEligibleSubscriptionStatus(subscription)
       && Number(subscription?.plan_id || 0) >= 3;
   }
 
   if (!BILLING_ENFORCEMENT_ENABLED) return true;
 
-  const status = String(subscription?.status || '').toLowerCase();
-  if (!['active', 'paid', 'trialing_paid', 'current'].includes(status)) return false;
+  if (!hasEligibleSubscriptionStatus(subscription)) return false;
   return Number(subscription?.plan_id || 0) >= definition.requiredPlanId;
 };
 
@@ -292,8 +323,8 @@ export const getRouteFeature = (pathname: string): FeatureKey | null => {
     ['/entregadores', 'deliveryTeam'],
     ['/motoboys', 'deliveryTeam'],
     ['/garcons', 'team'],
-    ['/marketing', 'marketing'],
-    ['/loyalty', 'marketing'],
+    ['/marketing', 'marketingEssential'],
+    ['/loyalty', 'marketingEssential'],
     ['/whatsapp-bot', 'whatsapp'],
     ['/configuracoes', 'settings'],
     ['/downloads', 'desktop'],

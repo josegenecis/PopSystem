@@ -271,6 +271,46 @@ const createAutomaticDeliveryOffer = async (supabase: any, order: any, newStatus
   return { ok: true, created: true, offerId: offer?.id || null, payoutAmount }
 }
 
+const runPostStatusTasks = async (supabase: any, updated: any, previousOrder: any, newStatus: string) => {
+  const stockTask = (async () => {
+    if (['preparing', 'ready', 'in_delivery', 'delivered', 'completed'].includes(newStatus)) {
+      try {
+        return await applyStockForOrder(supabase, updated)
+      } catch (e: any) {
+        return { ok: false, error: String(e?.message || e) }
+      }
+    }
+    if (newStatus === 'cancelled' && String(previousOrder.status || '') !== 'cancelled') {
+      try {
+        return await restoreStockForCancelledOrder(supabase, updated)
+      } catch (e: any) {
+        return { ok: false, error: String(e?.message || e) }
+      }
+    }
+    return { ok: true, skipped: true, reason: 'status_without_stock_change' }
+  })()
+
+  const whatsappTask = notifyOrderStatus(supabase, updated, newStatus)
+    .catch((e: any) => ({ ok: false, error: String(e?.message || e) }))
+
+  const deliveryOfferTask = createAutomaticDeliveryOffer(supabase, updated, newStatus)
+    .catch((e: any) => ({ ok: false, error: String(e?.message || e) }))
+
+  const loyaltyTask = (newStatus === 'delivered' || newStatus === 'completed')
+    ? processLoyaltyForOrder(supabase, updated)
+        .catch((e: any) => ({ ok: false, error: String(e?.message || e) }))
+    : Promise.resolve({ ok: true, skipped: true, reason: 'status_without_loyalty_change' })
+
+  const [stock, whatsapp, deliveryOffer, loyalty] = await Promise.all([
+    stockTask,
+    whatsappTask,
+    deliveryOfferTask,
+    loyaltyTask,
+  ])
+
+  return { stock, whatsapp, deliveryOffer, loyalty }
+}
+
 const callIfoodForStatus = async (supabase: any, order: any, newStatus: string, payload: any) => {
   const variations = order?.variations && typeof order.variations === 'object'
     ? order.variations
@@ -301,12 +341,20 @@ const callIfoodForStatus = async (supabase: any, order: any, newStatus: string, 
   }
 
   if (newStatus === 'in_delivery') {
-    return await requestIfoodOrderAction(supabase, settings, ifoodOrderId, 'dispatch')
+    if (deliveredBy !== 'MERCHANT') {
+      return { ok: true, skipped: true, reason: 'ifood_delivery' }
+    }
+    return await requestIfoodOrderAction(
+      supabase,
+      settings,
+      ifoodOrderId,
+      'dispatch',
+      { deliveredBy: 'MERCHANT' },
+    )
   }
 
   if (newStatus === 'cancelled') {
     const cancellationCode = String(payload?.ifoodCancellationCode || '').trim()
-    const cancellationReason = String(payload?.ifoodCancellationReason || '').trim()
     if (!cancellationCode) {
       throw new Error('ifood_cancel_reason_required')
     }
@@ -316,10 +364,7 @@ const callIfoodForStatus = async (supabase: any, order: any, newStatus: string, 
       settings,
       ifoodOrderId,
       'requestCancellation',
-      {
-        reason: cancellationReason || 'Cancelamento solicitado no PopSystem',
-        cancellationCode,
-      },
+      { reason: cancellationCode },
     )
   }
 
@@ -440,6 +485,7 @@ Deno.serve(async (req: Request) => {
     if (!authenticatedUserId) return ok({ ok: false, error: 'unauthorized' })
 
     const body = await req.json().catch(() => ({}))
+    const requestStartedAt = Date.now()
     const orderId = String(body?.orderId || '')
     const newStatus = String(body?.newStatus || '')
     const operationId = String(body?.operationId || crypto.randomUUID())
@@ -557,49 +603,52 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    let stockResult: any = null
-    if (['preparing', 'ready', 'in_delivery', 'delivered', 'completed'].includes(newStatus)) {
-      try {
-        stockResult = await applyStockForOrder(supabase, updated)
-      } catch {}
-    } else if (newStatus === 'cancelled' && String(order.status || '') !== 'cancelled') {
-      try {
-        stockResult = await restoreStockForCancelledOrder(supabase, updated)
-      } catch (e: any) {
-        stockResult = { ok: false, error: String(e?.message || e) }
-      }
+    const postStatusTask = runPostStatusTasks(supabase, updated, order, newStatus)
+    const edgeRuntime = (globalThis as any).EdgeRuntime
+    let postStatusResult: any = null
+
+    if (edgeRuntime && typeof edgeRuntime.waitUntil === 'function') {
+      edgeRuntime.waitUntil(
+        postStatusTask
+          .then((result) => {
+            console.log('[orders-update-status] post-processing completed', {
+              orderId,
+              newStatus,
+              operationId,
+              result,
+            })
+          })
+          .catch((error) => {
+            console.error('[orders-update-status] post-processing failed', {
+              orderId,
+              newStatus,
+              operationId,
+              error: String(error?.message || error),
+            })
+          }),
+      )
+    } else {
+      postStatusResult = await postStatusTask
     }
 
-    let whatsappResult: any = null
-    try {
-      whatsappResult = await notifyOrderStatus(supabase, updated, newStatus)
-    } catch (e: any) {
-      whatsappResult = { ok: false, error: String(e?.message || e) }
-    }
+    const queuedResult = { ok: true, queued: true }
 
-    let deliveryOfferResult: any = null
-    try {
-      deliveryOfferResult = await createAutomaticDeliveryOffer(supabase, updated, newStatus)
-    } catch (e: any) {
-      deliveryOfferResult = { ok: false, error: String(e?.message || e) }
-    }
-
-    let loyaltyResult: any = null
-    try {
-      if (newStatus === 'delivered' || newStatus === 'completed') {
-        loyaltyResult = await processLoyaltyForOrder(supabase, updated)
-      }
-    } catch (e: any) {
-      loyaltyResult = { ok: false, error: String(e?.message || e) }
-    }
+    console.log('[orders-update-status] status persisted', {
+      orderId,
+      newStatus,
+      operationId,
+      elapsedMs: Date.now() - requestStartedAt,
+      postProcessingQueued: !postStatusResult,
+    })
 
     return ok({
       ok: true,
       order: updated,
-      stock: stockResult,
-      whatsapp: whatsappResult,
-      deliveryOffer: deliveryOfferResult,
-      loyalty: loyaltyResult,
+      stock: postStatusResult?.stock || queuedResult,
+      whatsapp: postStatusResult?.whatsapp || queuedResult,
+      deliveryOffer: postStatusResult?.deliveryOffer || queuedResult,
+      loyalty: postStatusResult?.loyalty || queuedResult,
+      postProcessingQueued: !postStatusResult,
       idempotent: false,
       operationId,
     })

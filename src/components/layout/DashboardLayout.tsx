@@ -1,12 +1,9 @@
-import React, { Suspense, useEffect, useState } from 'react';
+import React, { Suspense } from 'react';
 import FixedHeader from './FixedHeader';
 import CollapsibleSidebar from './CollapsibleSidebar';
 import MobileBottomNav from './MobileBottomNav';
 import SoundPermissionHelper from '@/components/notifications/SoundPermissionHelper';
 import { SidebarProvider, useSidebar } from '@/contexts/SidebarContext';
-import { useAuth } from '@/contexts/AuthContext';
-import OnboardingWizard from '@/components/onboarding/OnboardingWizard';
-import { supabase } from '@/integrations/supabase/client';
 import PageContentSkeleton from '@/components/ui/page-content-skeleton';
 
 interface DashboardLayoutProps {
@@ -15,66 +12,9 @@ interface DashboardLayoutProps {
 
 const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) => {
   const { isOpen, isMobile, isPinned, closeSidebar } = useSidebar();
-  const { user, loading, refreshUser } = useAuth();
-  const [showWizard, setShowWizard] = useState(false);
-
-  useEffect(() => {
-    let mounted = true;
-
-    const checkOnboardingStatus = async () => {
-      if (!user) {
-        return;
-      }
-      
-      try {
-        // Verifica produtos e status do perfil em paralelo
-        const [productsResult, profileResult] = await Promise.race([
-          Promise.all([
-            supabase.from('products').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
-            supabase.from('profiles').select('onboarding_completed').eq('id', user.id).maybeSingle()
-          ]),
-          new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error('Tempo limite ao preparar o painel.')), 6000)),
-        ]);
-        
-        if (!mounted) return;
-
-        if (productsResult.error) throw productsResult.error;
-        if (profileResult.error) throw profileResult.error;
-
-        const hasProducts = (productsResult.count || 0) > 0;
-        const isCompleted = profileResult.data?.onboarding_completed === true;
-        
-        // Se tem produtos OU marcou como completado, não mostra wizard
-        if (hasProducts || isCompleted) {
-          setShowWizard(false);
-        } else {
-          setShowWizard(true);
-        }
-      } catch (error) {
-        console.error("Error checking onboarding status:", error);
-      }
-    };
-
-    if (!loading) {
-      checkOnboardingStatus();
-    }
-
-    return () => {
-      mounted = false;
-    };
-  }, [user, loading]);
-
-  const handleOnboardingComplete = () => {
-    refreshUser();
-    setShowWizard(false);
-  };
 
   return (
     <div className="relative min-h-screen w-full overflow-x-hidden bg-gradient-to-br from-slate-50 via-white to-orange-50 dark:from-[#07110d] dark:via-[#0b1512] dark:to-[#101c17]">
-      {showWizard && (
-        <OnboardingWizard onComplete={handleOnboardingComplete} />
-      )}
-
       <FixedHeader />
       
       {/* Overlay para mobile */}

@@ -180,7 +180,7 @@ const DataMigrationModal: React.FC<DataMigrationModalProps> = ({ isOpen, onClose
           if (offlineEngine === 'firebird') {
             const converted = await convertFirebirdToImportFile(firebird);
             uploadFile = converted.file;
-            setStatusText(`${converted.tableCount} tabelas e ${converted.rowCount.toLocaleString('pt-BR')} registros encontrados. Enviando para análise...`);
+            setStatusText(`${converted.tableCount} tabelas e ${converted.rowCount.toLocaleString('pt-BR')} registros encontrados.${converted.compressed ? ' Dados compactados automaticamente.' : ''} Enviando para análise...`);
           } else {
             if (!file) throw new Error('Selecione o banco SQLite.');
             const engine = detectOfflineDatabaseEngine(file.name);
@@ -193,7 +193,7 @@ const DataMigrationModal: React.FC<DataMigrationModalProps> = ({ isOpen, onClose
           if (!file) throw new Error('Selecione o arquivo de importação.');
           uploadFile = file;
         }
-        if (uploadFile.size > 50 * 1024 * 1024) throw new Error('Os dados convertidos ultrapassam 50 MB. Divida o banco ou use o conector desktop.');
+        if (uploadFile.size > 50 * 1024 * 1024) throw new Error('Mesmo após a compactação, os dados ultrapassam 50 MB. Este volume precisa de importação assistida.');
         const path = `${user.id}/${crypto.randomUUID()}/${safeFilename(uploadFile.name)}`;
         const { error } = await supabase.storage.from('data-imports').upload(path, uploadFile, { contentType: uploadFile.type || 'application/octet-stream', upsert: false });
         if (error) throw error;

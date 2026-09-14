@@ -55,6 +55,10 @@ const ResetPassword: React.FC = () => {
     }
   }, []);
 
+  const isOperatorPinRecovery = searchParams.mode === 'operator-pin';
+  const operatorId = String(searchParams.operatorId || '').trim();
+  const operatorStoreId = String(searchParams.storeId || '').trim();
+
   useEffect(() => {
     let cancelled = false;
     const init = async () => {
@@ -97,18 +101,27 @@ const ResetPassword: React.FC = () => {
   const handleUpdatePassword = async () => {
     if (saving) return;
     const trimmed = password.trim();
-    if (trimmed.length < 6) {
+    const isValidPin = /^\d{4,6}$/.test(trimmed);
+    if (isOperatorPinRecovery ? !isValidPin : trimmed.length < 6) {
       toast({
-        title: 'Senha fraca',
-        description: 'Use uma senha com pelo menos 6 caracteres.',
+        title: isOperatorPinRecovery ? 'PIN inválido' : 'Senha fraca',
+        description: isOperatorPinRecovery ? 'Use um PIN numérico de 4 a 6 dígitos.' : 'Use uma senha com pelo menos 6 caracteres.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (isOperatorPinRecovery && (!operatorId || !operatorStoreId)) {
+      toast({
+        title: 'Link inválido',
+        description: 'Solicite um novo link de recuperação do PIN.',
         variant: 'destructive',
       });
       return;
     }
     if (trimmed !== confirmPassword.trim()) {
       toast({
-        title: 'Senhas não conferem',
-        description: 'Digite a mesma senha nos dois campos.',
+        title: isOperatorPinRecovery ? 'PINs não conferem' : 'Senhas não conferem',
+        description: `Digite o mesmo ${isOperatorPinRecovery ? 'PIN' : 'valor'} nos dois campos.`,
         variant: 'destructive',
       });
       return;
@@ -116,17 +129,25 @@ const ResetPassword: React.FC = () => {
 
     try {
       setSaving(true);
-      const { error } = await supabase.auth.updateUser({ password: trimmed });
+      const result = isOperatorPinRecovery
+        ? await supabase.from('waiters')
+            .update({ pin: trimmed })
+            .eq('id', operatorId)
+            .eq('user_id', operatorStoreId)
+            .select('id')
+            .single()
+        : await supabase.auth.updateUser({ password: trimmed });
+      const { error } = result;
       if (error) throw error;
       toast({
-        title: 'Senha atualizada',
-        description: 'Você já pode acessar com a nova senha.',
+        title: isOperatorPinRecovery ? 'PIN atualizado' : 'Senha atualizada',
+        description: isOperatorPinRecovery ? 'O operador já pode acessar com o novo PIN.' : 'Você já pode acessar com a nova senha.',
       });
-      navigate('/login', { replace: true });
+      navigate(isOperatorPinRecovery ? '/operator-login' : '/login', { replace: true });
     } catch (e: any) {
       toast({
-        title: 'Erro ao atualizar senha',
-        description: e?.message || 'Não foi possível atualizar sua senha.',
+        title: isOperatorPinRecovery ? 'Erro ao atualizar PIN' : 'Erro ao atualizar senha',
+        description: e?.message || (isOperatorPinRecovery ? 'Não foi possível atualizar o PIN.' : 'Não foi possível atualizar sua senha.'),
         variant: 'destructive',
       });
     } finally {
@@ -139,7 +160,7 @@ const ResetPassword: React.FC = () => {
       <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
         <Card className="w-full max-w-md">
           <CardHeader>
-            <CardTitle>Redefinir senha</CardTitle>
+            <CardTitle>{isOperatorPinRecovery ? 'Redefinir PIN' : 'Redefinir senha'}</CardTitle>
             <CardDescription>Carregando…</CardDescription>
           </CardHeader>
           <CardContent />
@@ -159,8 +180,8 @@ const ResetPassword: React.FC = () => {
             </CardDescription>
           </CardHeader>
           <CardFooter className="flex justify-end">
-            <Button onClick={() => navigate('/login')} disabled={saving}>
-              Ir para login
+            <Button onClick={() => navigate(isOperatorPinRecovery ? '/operator-login' : '/login')} disabled={saving}>
+              {isOperatorPinRecovery ? 'Voltar à identificação' : 'Ir para login'}
             </Button>
           </CardFooter>
         </Card>
@@ -172,19 +193,21 @@ const ResetPassword: React.FC = () => {
     <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>Redefinir senha</CardTitle>
-          <CardDescription>Crie uma nova senha para sua conta.</CardDescription>
+          <CardTitle>{isOperatorPinRecovery ? 'Redefinir PIN do operador' : 'Redefinir senha'}</CardTitle>
+          <CardDescription>{isOperatorPinRecovery ? 'Crie um novo PIN numérico de 4 a 6 dígitos.' : 'Crie uma nova senha para sua conta.'}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="password">Nova senha</Label>
+            <Label htmlFor="password">{isOperatorPinRecovery ? 'Novo PIN' : 'Nova senha'}</Label>
             <div className="relative">
               <Input
                 id="password"
                 type={showPassword ? 'text' : 'password'}
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => setPassword(isOperatorPinRecovery ? e.target.value.replace(/\D/g, '') : e.target.value)}
                 autoComplete="new-password"
+                inputMode={isOperatorPinRecovery ? 'numeric' : undefined}
+                maxLength={isOperatorPinRecovery ? 6 : undefined}
                 className="pr-10"
               />
               <Button
@@ -200,14 +223,16 @@ const ResetPassword: React.FC = () => {
             </div>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="confirmPassword">Confirmar nova senha</Label>
+            <Label htmlFor="confirmPassword">{isOperatorPinRecovery ? 'Confirmar novo PIN' : 'Confirmar nova senha'}</Label>
             <div className="relative">
               <Input
                 id="confirmPassword"
                 type={showConfirmPassword ? 'text' : 'password'}
                 value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
+                onChange={(e) => setConfirmPassword(isOperatorPinRecovery ? e.target.value.replace(/\D/g, '') : e.target.value)}
                 autoComplete="new-password"
+                inputMode={isOperatorPinRecovery ? 'numeric' : undefined}
+                maxLength={isOperatorPinRecovery ? 6 : undefined}
                 className="pr-10"
               />
               <Button
@@ -224,8 +249,8 @@ const ResetPassword: React.FC = () => {
           </div>
         </CardContent>
         <CardFooter className="flex justify-end">
-          <Button onClick={handleUpdatePassword} disabled={saving || password.trim().length < 6}>
-            {saving ? 'Salvando…' : 'Atualizar senha'}
+          <Button onClick={handleUpdatePassword} disabled={saving || (isOperatorPinRecovery ? !/^\d{4,6}$/.test(password.trim()) : password.trim().length < 6)}>
+            {saving ? 'Salvando…' : isOperatorPinRecovery ? 'Atualizar PIN' : 'Atualizar senha'}
           </Button>
         </CardFooter>
       </Card>
@@ -234,4 +259,3 @@ const ResetPassword: React.FC = () => {
 };
 
 export default ResetPassword;
-

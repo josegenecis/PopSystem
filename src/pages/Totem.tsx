@@ -25,6 +25,7 @@ import { supabase } from '@/integrations/supabase/client';
 import TotemFulfillmentDialog, { type TotemOrderType } from '@/components/totem/TotemFulfillmentDialog';
 import TotemUpsellModal, { type TotemUpsellRecommendation } from '@/components/totem/TotemUpsellModal';
 import { normalizeImageUrlForDisplay } from '@/utils/normalizeImageUrl';
+import { warmImageCache } from '@/utils/imageCache';
 
 interface Product {
   id: string;
@@ -99,6 +100,15 @@ export default function Totem() {
 
   const itemCount = getCartItemCount();
   const total = getCartTotal();
+
+  useEffect(() => {
+    warmImageCache([
+      ...products.map((product) => product.image_url),
+      ...categories.map((category) => category.totem_image_url),
+      profile?.logo_url,
+      profile?.banner_url,
+    ]);
+  }, [products, categories, profile?.logo_url, profile?.banner_url]);
 
   useEffect(() => {
     clearCartRef.current = clearCart;

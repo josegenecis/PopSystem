@@ -49,7 +49,9 @@ export const isAdminOperator = (session: OperatorSession | null): boolean => {
 export const canCancelOrder = (session: OperatorSession | null): boolean => {
   if (!session) return false
   if (isAdminOperator(session)) return true
-  return session.permissions?.can_cancel_order === true || session.permissions?.orders_manage === true
+  return session.permissions?.can_cancel_order === true
+    || session.permissions?.orders_cancel === true
+    || session.permissions?.orders_manage === true
 }
 
 export const isCashOperator = (session: OperatorSession | null): boolean => {
@@ -58,6 +60,24 @@ export const isCashOperator = (session: OperatorSession | null): boolean => {
   return session.permissions?.can_open_cash === true || 
          session.permissions?.can_close_cash === true ||
          session.permissions?.pos_open_close === true
+}
+
+export const canOpenCash = (session: OperatorSession | null): boolean => {
+  if (!session) return false
+  if (isAdminOperator(session)) return true
+  return session.permissions?.can_open_cash === true || session.permissions?.pos_open_close === true
+}
+
+export const canCloseCash = (session: OperatorSession | null): boolean => {
+  if (!session) return false
+  if (isAdminOperator(session)) return true
+  return session.permissions?.can_close_cash === true || session.permissions?.pos_open_close === true
+}
+
+export const canMoveCash = (session: OperatorSession | null): boolean => {
+  if (!session) return false
+  if (isAdminOperator(session)) return true
+  return session.permissions?.cash_movement === true
 }
 
 export const canGiveDiscount = (session: OperatorSession | null): boolean => {
@@ -95,20 +115,68 @@ export type OperatorArea =
   | 'pdv'
   | 'tables'
   | 'orders'
+  | 'customers'
   | 'kds'
   | 'products'
   | 'stock'
+  | 'cash'
   | 'finance'
+  | 'expenses'
   | 'reports'
   | 'marketing'
+  | 'whatsapp'
   | 'settings'
   | 'team'
+  | 'timeclock'
   | 'delivery'
+  | 'deliveryAreas'
+  | 'deliveryTeam'
+  | 'hardware'
+  | 'integrations'
   | 'desktop'
   | 'agent'
   | 'security'
   | 'fiscal'
   | 'pix'
+
+export const OPERATOR_AREA_PERMISSIONS: Record<OperatorArea, string[]> = {
+  dashboard: ['dashboard_view'],
+  pdv: ['pos_access'],
+  tables: ['tables_access', 'pos_access', 'waiter_app'],
+  orders: ['orders_manage'],
+  customers: ['customers_manage', 'orders_manage', 'marketing_manage'],
+  kds: ['kds_access', 'orders_manage'],
+  products: ['menu_manage'],
+  stock: ['stock_manage'],
+  cash: ['pos_open_close', 'can_open_cash', 'can_close_cash', 'cash_movement'],
+  finance: ['financial_view'],
+  expenses: ['expenses_manage', 'financial_view'],
+  reports: ['reports_view', 'financial_view'],
+  marketing: ['marketing_manage'],
+  whatsapp: ['whatsapp_manage', 'marketing_manage'],
+  settings: [
+    'settings_manage',
+    'delivery_areas_manage',
+    'payments_manage',
+    'whatsapp_manage',
+    'hardware_manage',
+    'ifood_manage',
+    'users_manage',
+  ],
+  team: ['users_manage'],
+  timeclock: ['timeclock_manage', 'users_manage'],
+  // `delivery_manage` e `settings_manage` preservam operadores já cadastrados.
+  delivery: ['delivery_manage', 'delivery_areas_manage', 'delivery_drivers_manage', 'settings_manage'],
+  deliveryAreas: ['delivery_areas_manage', 'delivery_manage', 'settings_manage'],
+  deliveryTeam: ['delivery_drivers_manage', 'delivery_manage', 'settings_manage'],
+  hardware: ['hardware_manage', 'settings_manage'],
+  integrations: ['ifood_manage', 'settings_manage'],
+  desktop: ['desktop_access', 'settings_manage'],
+  agent: ['agent_access', 'settings_manage'],
+  security: ['security_view', 'settings_manage'],
+  fiscal: ['fiscal_manage', 'settings_manage'],
+  pix: ['payments_manage', 'financial_view', 'settings_manage'],
+}
 
 export const canAccessOperatorArea = (session: OperatorSession | null, area?: OperatorArea): boolean => {
   if (!area) return true
@@ -116,28 +184,7 @@ export const canAccessOperatorArea = (session: OperatorSession | null, area?: Op
   if (isAdminOperator(session)) return true
   const permissions = session.permissions || {}
 
-  const areaPermissions: Record<OperatorArea, string[]> = {
-    dashboard: ['dashboard_view'],
-    pdv: ['pos_access'],
-    tables: ['tables_access', 'pos_access', 'waiter_app'],
-    orders: ['orders_manage'],
-    kds: ['kds_access', 'orders_manage'],
-    products: ['menu_manage'],
-    stock: ['stock_manage'],
-    finance: ['financial_view'],
-    reports: ['reports_view', 'financial_view'],
-    marketing: ['marketing_manage'],
-    settings: ['settings_manage'],
-    team: ['users_manage'],
-    delivery: ['delivery_manage', 'settings_manage'],
-    desktop: ['settings_manage'],
-    agent: ['settings_manage'],
-    security: ['settings_manage'],
-    fiscal: ['fiscal_manage', 'settings_manage'],
-    pix: ['financial_view', 'settings_manage'],
-  }
-
-  return (areaPermissions[area] || []).some((permission) => permissions[permission] === true)
+  return (OPERATOR_AREA_PERMISSIONS[area] || []).some((permission) => permissions[permission] === true)
 }
 
 const defaultOperatorRoutes: Array<{ area: OperatorArea; path: string }> = [
@@ -145,14 +192,26 @@ const defaultOperatorRoutes: Array<{ area: OperatorArea; path: string }> = [
   { area: 'pdv', path: '/pdv' },
   { area: 'tables', path: '/mesas' },
   { area: 'orders', path: '/pedidos' },
+  { area: 'customers', path: '/clientes' },
   { area: 'kds', path: '/cozinha' },
   { area: 'products', path: '/produtos' },
   { area: 'stock', path: '/estoque' },
+  { area: 'cash', path: '/caixa' },
   { area: 'finance', path: '/financeiro' },
+  { area: 'expenses', path: '/despesas' },
   { area: 'reports', path: '/relatorios' },
   { area: 'marketing', path: '/marketing' },
-  { area: 'settings', path: '/configuracoes' },
+  { area: 'whatsapp', path: '/whatsapp-bot' },
   { area: 'team', path: '/garcons' },
+  { area: 'timeclock', path: '/ponto' },
+  { area: 'deliveryAreas', path: '/bairros-entrega' },
+  { area: 'deliveryTeam', path: '/entregadores' },
+  { area: 'settings', path: '/configuracoes' },
+  { area: 'desktop', path: '/downloads' },
+  { area: 'agent', path: '/agente' },
+  { area: 'security', path: '/security' },
+  { area: 'fiscal', path: '/fiscal' },
+  { area: 'pix', path: '/pix' },
 ]
 
 const pathOperatorAreas: Array<{ area: OperatorArea; paths: string[] }> = [
@@ -160,15 +219,21 @@ const pathOperatorAreas: Array<{ area: OperatorArea; paths: string[] }> = [
   { area: 'pdv', paths: ['/pdv'] },
   { area: 'tables', paths: ['/mesas'] },
   { area: 'orders', paths: ['/pedidos', '/orders'] },
+  { area: 'customers', paths: ['/clientes'] },
   { area: 'kds', paths: ['/cozinha'] },
   { area: 'products', paths: ['/produtos', '/cardapio'] },
   { area: 'stock', paths: ['/estoque', '/inteligencia/cmv', '/inteligencia/curva-abc'] },
-  { area: 'finance', paths: ['/financeiro', '/caixa', '/despesas'] },
+  { area: 'cash', paths: ['/caixa'] },
+  { area: 'finance', paths: ['/financeiro'] },
+  { area: 'expenses', paths: ['/despesas'] },
   { area: 'reports', paths: ['/relatorios'] },
-  { area: 'marketing', paths: ['/marketing', '/whatsapp-bot', '/loyalty'] },
+  { area: 'marketing', paths: ['/marketing', '/loyalty'] },
+  { area: 'whatsapp', paths: ['/whatsapp-bot'] },
   { area: 'settings', paths: ['/configuracoes'] },
-  { area: 'team', paths: ['/garcons', '/ponto'] },
-  { area: 'delivery', paths: ['/bairros-entrega', '/entregadores', '/motoboys'] },
+  { area: 'team', paths: ['/garcons'] },
+  { area: 'timeclock', paths: ['/ponto'] },
+  { area: 'deliveryAreas', paths: ['/bairros-entrega'] },
+  { area: 'deliveryTeam', paths: ['/entregadores', '/motoboys'] },
   { area: 'desktop', paths: ['/desktop', '/downloads'] },
   { area: 'agent', paths: ['/agente'] },
   { area: 'security', paths: ['/security'] },

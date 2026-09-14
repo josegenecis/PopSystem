@@ -23,6 +23,7 @@ type FiscalRule = {
   is_cst?: string | null;
   is_cclass_trib?: string | null;
   is_config?: Record<string, unknown> | null;
+  legal_basis?: string | null;
   rtc_source_version?: string | null;
   rtc_table_version?: string | null;
   accountant_approved_at?: string | null;
@@ -104,7 +105,7 @@ export default function FiscalRtcValidation() {
         .eq('user_id', storeId)
         .maybeSingle(),
       client.from('fiscal_tax_rules')
-        .select('id,name,active,ibs_cbs_cst,cclass_trib,ibs_cbs_config,is_cst,is_cclass_trib,is_config,rtc_source_version,rtc_table_version,accountant_approved_at,accountant_approved_by,valid_from,valid_until')
+        .select('id,name,active,ibs_cbs_cst,cclass_trib,ibs_cbs_config,is_cst,is_cclass_trib,is_config,legal_basis,rtc_source_version,rtc_table_version,accountant_approved_at,accountant_approved_by,valid_from,valid_until')
         .eq('user_id', storeId)
         .order('priority', { ascending: true }),
     ]);
@@ -161,12 +162,13 @@ export default function FiscalRtcValidation() {
                 <div>
                   <div className="flex items-center gap-2 font-semibold">{errors.length ? <XCircle className="h-4 w-4 text-red-500" /> : <CheckCircle2 className="h-4 w-4 text-emerald-600" />}{rule.name}</div>
                   <div className="mt-1 text-xs text-muted-foreground">Vigência: {rule.valid_from}{rule.valid_until ? ` até ${rule.valid_until}` : ' sem término'} • {rule.rtc_source_version || 'NT não versionada'} • {rule.rtc_table_version || 'tabela não versionada'}</div>
+                  <div className="mt-1 text-xs text-muted-foreground"><span className="font-semibold text-foreground">Fundamentação legal:</span> {rule.legal_basis || 'Não informada'}</div>
                 </div>
                 <div className="flex gap-2"><Badge variant={rule.active ? 'default' : 'secondary'}>{rule.active ? 'Ativa' : 'Inativa'}</Badge><Badge variant={rule.accountant_approved_at ? 'outline' : 'destructive'}>{rule.accountant_approved_at ? 'Aprovada' : 'Sem aprovação'}</Badge></div>
               </div>
               <div className="mt-3 grid gap-3 md:grid-cols-2">
-                <TaxSnapshot title="IBS/CBS" codes={`${rule.ibs_cbs_cst || '—'} / ${rule.cclass_trib || '—'}`} value={rule.ibs_cbs_config} />
-                <TaxSnapshot title="Imposto Seletivo" codes={`${rule.is_cst || '—'} / ${rule.is_cclass_trib || '—'}`} value={rule.is_config} />
+                <RtcSummary codes={`${rule.ibs_cbs_cst || '—'} / ${rule.cclass_trib || '—'}`} value={rule.ibs_cbs_config} />
+                <SelectiveTaxSummary codes={`${rule.is_cst || '—'} / ${rule.is_cclass_trib || '—'}`} value={rule.is_config} />
               </div>
               {errors.length > 0 && <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-red-700">{errors.map((item) => <li key={item}>{item}</li>)}</ul>}
             </div>
@@ -181,6 +183,26 @@ function StatusCard({ label, value, ok }: { label: string; value: string; ok: bo
   return <div className={`rounded-xl border p-3 ${ok ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}><div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</div><div className="mt-1 text-sm font-semibold">{value}</div></div>;
 }
 
-function TaxSnapshot({ title, codes, value }: { title: string; codes: string; value: unknown }) {
-  return <div className="rounded-lg bg-slate-950 p-3 text-slate-100"><div className="flex items-center justify-between text-xs font-semibold"><span>{title}</span><span>{codes}</span></div><pre className="mt-2 max-h-44 overflow-auto whitespace-pre-wrap text-[11px] text-slate-300">{JSON.stringify(objectValue(value), null, 2)}</pre></div>;
+const displayNumber = (value: unknown, suffix = '') => Number.isFinite(Number(value)) ? `${Number(value).toLocaleString('pt-BR', { maximumFractionDigits: 4 })}${suffix}` : 'Não informado';
+
+function RtcSummary({ codes, value }: { codes: string; value: unknown }) {
+  const rtc = objectValue(value);
+  const mode = String(rtc.mode || 'none');
+  const modeLabel = mode === 'standard' ? 'Tributação padrão' : mode === 'monophase' ? 'Monofásica' : mode === 'transfer_credit' ? 'Transferência de crédito' : 'Sem incidência';
+  const jurisdictions = [
+    ['IBS estadual', objectValue(rtc.ibsUf)],
+    ['IBS municipal', objectValue(rtc.ibsMun)],
+    ['CBS', objectValue(rtc.cbs)],
+  ] as const;
+  return <div className="rounded-lg border bg-slate-50 p-3"><div className="flex items-center justify-between gap-3 text-xs font-semibold"><span>IBS/CBS</span><span>{codes}</span></div><div className="mt-2 text-sm font-medium">{modeLabel}</div>{mode === 'standard' ? <div className="mt-3 space-y-2">{jurisdictions.map(([label, item]) => <div key={label} className="rounded-md border bg-white p-2 text-xs"><div className="font-semibold">{label}</div><div className="mt-1 grid grid-cols-2 gap-1 text-muted-foreground"><span>Alíquota: {displayNumber(item.rate, '%')}</span><span>Redução: {displayNumber(item.reduction ?? 0, '%')}</span><span>Diferimento: {displayNumber(item.deferralPercent ?? 0, '%')}</span><span>Devolução: {displayNumber(item.returnedPercent ?? 0, '%')}</span></div></div>)}</div> : null}{mode === 'monophase' ? <SummaryFields value={objectValue(rtc.monophase)} /> : null}{mode === 'transfer_credit' ? <SummaryFields value={objectValue(rtc.transferCredit)} /> : null}</div>;
+}
+
+function SelectiveTaxSummary({ codes, value }: { codes: string; value: unknown }) {
+  const config = objectValue(value);
+  return <div className="rounded-lg border bg-slate-50 p-3"><div className="flex items-center justify-between gap-3 text-xs font-semibold"><span>Imposto Seletivo</span><span>{codes}</span></div><div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground"><span>Situação: {config.enabled === true ? 'Habilitado' : 'Sem incidência'}</span><span>Alíquota: {displayNumber(config.rate, '%')}</span><span>Alíquota específica: {displayNumber(config.specificRate)}</span><span>Unidade: {String(config.unit || 'Não informada')}</span></div></div>;
+}
+
+function SummaryFields({ value }: { value: Record<string, unknown> }) {
+  const entries = Object.entries(value);
+  return entries.length ? <div className="mt-3 grid gap-2 sm:grid-cols-2">{entries.map(([key, fieldValue]) => <div key={key} className="rounded-md border bg-white p-2 text-xs"><div className="font-medium text-muted-foreground">{key}</div><div className="font-semibold">{displayNumber(fieldValue)}</div></div>)}</div> : <div className="mt-3 text-xs text-amber-700">Parâmetros não informados.</div>;
 }

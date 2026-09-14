@@ -3,7 +3,9 @@ const path = require('path');
 const Firebird = require('node-firebird');
 
 const MAX_ROWS = 250000;
-const MAX_SERIALIZED_BYTES = 45 * 1024 * 1024;
+// O conteúdo é compactado antes do envio. Este limite protege a memória do
+// aplicativo sem obrigar o restaurante a dividir bancos Firebird comuns.
+const MAX_SERIALIZED_BYTES = 120 * 1024 * 1024;
 const ALLOWED_CHARSETS = new Set(['UTF8', 'WIN1252', 'ISO8859_1', 'NONE']);
 
 const quoteIdentifier = (identifier) => `"${String(identifier).replace(/"/g, '""')}"`;
@@ -110,7 +112,7 @@ class FirebirdMigrationService {
           if (rowCount >= MAX_ROWS) throw new Error(`O banco possui mais de ${MAX_ROWS.toLocaleString('pt-BR')} registros. Divida a migração ou solicite uma importação assistida.`);
           const row = normalizeRow(rawRow);
           serializedBytes += Buffer.byteLength(JSON.stringify(row), 'utf8');
-          if (serializedBytes > MAX_SERIALIZED_BYTES) throw new Error('Os dados convertidos ultrapassam 45 MB. Divida a migração ou solicite uma importação assistida.');
+          if (serializedBytes > MAX_SERIALIZED_BYTES) throw new Error('Os dados convertidos ultrapassam 120 MB. Para este volume, solicite uma importação assistida.');
           rows.push(row);
           rowCount += 1;
         });

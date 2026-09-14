@@ -12,10 +12,13 @@ if (!xmlFile) {
 }
 
 const root = path.resolve(__dirname, '..');
-const schemaDir = path.join(root, 'supabase/functions/nfce-operations/schemas/PL_009_V4');
+const schemaDir = path.join(
+  root,
+  'supabase/functions/nfce-operations/schemas/PL_010e_v1.02/NFe',
+);
 const schemaFile = schemaArg
   ? path.resolve(schemaArg)
-  : path.join(schemaDir, 'enviNFe_v4.00.xsd');
+  : path.join(schemaDir, 'nfe_v4.00.xsd');
 const resolvedXml = path.resolve(xmlFile);
 
 if (!fs.existsSync(resolvedXml)) {
@@ -34,7 +37,7 @@ const xmllint = spawnSync('xmllint', ['--noout', '--schema', schemaFile, resolve
 });
 
 if (xmllint.status === 0) {
-  console.log('XML NFC-e valido contra o schema.');
+  console.log('XML NF-e/NFC-e valido contra o schema oficial 010e v1.02.');
   process.exit(0);
 }
 

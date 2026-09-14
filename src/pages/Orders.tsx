@@ -173,6 +173,17 @@ const Orders = () => {
   const enrichOrder = (order: any): Order => {
     const variations = order?.variations && typeof order.variations === 'object' ? order.variations : {};
     const ifood = variations?.ifood && typeof variations.ifood === 'object' ? variations.ifood : {};
+    const storedIntegration = order?.integration_payload && typeof order.integration_payload === 'object'
+      ? order.integration_payload
+      : {};
+    const integrationPayload = {
+      ...storedIntegration,
+      ...variations,
+      ifood: {
+        ...(storedIntegration?.ifood || {}),
+        ...ifood,
+      },
+    };
 
     return {
       ...order,
@@ -182,7 +193,7 @@ const Orders = () => {
       customer_document: order?.customer_document || variations?.customerDocument || null,
       pickup_code: order?.pickup_code || variations?.pickupCode || ifood?.pickupCode || null,
       scheduled_at: order?.scheduled_at || variations?.scheduledAt || ifood?.deliveryDateTimeStart || null,
-      integration_payload: order?.integration_payload || variations || null,
+      integration_payload: integrationPayload,
     } as Order;
   };
 
@@ -527,32 +538,17 @@ const Orders = () => {
           ? { status: newStatus, acceptance_status: 'rejected' }
           : { status: newStatus };
 
-      if (newStatus === 'cancelled') {
-        optimisticOrderSnapshot = existingOrder;
-        setOrders(prev => prev.map(order =>
-          order.id === orderId
-            ? { ...order, ...updateData }
-            : order
-        ));
-      }
+      optimisticOrderSnapshot = existingOrder;
+      setOrders(prev => prev.map(order =>
+        order.id === orderId
+          ? { ...order, ...updateData }
+          : order
+      ));
 
       console.log('📝 Dados para update:', updateData);
 
 
       console.log('🔄 Executando update no Supabase...');
-
-      // Verificar conexão com Supabase antes do update
-      const { data: { user: currentUser }, error: authError } = await supabase.auth.getUser();
-
-      if (authError) {
-        console.error('❌ Erro de autenticação no Supabase:', authError);
-        throw new Error(`Erro de autenticação: ${authError.message}`);
-      }
-
-      if (!currentUser) {
-        console.error('❌ Usuário não autenticado no Supabase');
-        throw new Error('Sessão expirada. Faça login novamente.');
-      }
 
       let data: any = null;
       let error: any = null;
@@ -666,7 +662,7 @@ const Orders = () => {
       }
 
     } catch (error: any) {
-      if (newStatus === 'cancelled' && optimisticOrderSnapshot) {
+      if (optimisticOrderSnapshot) {
         setOrders(prev => prev.map(order =>
           order.id === orderId ? optimisticOrderSnapshot as Order : order
         ));

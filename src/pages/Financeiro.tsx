@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
   Card, 
   CardContent, 
@@ -54,7 +54,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { PrinterService } from '@/utils/printerService';
-import { getLocalOperatorSession, canCancelOrder } from '@/services/operatorAuth';
+import { canCancelOrder, canCloseCash, canMoveCash, canOpenCash, getLocalOperatorSession } from '@/services/operatorAuth';
 import { updateOrderStatus } from '@/utils/updateOrderStatus';
 import { invokeEdgeFunction } from '@/utils/invokeEdgeFunction';
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell, Legend, BarChart, Bar } from 'recharts';
@@ -69,16 +69,18 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { CurrencyTextInput } from '@/components/ui/currency-text-input';
-import { parseBRL } from '@/lib/currency';
+import { formatBRL, parseBRL } from '@/lib/currency';
 import { CancelSaleDialog } from '@/components/finance/CancelSaleDialog';
 import { friendlyErrorMessage } from '@/lib/friendly-error';
 import StaffConsumptionManager from '@/components/tables/StaffConsumptionManager';
 import { Checkbox } from '@/components/ui/checkbox';
 import { getOpenTableCount } from '@/services/openTables';
+import { cn } from '@/lib/utils';
 
 type PaymentMethod = 'pix' | 'pix_online' | 'pix_entrega' | 'dinheiro' | 'cartao' | 'cartao_online';
 type PaymentMethodFilter = '' | 'all' | PaymentMethod;
 type TxTypeFilter = '' | 'all' | 'entrada' | 'saida';
+type PeriodPreset = 'today' | '7d' | '30d' | 'month';
 type SupabaseQuery = {
   select: (columns: string) => SupabaseQuery;
   eq: (column: string, value: unknown) => SupabaseQuery;
@@ -99,6 +101,7 @@ interface Transaction {
   category: string;
   paymentMethod?: PaymentMethod;
   status?: string;
+  acceptanceStatus?: string;
   order?: Record<string, any>;
 }
 
@@ -111,6 +114,45 @@ interface CashSession {
   status: 'open' | 'closed';
   notes?: string | null;
 }
+
+interface CashCloseOverview {
+  total: number;
+  pix: number;
+  cash: number;
+  credit: number;
+  debit: number;
+  genericCard: number;
+  receivable: number;
+  inAmount: number;
+  outAmount: number;
+  expectedCash: number;
+}
+
+const FINANCE_PAGE_SIZE = 1000;
+
+const getPeriodRange = (preset: PeriodPreset = '30d') => {
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
+  const start = new Date(end);
+
+  if (preset === 'today') {
+    start.setHours(0, 0, 0, 0);
+  } else if (preset === 'month') {
+    start.setDate(1);
+    start.setHours(0, 0, 0, 0);
+  } else {
+    start.setDate(start.getDate() - (preset === '7d' ? 6 : 29));
+    start.setHours(0, 0, 0, 0);
+  }
+
+  return { start, end };
+};
+
+const isConfirmedIncome = (transaction: Transaction) => {
+  const status = String(transaction.status || '').toLowerCase();
+  const acceptanceStatus = String(transaction.acceptanceStatus || '').toLowerCase();
+  return status !== 'cancelled' && acceptanceStatus !== 'awaiting_pix_payment';
+};
 
 const Financeiro = () => {
   const { user } = useAuth();
@@ -131,6 +173,7 @@ const Financeiro = () => {
   const [reprintingCashReport, setReprintingCashReport] = useState(false);
   const [cancellingOrderIds, setCancellingOrderIds] = useState<Set<string>>(new Set());
   const [orderToCancel, setOrderToCancel] = useState<any | null>(null);
+  const fetchSequenceRef = useRef(0);
   
   // States for new expense
   const [newExpense, setNewExpense] = useState({ description: '', amount: '', category: 'Geral' });
@@ -144,24 +187,37 @@ const Financeiro = () => {
   const [openTablesCount, setOpenTablesCount] = useState(0);
   const [checkingOpenTables, setCheckingOpenTables] = useState(false);
   const [openTablesConsent, setOpenTablesConsent] = useState(false);
+  const [cashCloseOverview, setCashCloseOverview] = useState<CashCloseOverview | null>(null);
+  const [loadingCashCloseOverview, setLoadingCashCloseOverview] = useState(false);
   const [mobileFinanceTab, setMobileFinanceTab] = useState<'caixa' | 'movimentos' | 'relatorios'>('caixa');
 
-  const [filters, setFilters] = useState({
-    paymentMethod: '' as PaymentMethodFilter,
-    type: '' as TxTypeFilter,
-    startDate: null as Date | null,
-    endDate: null as Date | null,
-    searchTerm: ''
+  const [filters, setFilters] = useState(() => {
+    const { start, end } = getPeriodRange('30d');
+    return {
+      paymentMethod: '' as PaymentMethodFilter,
+      type: '' as TxTypeFilter,
+      startDate: start as Date | null,
+      endDate: end as Date | null,
+      searchTerm: ''
+    };
   });
+  const [activePeriodPreset, setActivePeriodPreset] = useState<PeriodPreset | null>('30d');
+  const filterStartTimestamp = filters.startDate?.getTime() ?? null;
+  const filterEndTimestamp = filters.endDate?.getTime() ?? null;
   
   // Fetch transactions and session
   useEffect(() => {
     if (user) {
-      fetchData();
       checkOpenSession();
       fetchCashSessions();
     }
   }, [user]);
+
+  useEffect(() => {
+    if (user?.id) void fetchData();
+    // fetchData intentionally follows the selected date window.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, filterStartTimestamp, filterEndTimestamp]);
 
   useEffect(() => {
     if (user?.id && selectedSessionId) {
@@ -171,24 +227,55 @@ const Financeiro = () => {
 
   const fetchData = async () => {
     if (!user) return;
+    const requestId = ++fetchSequenceRef.current;
     setIsLoading(true);
     try {
-      // 1. Fetch Orders (Income)
-      const { data: orders } = await supabase
-        .from('orders')
-        .select('*')
-        .eq('user_id', user.id);
+      const rangeStart = filters.startDate ? new Date(filters.startDate) : getPeriodRange('30d').start;
+      const rangeEnd = filters.endDate ? new Date(filters.endDate) : getPeriodRange('30d').end;
+      rangeStart.setHours(0, 0, 0, 0);
+      rangeEnd.setHours(23, 59, 59, 999);
 
-      const ordersList = (orders as any[]) || [];
+      const fetchAllPages = async (buildQuery: (from: number, to: number) => PromiseLike<{ data: unknown[] | null; error: any }>) => {
+        const rows: any[] = [];
+        for (let from = 0; ; from += FINANCE_PAGE_SIZE) {
+          const { data, error } = await buildQuery(from, from + FINANCE_PAGE_SIZE - 1);
+          if (error) throw error;
+          const page = (data as any[]) || [];
+          rows.push(...page);
+          if (page.length < FINANCE_PAGE_SIZE) break;
+        }
+        return rows;
+      };
+
+      const [ordersList, cancellationAudits, expensesList] = await Promise.all([
+        fetchAllPages((from, to) => (supabase as any)
+          .from('orders')
+          .select('*')
+          .eq('user_id', user.id)
+          .gte('created_at', rangeStart.toISOString())
+          .lte('created_at', rangeEnd.toISOString())
+          .order('created_at', { ascending: false })
+          .range(from, to)),
+        fetchAllPages((from, to) => (supabase as any)
+          .from('finance_sale_cancellations')
+          .select('order_id, reason, authorized_waiter_name, created_at, refund_requested, refund_status')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .range(from, to)),
+        fetchAllPages((from, to) => (supabase as any)
+          .from('expenses')
+          .select('*')
+          .eq('user_id', user.id)
+          .eq('is_active', true)
+          .order('created_at', { ascending: false })
+          .range(from, to)),
+      ]);
+
+      if (requestId !== fetchSequenceRef.current) return;
       setOrdersRaw(ordersList);
 
-      const { data: cancellationAudits } = await (supabase as any)
-        .from('finance_sale_cancellations')
-        .select('order_id, reason, authorized_waiter_name, created_at, refund_requested, refund_status')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
       const cancellationByOrder = new Map<string, any>();
-      ((cancellationAudits as any[]) || []).forEach((audit) => {
+      cancellationAudits.forEach((audit) => {
         const orderId = String(audit?.order_id || '');
         if (orderId && !cancellationByOrder.has(orderId)) cancellationByOrder.set(orderId, audit);
       });
@@ -197,32 +284,25 @@ const Financeiro = () => {
         id: order.id,
         date: new Date(order.created_at),
         description: `Pedido #${order.id.substring(0, 8)}`,
-        amount: order.total,
+        amount: Number(order.total || 0),
         type: 'entrada' as 'entrada',
         category: 'Vendas',
         paymentMethod: order.payment_method as PaymentMethod,
         status: String(order.status || ''),
+        acceptanceStatus: String(order.acceptance_status || ''),
         order: {
           ...order,
           financial_cancellation: cancellationByOrder.get(String(order.id)) || null,
         },
       }));
 
-      // 2. Fetch Expenses (Outcome)
-      const { data: expenses } = await (supabase as any)
-        .from('expenses')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('is_active', true);
-
-      const expensesList = (expenses as any[]) || [];
       setExpensesRaw(expensesList);
 
       const expenseTx = expensesList.map(exp => ({
         id: exp.id,
         date: new Date(exp.expense_date || exp.date || exp.created_at),
         description: exp.description,
-        amount: exp.amount,
+        amount: Number(exp.amount || 0),
         type: 'saida' as 'saida',
         category: exp.category || 'Geral',
         paymentMethod: 'dinheiro' as PaymentMethod // Assuming expenses are paid in cash for simplicity or add field later
@@ -230,13 +310,17 @@ const Financeiro = () => {
 
       const all = [...incomeTx, ...expenseTx].sort((a, b) => b.date.getTime() - a.date.getTime());
       setTransactions(all);
-      setFilteredTransactions(all);
 
     } catch (error: any) {
+      if (requestId !== fetchSequenceRef.current) return;
       console.error(error);
-      toast({ title: 'Erro ao carregar dados', variant: 'destructive' });
+      toast({
+        title: 'Erro ao carregar o faturamento',
+        description: 'Não foi possível consultar todas as vendas do período. Tente novamente.',
+        variant: 'destructive'
+      });
     } finally {
-      setIsLoading(false);
+      if (requestId === fetchSequenceRef.current) setIsLoading(false);
     }
   };
 
@@ -472,6 +556,7 @@ const Financeiro = () => {
 
   const getPaymentBucket = (paymentMethod: unknown) => {
     const value = String(paymentMethod || '').trim().toLowerCase();
+    if (value.includes('pagar_depois') || value.includes('conta') || value.includes('receiv')) return 'receber';
     if (value.includes('pix')) return 'pix';
     if (value.includes('dinheiro') || value.includes('cash') || value.includes('especie')) return 'dinheiro';
     if (value.includes('credito') || value.includes('credit')) return 'credito';
@@ -507,6 +592,80 @@ const Financeiro = () => {
     return Math.round(validDurations.reduce((sum, value) => sum + value, 0) / validDurations.length);
   };
 
+  const loadCashCloseOverview = async (session: CashSession): Promise<CashCloseOverview> => {
+    if (!user?.id) throw new Error('Usuário não autenticado.');
+
+    const closedAt = session.closed_at || new Date().toISOString();
+    const orderSelect = 'id, created_at, total, payment_method, status, cash_register_session_id, variations';
+    const [{ data: linkedOrders, error: linkedError }, { data: unlinkedOrders, error: unlinkedError }, { data: movements, error: movementsError }] = await Promise.all([
+      (supabase as any)
+        .from('orders')
+        .select(orderSelect)
+        .eq('user_id', user.id)
+        .eq('cash_register_session_id', session.id),
+      (supabase as any)
+        .from('orders')
+        .select(orderSelect)
+        .eq('user_id', user.id)
+        .is('cash_register_session_id', null)
+        .gte('created_at', session.opened_at)
+        .lte('created_at', closedAt),
+      (supabase as any)
+        .from('cash_movements')
+        .select('type, amount')
+        .eq('user_id', user.id)
+        .eq('session_id', session.id),
+    ]);
+
+    if (linkedError) throw linkedError;
+    if (unlinkedError) throw unlinkedError;
+    if (movementsError) throw movementsError;
+
+    const uniqueOrders = new Map<string, Record<string, unknown>>();
+    for (const order of [
+      ...(Array.isArray(linkedOrders) ? linkedOrders : []),
+      ...(Array.isArray(unlinkedOrders) ? unlinkedOrders : []),
+    ]) {
+      if (order?.id) uniqueOrders.set(String(order.id), order);
+    }
+
+    const sales = Array.from(uniqueOrders.values())
+      .filter((order) => String(order?.status || '').toLowerCase() !== 'cancelled');
+    const totals = sales.reduce<Record<string, number>>((acc, order) => {
+      const lines = getOrderPaymentLines(order);
+      const paymentLines = lines.length > 0
+        ? lines
+        : [{ method: String(order?.payment_method || ''), amount: Number(order?.total || 0) }];
+      for (const line of paymentLines) {
+        const bucket = getPaymentBucket(line.method);
+        acc[bucket] = (acc[bucket] || 0) + line.amount;
+      }
+      return acc;
+    }, {});
+
+    const movementList = Array.isArray(movements) ? movements : [];
+    const inAmount = movementList
+      .filter((movement) => movement?.type === 'in')
+      .reduce((sum, movement) => sum + Number(movement?.amount || 0), 0);
+    const outAmount = movementList
+      .filter((movement) => movement?.type === 'out')
+      .reduce((sum, movement) => sum + Number(movement?.amount || 0), 0);
+    const cash = Number(totals.dinheiro || 0);
+
+    return {
+      total: sales.reduce((sum, order) => sum + Number(order?.total || 0), 0),
+      pix: Number(totals.pix || 0),
+      cash,
+      credit: Number(totals.credito || 0),
+      debit: Number(totals.debito || 0),
+      genericCard: Number(totals.cartao || 0) + Number(totals.voucher || 0),
+      receivable: Number(totals.receber || 0),
+      inAmount,
+      outAmount,
+      expectedCash: Number(session.initial_amount || 0) + cash + inAmount - outAmount,
+    };
+  };
+
   const classifyOrderChannel = (order: Record<string, unknown>) => {
     const orderType = String(order?.order_type || '').trim().toLowerCase();
     const status = String(order?.status || '').trim().toLowerCase();
@@ -535,7 +694,7 @@ const Financeiro = () => {
     if (!user?.id) return [];
 
     const db = supabase as unknown as SupabaseUntyped;
-    const orderSelect = 'id, created_at, updated_at, total, discount, delivery_fee, payment_method, status, order_type, customer_name, customer_phone, customer_address, customer_neighborhood, delivery_zone_id, table_id';
+    const orderSelect = 'id, created_at, updated_at, total, discount, delivery_fee, payment_method, status, order_type, customer_name, customer_phone, customer_address, customer_neighborhood, delivery_zone_id, table_id, variations';
     const [{ data: orders }, { data: unlinkedOrders }, { data: movements }, { data: profile }, { data: fiscal }] = await Promise.all([
       db
         .from('orders')
@@ -674,9 +833,18 @@ const Financeiro = () => {
       row('Débito:', formatCurrency(paymentTotals.debito || 0)),
       row('Voucher/Refeição:', formatCurrency(paymentTotals.voucher || 0)),
       ...(Number(paymentTotals.cartao || 0) > 0 ? [row('Cartão:', formatCurrency(paymentTotals.cartao || 0))] : []),
+      row('Contas a Receber:', formatCurrency(paymentTotals.receber || 0)),
       ...(Number(paymentTotals.outros || 0) > 0 ? [row('Outros:', formatCurrency(paymentTotals.outros || 0))] : []),
       '',
-      row('TOTAL RECEBIDO:', formatCurrency(grossRevenue)),
+      row('TOTAL RECEBIDO:', formatCurrency(
+        Number(paymentTotals.pix || 0)
+        + Number(paymentTotals.dinheiro || 0)
+        + Number(paymentTotals.credito || 0)
+        + Number(paymentTotals.debito || 0)
+        + Number(paymentTotals.voucher || 0)
+        + Number(paymentTotals.cartao || 0)
+        + Number(paymentTotals.outros || 0)
+      )),
       '',
       divider,
       centerText('MOVIMENTO CAIXA'),
@@ -795,6 +963,23 @@ const Financeiro = () => {
 
   const handleCashOperation = async () => {
     if (!user) return;
+    const operatorSession = getLocalOperatorSession();
+    const canRunOperation = cashOperation === 'open'
+      ? canOpenCash(operatorSession)
+      : cashOperation === 'close'
+        ? canCloseCash(operatorSession)
+        : canMoveCash(operatorSession);
+    if (!canRunOperation) {
+      toast({
+        title: 'Sem permissão para operar o caixa',
+        description: cashOperation === 'open' || cashOperation === 'close'
+          ? 'O administrador precisa liberar a permissão "Abrir/Fechar Caixa" em Usuários e Equipe.'
+          : 'O administrador precisa liberar a permissão "Sangria/Suprimento" em Usuários e Equipe.',
+        variant: 'destructive',
+      });
+      setIsCashDialogOpen(false);
+      return;
+    }
     const amount = parseBRL(cashAmount);
     if (isNaN(amount)) return;
 
@@ -822,7 +1007,7 @@ const Financeiro = () => {
         await PrinterService.printCashReport({
           title: 'Abertura de Caixa',
           userId: user.id,
-          lines: [`Data/Hora: ${new Date().toLocaleString('pt-BR')}`, `Valor inicial: R$ ${Number(amount).toFixed(2)}`]
+          lines: [`Data/Hora: ${new Date().toLocaleString('pt-BR')}`, `Valor inicial: ${formatBRL(amount)}`]
         });
       } else if (cashOperation === 'close') {
         if (!currentSession) return;
@@ -892,7 +1077,7 @@ const Financeiro = () => {
           userId: user.id,
           lines: [
             `Data/Hora: ${new Date().toLocaleString('pt-BR')}`,
-            `Valor: R$ ${Number(amount).toFixed(2)}`,
+            `Valor: ${formatBRL(amount)}`,
             cashDescription ? `Descrição: ${cashDescription}` : ''
           ].filter(Boolean) as string[]
         });
@@ -919,7 +1104,7 @@ const Financeiro = () => {
   // Calculate financial summaries using the same period displayed in the charts.
   const financialTransactions = filteredTransactions.filter(
     (transaction) =>
-      transaction.status !== 'cancelled'
+      (transaction.type === 'saida' || isConfirmedIncome(transaction))
       && transaction.date >= reportStart
       && transaction.date <= reportEnd
   );
@@ -1008,44 +1193,36 @@ const Financeiro = () => {
   };
   
   const resetFilters = () => {
+    const { start, end } = getPeriodRange('30d');
     setFilters({
       paymentMethod: '',
       type: '',
-      startDate: null,
-      endDate: null,
+      startDate: start,
+      endDate: end,
       searchTerm: ''
     });
-    setFilteredTransactions(transactions);
+    setActivePeriodPreset('30d');
   };
   
   const handleFilterChange = (field: keyof typeof filters, value: any) => {
+    if (field === 'startDate' || field === 'endDate') setActivePeriodPreset(null);
     setFilters({
       ...filters,
       [field]: value
     });
   };
 
-  const setPeriodPreset = (preset: 'today' | '7d' | '30d' | 'month') => {
-    const end = new Date();
-    end.setHours(23, 59, 59, 999);
-    const start = new Date(end);
-
-    if (preset === 'today') {
-      start.setHours(0, 0, 0, 0);
-    } else if (preset === 'month') {
-      start.setDate(1);
-      start.setHours(0, 0, 0, 0);
-    } else {
-      start.setDate(start.getDate() - (preset === '7d' ? 6 : 29));
-      start.setHours(0, 0, 0, 0);
-    }
-
+  const setPeriodPreset = (preset: PeriodPreset) => {
+    const { start, end } = getPeriodRange(preset);
+    setActivePeriodPreset(preset);
     setFilters((current) => ({ ...current, startDate: start, endDate: end }));
   };
   
   useEffect(() => {
     applyFilters();
-  }, [filters.startDate, filters.endDate]);
+    // Keep the displayed list synchronized after a period refetch or filter change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transactions, filters.paymentMethod, filters.type, filters.startDate, filters.endDate, filters.searchTerm]);
   
   const formatDate = (date: Date) => {
     if (!date || isNaN(date.getTime())) return '-';
@@ -1142,7 +1319,8 @@ const Financeiro = () => {
     const ordersInRange = (ordersRaw || []).filter((o: any) => {
       const created = new Date(o?.created_at);
       if (created < reportStart || created > reportEnd) return false;
-      if (String(o?.status || '') === 'cancelled') return false;
+      if (String(o?.status || '').toLowerCase() === 'cancelled') return false;
+      if (String(o?.acceptance_status || '').toLowerCase() === 'awaiting_pix_payment') return false;
       return true;
     });
     const receitaLiquida = ordersInRange.reduce((acc: number, o: any) => acc + Number(o?.total || 0), 0);
@@ -1219,6 +1397,7 @@ const Financeiro = () => {
   const periodSales = filteredTransactions.filter(
     (transaction) =>
       transaction.category === 'Vendas'
+      && String(transaction.acceptanceStatus || '').toLowerCase() !== 'awaiting_pix_payment'
       && transaction.date >= reportStart
       && transaction.date <= reportEnd
   );
@@ -1276,24 +1455,50 @@ const Financeiro = () => {
     : 'Acompanhe receitas, despesas, lucro e DRE no período selecionado';
 
   const openCashActionDialog = async (operation: 'open' | 'close' | 'in' | 'out') => {
+    const operatorSession = getLocalOperatorSession();
+    const canRunOperation = operation === 'open'
+      ? canOpenCash(operatorSession)
+      : operation === 'close'
+        ? canCloseCash(operatorSession)
+        : canMoveCash(operatorSession);
+    if (!canRunOperation) {
+      toast({
+        title: 'Sem permissão para operar o caixa',
+        description: operation === 'open' || operation === 'close'
+          ? 'O administrador precisa liberar a permissão "Abrir/Fechar Caixa" em Usuários e Equipe.'
+          : 'O administrador precisa liberar a permissão "Sangria/Suprimento" em Usuários e Equipe.',
+        variant: 'destructive',
+      });
+      return;
+    }
     setCashOperation(operation);
     setCashAmount('');
     setCashDescription('');
+    setCashCloseOverview(null);
     setOpenTablesConsent(false);
     setOpenTablesCount(0);
     setIsCashDialogOpen(true);
     if (operation === 'close' && user?.id) {
       setCheckingOpenTables(true);
+      setLoadingCashCloseOverview(true);
       try {
-        setOpenTablesCount(await getOpenTableCount(user.id));
+        const closingSession = currentSession || (selectedSession?.status === 'open' ? selectedSession : null);
+        const [openCount, overview] = await Promise.all([
+          getOpenTableCount(user.id),
+          closingSession ? loadCashCloseOverview(closingSession) : Promise.reject(new Error('Nenhuma sessão de caixa aberta.')),
+        ]);
+        setOpenTablesCount(openCount);
+        setCashCloseOverview(overview);
+        setCashAmount(formatBRL(overview.expectedCash));
       } catch (error) {
         toast({
-          title: 'Não foi possível conferir as mesas',
+          title: 'Não foi possível preparar o fechamento',
           description: friendlyErrorMessage(error, 'Tente novamente antes de fechar o caixa.'),
           variant: 'destructive',
         });
       } finally {
         setCheckingOpenTables(false);
+        setLoadingCashCloseOverview(false);
       }
     }
   };
@@ -1408,15 +1613,13 @@ const Financeiro = () => {
                 </div>
               )}
               <Dialog open={isCashDialogOpen} onOpenChange={setIsCashDialogOpen}>
-            <DialogTrigger asChild>
               <Button className="border border-white/20 bg-white/15 text-white hover:bg-white/25" variant="outline" onClick={() => {
                 void openCashActionDialog(currentSession ? 'close' : 'open');
               }}>
                 {currentSession ? <Unlock className="mr-2 h-4 w-4" /> : <Lock className="mr-2 h-4 w-4" />}
                 {currentSession ? 'Gerenciar Caixa' : 'Abrir Caixa'}
               </Button>
-            </DialogTrigger>
-            <DialogContent>
+            <DialogContent className={cashOperation === 'close' ? 'sm:max-w-2xl' : undefined}>
               <DialogHeader>
                 <DialogTitle>
                   {cashOperation === 'open' && 'Abertura de Caixa'}
@@ -1428,20 +1631,62 @@ const Financeiro = () => {
                   {currentSession && (
                     <div className="flex gap-2 mb-4">
                       <Button variant={cashOperation === 'close' ? 'default' : 'outline'} size="sm" onClick={() => { void openCashActionDialog('close'); }}>Fechar</Button>
-                      <Button variant={cashOperation === 'in' ? 'default' : 'outline'} size="sm" onClick={() => setCashOperation('in')}>Suprimento</Button>
-                      <Button variant={cashOperation === 'out' ? 'default' : 'outline'} size="sm" onClick={() => setCashOperation('out')}>Sangria</Button>
+                      <Button variant={cashOperation === 'in' ? 'default' : 'outline'} size="sm" onClick={() => { void openCashActionDialog('in'); }}>Suprimento</Button>
+                      <Button variant={cashOperation === 'out' ? 'default' : 'outline'} size="sm" onClick={() => { void openCashActionDialog('out'); }}>Sangria</Button>
                     </div>
                   )}
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4">
+                {cashOperation === 'close' && (
+                  loadingCashCloseOverview ? (
+                    <p className="text-sm text-muted-foreground">Carregando resumo das vendas...</p>
+                  ) : cashCloseOverview ? (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                        {[
+                          ['Vendas (total)', cashCloseOverview.total],
+                          ['Dinheiro', cashCloseOverview.cash],
+                          ['PIX', cashCloseOverview.pix],
+                          ['Débito', cashCloseOverview.debit],
+                          ['Crédito', cashCloseOverview.credit],
+                          ...(cashCloseOverview.genericCard > 0 ? [['Outros cartões', cashCloseOverview.genericCard] as [string, number]] : []),
+                        ].map(([label, value]) => (
+                          <div key={label} className="rounded-xl border bg-white p-3">
+                            <div className="text-xs text-muted-foreground">{label}</div>
+                            <div className="text-lg font-bold text-slate-950">{formatCurrency(Number(value))}</div>
+                          </div>
+                        ))}
+                        <div className="rounded-xl border border-sky-200 bg-sky-50 p-3">
+                          <div className="text-xs text-sky-700">Contas a receber</div>
+                          <div className="text-lg font-bold text-sky-950">{formatCurrency(cashCloseOverview.receivable)}</div>
+                          <div className="mt-1 text-[11px] text-sky-700">Somente para controle</div>
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                        <div className="text-xs text-emerald-700">Dinheiro esperado no caixa</div>
+                        <div className="text-xl font-bold text-emerald-950">{formatCurrency(cashCloseOverview.expectedCash)}</div>
+                        <div className="mt-1 text-xs text-emerald-700">
+                          Abertura + vendas em dinheiro + suprimentos − sangrias
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Não foi possível calcular o resumo desta sessão.</p>
+                  )
+                )}
                 <div>
-                  <Label>Valor</Label>
+                  <Label>{cashOperation === 'close' ? 'Valor contado em dinheiro' : 'Valor'}</Label>
                   <CurrencyTextInput 
                     value={cashAmount} 
                     onValueChange={setCashAmount} 
                     placeholder="R$ 0,00"
                   />
+                  {cashOperation === 'close' && cashCloseOverview && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Diferença: {formatCurrency(parseBRL(cashAmount) - cashCloseOverview.expectedCash)}
+                    </p>
+                  )}
                 </div>
                 {cashOperation !== 'open' && (
                    <div>
@@ -1484,7 +1729,7 @@ const Financeiro = () => {
               <DialogFooter>
                 <Button
                   onClick={handleCashOperation}
-                  disabled={cashOperation === 'close' && (checkingOpenTables || (openTablesCount > 0 && !openTablesConsent))}
+                  disabled={cashOperation === 'close' && (checkingOpenTables || loadingCashCloseOverview || !cashCloseOverview || (openTablesCount > 0 && !openTablesConsent))}
                 >
                   Confirmar
                 </Button>
@@ -1562,7 +1807,7 @@ const Financeiro = () => {
             <div className="flex flex-col gap-5">
               <div className="grid w-full grid-cols-2 gap-3 xl:grid-cols-4">
                   <div className="min-w-0 rounded-[22px] border border-[#8CC850]/18 bg-gradient-to-br from-white to-[#F5FBED] p-4 dark:border-[#8CC850]/15 dark:from-[#0c1512] dark:to-[#112017]">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Receitas</div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Faturamento</div>
                     <div className="mt-2 truncate text-[1.35rem] font-bold text-slate-900 dark:text-white 2xl:text-2xl">{formatCurrency(totalIncome)}</div>
                   </div>
                   <div className="min-w-0 rounded-[22px] border border-[#FF6400]/18 bg-gradient-to-br from-white to-[#FFF3EA] p-4 dark:border-[#FF6400]/15 dark:from-[#0c1512] dark:to-[#1e1510]">
@@ -1603,9 +1848,19 @@ const Financeiro = () => {
                       type="button"
                       variant="outline"
                       size="sm"
-                      className="h-9 rounded-xl border-[#003223]/10 bg-white px-3 text-xs text-[#003223] shadow-sm hover:bg-[#F5FBED] dark:border-white/10 dark:bg-white/5 dark:text-white"
-                      onClick={() => setPeriodPreset(preset.key as 'today' | '7d' | '30d' | 'month')}
+                      aria-pressed={activePeriodPreset === preset.key}
+                      disabled={isLoading && activePeriodPreset === preset.key}
+                      className={cn(
+                        'h-9 rounded-xl px-3 text-xs shadow-sm transition-colors',
+                        activePeriodPreset === preset.key
+                          ? 'border-[#003223] bg-[#003223] text-white hover:bg-[#0a4a34] hover:text-white dark:border-[#8CC850] dark:bg-[#8CC850] dark:text-[#003223]'
+                          : 'border-[#003223]/10 bg-white text-[#003223] hover:bg-[#F5FBED] dark:border-white/10 dark:bg-white/5 dark:text-white'
+                      )}
+                      onClick={() => setPeriodPreset(preset.key as PeriodPreset)}
                     >
+                      {isLoading && activePeriodPreset === preset.key ? (
+                        <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                      ) : null}
                       {preset.label}
                     </Button>
                   ))}
@@ -1664,7 +1919,7 @@ const Financeiro = () => {
                 <div className="grid gap-4">
                   <div className="rounded-[28px] border border-[#003223]/8 bg-[#F8FAF8] p-4 dark:border-white/10 dark:bg-[#0c1512]">
                     <div className="text-sm font-semibold text-slate-900 dark:text-white">Mix de pagamentos</div>
-                    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">Como as receitas estão distribuídas hoje</div>
+                    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">Como o faturamento está distribuído no período</div>
                     <div className="mt-4 h-[180px]">
                       {hasPaymentMix ? (
                         <ResponsiveContainer width="100%" height="100%">

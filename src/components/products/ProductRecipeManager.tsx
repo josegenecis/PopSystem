@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { Trash2, Plus, Calculator, ChevronDown, ChevronUp } from 'lucide-react';
+import { formatBRL } from '@/lib/currency';
 
 interface RecipeItem {
   id: string;
@@ -192,7 +193,7 @@ const ProductRecipeManager = forwardRef<ProductRecipeManagerHandle, ProductRecip
                 <SelectContent>
                   {ingredients.map(ing => (
                     <SelectItem key={ing.id} value={ing.id}>
-                      {ing.name} (R$ {ing.cost_price}/{ing.unit})
+                      {ing.name} ({formatBRL(ing.cost_price)}/{ing.unit})
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -253,13 +254,13 @@ const ProductRecipeManager = forwardRef<ProductRecipeManagerHandle, ProductRecip
                   <div className="flex-1">
                     <div className="text-sm font-medium">{item.ingredient?.name}</div>
                     <div className="text-xs text-gray-500">
-                      {item.quantity} {item.ingredient?.unit} × R$ {Number(item.ingredient?.cost_price || 0).toFixed(4)}
+                      {item.quantity} {item.ingredient?.unit} × R$ {Number(item.ingredient?.cost_price || 0).toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 4 })}
                       {Number(item.waste_percentage || 0) > 0 ? ` + ${item.waste_percentage}% de perda` : ''}
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="font-semibold text-sm">
-                      R$ {((item.ingredient?.cost_price || 0) * item.quantity * (1 + Number(item.waste_percentage || 0) / 100)).toFixed(2)}
+                      {formatBRL((item.ingredient?.cost_price || 0) * item.quantity * (1 + Number(item.waste_percentage || 0) / 100))}
                     </div>
                     <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:bg-red-50" onClick={() => handleRemoveItem(item.id)}>
                       <Trash2 className="h-4 w-4" />
@@ -270,7 +271,7 @@ const ProductRecipeManager = forwardRef<ProductRecipeManagerHandle, ProductRecip
               
               <div className="flex justify-between items-center bg-gray-50 p-3 rounded-lg border mt-2">
                 <span className="font-semibold text-gray-700">Custo Total de Produção:</span>
-                <span className="font-bold text-lg text-red-600">R$ {totalCost.toFixed(2)}</span>
+                <span className="font-bold text-lg text-red-600">{formatBRL(totalCost)}</span>
               </div>
             </div>
           )}

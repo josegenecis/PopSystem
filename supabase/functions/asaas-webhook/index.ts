@@ -109,6 +109,39 @@ serve(async (req) => {
         ? await supabase.from("subscription_plan_changes").select("*").eq("asaas_payment_id", payment.id).maybeSingle()
         : { data: null };
 
+    let invoiceUserId = String(planChange?.user_id || "");
+    let localSubscriptionId: string | null = null;
+    if (!invoiceUserId && (subscriptionId || initialSubscriptionIdFromReference || payment.id)) {
+      let lookup = supabase.from("subscriptions").select("id,user_id");
+      if (subscriptionId || initialSubscriptionIdFromReference) {
+        lookup = lookup.eq("asaas_subscription_id", subscriptionId || initialSubscriptionIdFromReference);
+      } else {
+        lookup = lookup.eq("asaas_payment_id", payment.id);
+      }
+      const { data: localSubscription } = await lookup.order("updated_at", { ascending: false }).limit(1).maybeSingle();
+      invoiceUserId = String(localSubscription?.user_id || "");
+      localSubscriptionId = localSubscription?.id || null;
+    }
+    if (invoiceUserId && payment.id) {
+      const paidAt = payment.paymentDate || payment.confirmedDate || payment.clientPaymentDate || null;
+      await supabase.from("subscription_invoices").upsert({
+        user_id: invoiceUserId,
+        subscription_id: localSubscriptionId,
+        provider: "asaas",
+        provider_payment_id: payment.id,
+        provider_subscription_id: subscriptionId,
+        status: String(payment.status || event.replace(/^PAYMENT_/, "") || "unknown").toLowerCase(),
+        amount: Number(payment.value || 0),
+        net_amount: payment.netValue == null ? null : Number(payment.netValue),
+        billing_type: payment.billingType || null,
+        due_date: payment.dueDate || null,
+        paid_at: paidAt ? new Date(paidAt).toISOString() : null,
+        invoice_url: payment.invoiceUrl || payment.bankSlipUrl || null,
+        last_event_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "provider,provider_payment_id" });
+    }
+
     if (planChange && paidEvents.has(event) && planChange.status !== "paid") {
       const { data: targetPlan } = await supabase
         .from("subscription_plans")

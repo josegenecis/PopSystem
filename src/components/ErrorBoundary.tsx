@@ -2,6 +2,7 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { isStaleChunkError, recoverFromStaleChunk } from '@/utils/chunkRecovery';
 
 interface Props {
   children: ReactNode;
@@ -28,19 +29,21 @@ class ErrorBoundary extends Component<Props, State> {
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error("Uncaught error:", error, errorInfo);
     this.setState({ errorInfo });
+    if (isStaleChunkError(error)) void recoverFromStaleChunk(error);
   }
 
   public render() {
     if (this.state.hasError) {
+      const staleVersion = isStaleChunkError(this.state.error);
       return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 p-4 text-center">
           <div className="bg-white p-8 rounded-xl shadow-lg max-w-lg w-full">
             <div className="mx-auto bg-red-100 w-16 h-16 rounded-full flex items-center justify-center mb-6">
               <AlertTriangle className="h-8 w-8 text-red-600" />
             </div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">Algo deu errado</h1>
+            <h1 className="text-2xl font-bold text-gray-900 mb-2">{staleVersion ? 'Atualizando o PopSystem' : 'Algo deu errado'}</h1>
             <p className="text-gray-600 mb-6">
-              Ocorreu um erro inesperado na aplicação.
+              {staleVersion ? 'Uma versão nova foi encontrada. A página será atualizada automaticamente.' : 'Ocorreu um erro inesperado na aplicação.'}
             </p>
             
             <div className="bg-gray-100 p-4 rounded-lg text-left mb-6 overflow-auto max-h-60">

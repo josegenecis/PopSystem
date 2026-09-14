@@ -31,6 +31,7 @@ import { invalidateSimpleVariationCaches } from '@/hooks/useSimpleVariations';
 // Defining the interface here to ensure consistency
 interface ProductItem {
   id?: string;
+  user_id?: string;
   name: string;
   barcode?: string;
   description?: string; 
@@ -66,7 +67,15 @@ interface ProductItem {
   fiscal_cclass_trib?: string;
   fiscal_reducao_ibs?: number;
   fiscal_reducao_cbs?: number;
+  fiscal_default_operation_id?: string;
 }
+
+type FiscalOperationOption = {
+  id: string;
+  name: string;
+  cfop: string;
+  model_codes: string[];
+};
 
 interface ProductVariant {
   id?: string;
@@ -128,7 +137,8 @@ interface ProductFormProps {
 }
 
 const ProductForm: React.FC<ProductFormProps> = ({ product, onSave, onCancel }) => {
-  const { user } = useAuth();
+  const { user, activeStoreId } = useAuth();
+  const fiscalStoreId = product?.user_id || activeStoreId || user?.id;
   const [formData, setFormData] = useState<ProductItem>({
     name: '',
     barcode: '',
@@ -164,12 +174,14 @@ const ProductForm: React.FC<ProductFormProps> = ({ product, onSave, onCancel }) 
     fiscal_cclass_trib: '',
     fiscal_reducao_ibs: 0,
     fiscal_reducao_cbs: 0,
+    fiscal_default_operation_id: '',
     ...product
   });
   const [categories, setCategories] = useState([]);
   const [globalVariations, setGlobalVariations] = useState([]);
   const [selectedVariations, setSelectedVariations] = useState<string[]>([]);
   const [availableProducts, setAvailableProducts] = useState<Array<{ id: string; name: string; category?: string | null }>>([]);
+  const [fiscalOperations, setFiscalOperations] = useState<FiscalOperationOption[]>([]);
   
   // Price Variants State
   const [priceVariants, setPriceVariants] = useState<ProductVariant[]>([]);
@@ -843,6 +855,7 @@ const ProductForm: React.FC<ProductFormProps> = ({ product, onSave, onCancel }) 
     if (!isUnsupported('fiscal_cclass_trib')) baseData.fiscal_cclass_trib = formData.fiscal_cclass_trib?.replace(/\D/g, '').slice(0, 6) || null;
     if (!isUnsupported('fiscal_reducao_ibs')) baseData.fiscal_reducao_ibs = Math.min(100, Math.max(0, Number(formData.fiscal_reducao_ibs) || 0));
     if (!isUnsupported('fiscal_reducao_cbs')) baseData.fiscal_reducao_cbs = Math.min(100, Math.max(0, Number(formData.fiscal_reducao_cbs) || 0));
+    if (!isUnsupported('fiscal_default_operation_id')) baseData.fiscal_default_operation_id = formData.fiscal_default_operation_id || null;
 
     if (stockSchemaSupported && !isUnsupported('track_stock') && !isUnsupported('stock_quantity') && !isUnsupported('low_stock_threshold')) {
       baseData.track_stock = formData.track_stock;
@@ -917,6 +930,35 @@ const ProductForm: React.FC<ProductFormProps> = ({ product, onSave, onCancel }) 
     if (!user?.id) return;
     checkStockSchema().catch(() => {});
   }, [user?.id]);
+
+  useEffect(() => {
+    if (!fiscalStoreId) {
+      setFiscalOperations([]);
+      return;
+    }
+    let cancelled = false;
+    const loadFiscalOperations = async () => {
+      // Coluna adicionada na homologação; os tipos gerados serão atualizados após a validação.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data, error } = await (supabase as any)
+        .from('fiscal_tax_rules')
+        .select('id,name,cfop,model_codes')
+        .eq('user_id', fiscalStoreId)
+        .eq('active', true)
+        .not('accountant_approved_at', 'is', null)
+        .contains('model_codes', ['65'])
+        .order('priority', { ascending: true });
+      if (cancelled) return;
+      if (error) {
+        console.warn('Não foi possível carregar operações fiscais do produto', error);
+        setFiscalOperations([]);
+        return;
+      }
+      setFiscalOperations((data || []) as FiscalOperationOption[]);
+    };
+    void loadFiscalOperations();
+    return () => { cancelled = true; };
+  }, [fiscalStoreId]);
 
   // Formata a string de centavos (somente dígitos) para BRL
   const formatFromRaw = (raw: string) => {
@@ -1573,7 +1615,7 @@ const ProductForm: React.FC<ProductFormProps> = ({ product, onSave, onCancel }) 
     }, 800);
     setAutoSaveTimer(timer);
     return () => clearTimeout(timer);
-  }, [user?.id, loading, createdProductId, formData.name, formData.barcode, formData.price, formData.costing_mode, formData.manual_unit_cost, formData.category_id, formData.category, formData.description, formData.image_url, formData.available, formData.show_in_delivery, formData.receipt_ingredients_enabled, formData.receipt_ingredients, formData.is_highlight, formData.original_price, formData.track_stock, formData.stock_quantity, formData.low_stock_threshold, formData.fiscal_ncm, formData.fiscal_cfop, formData.fiscal_csosn, formData.fiscal_cst_pis, formData.fiscal_cst_cofins, formData.fiscal_origem, formData.fiscal_cest, formData.fiscal_beneficio, formData.fiscal_observacao, formData.fiscal_ibs_cbs_cst, formData.fiscal_cclass_trib, formData.fiscal_reducao_ibs, formData.fiscal_reducao_cbs, stockSchemaSupported]);
+  }, [user?.id, loading, createdProductId, formData.name, formData.barcode, formData.price, formData.costing_mode, formData.manual_unit_cost, formData.category_id, formData.category, formData.description, formData.image_url, formData.available, formData.show_in_delivery, formData.receipt_ingredients_enabled, formData.receipt_ingredients, formData.is_highlight, formData.original_price, formData.track_stock, formData.stock_quantity, formData.low_stock_threshold, formData.fiscal_ncm, formData.fiscal_cfop, formData.fiscal_csosn, formData.fiscal_cst_pis, formData.fiscal_cst_cofins, formData.fiscal_origem, formData.fiscal_cest, formData.fiscal_beneficio, formData.fiscal_observacao, formData.fiscal_ibs_cbs_cst, formData.fiscal_cclass_trib, formData.fiscal_reducao_ibs, formData.fiscal_reducao_cbs, formData.fiscal_default_operation_id, stockSchemaSupported]);
 
 
   const onDragEnd = (result: DropResult) => {
@@ -2371,6 +2413,25 @@ const ProductForm: React.FC<ProductFormProps> = ({ product, onSave, onCancel }) 
             </AccordionTrigger>
             <AccordionContent className="pb-4">
               <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1 rounded-xl border border-[#003223]/10 bg-[#F7FBF5] p-3 sm:col-span-2">
+                  <Label htmlFor="fiscal_default_operation_id" className="text-boracume-dark-green font-semibold">Operação fiscal padrão no PDV</Label>
+                  <Select
+                    value={formData.fiscal_default_operation_id || 'automatic'}
+                    onValueChange={(value) => setFormData(prev => ({ ...prev, fiscal_default_operation_id: value === 'automatic' ? '' : value }))}
+                  >
+                    <SelectTrigger id="fiscal_default_operation_id" className="h-11 rounded-xl bg-[#FFFDF9] font-semibold">
+                      <SelectValue placeholder="Selecione a operação" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="automatic">Automática — conforme o contexto da venda</SelectItem>
+                      {fiscalOperations.map((operation) => (
+                        <SelectItem key={operation.id} value={operation.id}>{operation.name} · CFOP {operation.cfop}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs leading-5 text-[#003223]/65">A operação escolhida será priorizada para este produto no PDV quando for compatível com a venda. Somente operações aprovadas para NFC-e aparecem aqui.</p>
+                  {fiscalOperations.length === 0 ? <p className="text-xs font-medium text-amber-700">Nenhuma operação fiscal aprovada para NFC-e está disponível.</p> : null}
+                </div>
                 <div className="space-y-1">
                   <Label htmlFor="fiscal_ncm" className="text-boracume-dark-green font-semibold">NCM</Label>
                   <Input

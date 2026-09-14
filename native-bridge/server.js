@@ -168,6 +168,14 @@ function openPrinter(transport, address) {
   }
 }
 
+function restoreConfiguredPrinter() {
+  if (systemPrinterName || networkAddress) return true
+  const transport = getEnv('PRINT_TRANSPORT', 'BRIDGE_TRANSPORT') || 'system'
+  const address = getEnv('PRINT_ADDRESS', 'BRIDGE_ADDRESS') || ''
+  if (!address) return false
+  return openPrinter(transport, address)
+}
+
 async function printRawNetwork(data) {
   return await new Promise((resolve) => {
     try {
@@ -307,21 +315,27 @@ wss.on('connection', (ws) => {
     try {
       switch (action) {
         case 'connect_printer': {
-          const ok = openPrinter(payload?.transport || 'network', payload?.address)
+          const requestedAddress = String(payload?.address || '').trim()
+          const ok = requestedAddress
+            ? openPrinter(payload?.transport || 'network', requestedAddress)
+            : restoreConfiguredPrinter()
           ws.send(JSON.stringify({ ok, event: 'printer_connected' }))
           break
         }
         case 'test_print': {
+          restoreConfiguredPrinter()
           const ok = (systemPrinterName || networkAddress) ? await printTest() : false
           ws.send(JSON.stringify({ ok, event: 'printed_test' }))
           break
         }
         case 'print_receipt': {
+          restoreConfiguredPrinter()
           const ok = (systemPrinterName || networkAddress) ? await printReceipt(payload) : false
           ws.send(JSON.stringify({ ok, event: 'printed_receipt' }))
           break
         }
         case 'open_cash_drawer': {
+          restoreConfiguredPrinter()
           const ok = await openCashDrawer(payload)
           ws.send(JSON.stringify({
             ok,
@@ -392,6 +406,7 @@ wss.on('connection', (ws) => {
           break
         }
         case 'get_status': {
+          restoreConfiguredPrinter()
           ws.send(JSON.stringify({
             ok: true,
             event: 'status',

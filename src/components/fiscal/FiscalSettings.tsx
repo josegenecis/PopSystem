@@ -36,6 +36,8 @@ interface FiscalConfig {
   regime_tributario: number;
   csc_id: string;
   csc_token: string;
+  ibpt_enabled: boolean;
+  ibpt_token: string;
   ativo: boolean;
 }
 
@@ -392,6 +394,8 @@ const FiscalSettings: React.FC<{ modelSettingsVisible?: boolean; recentDocuments
     regime_tributario: 1,
     csc_id: '',
     csc_token: '',
+    ibpt_enabled: false,
+    ibpt_token: '',
     ativo: false
   });
   const [loading, setLoading] = useState(false);
@@ -455,6 +459,8 @@ const FiscalSettings: React.FC<{ modelSettingsVisible?: boolean; recentDocuments
           regime_tributario: data.regime_tributario || 1,
           csc_id: data.csc_id || '',
           csc_token: data.csc_token || '',
+          ibpt_enabled: Boolean((data as any).ibpt_enabled),
+          ibpt_token: (data as any).ibpt_token || '',
           ativo: data.ativo || false
         });
         setNfceNumeroRaw(String(data.nfce_numero_atual || 1));
@@ -618,6 +624,15 @@ const FiscalSettings: React.FC<{ modelSettingsVisible?: boolean; recentDocuments
         );
         if (!certificateResult) return false;
         settingsToSave = mergeCertificateData(settings, certificateResult.info, certificateResult.registration);
+      }
+
+      if (settingsToSave.ibpt_enabled && !settingsToSave.ibpt_token.trim()) {
+        toast({
+          title: "Informe o token do IBPT",
+          description: "O token individual do CNPJ e necessario para consultar e exibir os tributos aproximados.",
+          variant: "destructive"
+        });
+        return false;
       }
 
       const validationErrors = validateLocalFiscalSettings(settingsToSave);
@@ -1257,6 +1272,36 @@ const FiscalSettings: React.FC<{ modelSettingsVisible?: boolean; recentDocuments
                   </div>
                 </div>
               </div>}
+
+              <div className="space-y-4 rounded-2xl border p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <Label className="text-base">Tributos aproximados — IBPT</Label>
+                    <p className="text-sm text-muted-foreground">
+                      Consulta a API oficial De Olho no Imposto e inclui vTotTrib, fonte e versão no documento.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={settings.ibpt_enabled}
+                    onCheckedChange={(checked) => setSettings(prev => ({ ...prev, ibpt_enabled: checked }))}
+                  />
+                </div>
+                {settings.ibpt_enabled && (
+                  <div className="space-y-2">
+                    <Label>Token IBPT da empresa</Label>
+                    <Input
+                      type="password"
+                      autoComplete="off"
+                      value={settings.ibpt_token}
+                      onChange={(event) => setSettings(prev => ({ ...prev, ibpt_token: event.target.value.trim() }))}
+                      placeholder="Token obtido no portal De Olho no Imposto"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      O token é individual por CNPJ e precisa estar vigente para a consulta da tabela IBPT.
+                    </p>
+                  </div>
+                )}
+              </div>
 
               <div className="flex gap-2">
                 {modelSettingsVisible && <Button onClick={testConnection} disabled={loading} variant="outline">

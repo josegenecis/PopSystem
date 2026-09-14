@@ -12,6 +12,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useConfirmDialog } from '@/contexts/ConfirmDialogContext';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
+import { formatBRL } from '@/lib/currency';
 
 type UpsellRule = {
   id: string;
@@ -208,7 +209,7 @@ export default function UpsellManager({ context = 'marketing' }: { context?: 'ma
                     <TableCell>{trigger || <span className="text-muted-foreground">Qualquer produto</span>}</TableCell>
                     <TableCell className="font-medium">{suggested || '-'}</TableCell>
                     <TableCell>
-                      {r.discount_type === 'percentage' ? `${Number(r.discount_value || 0)}%` : r.discount_type === 'fixed' ? `R$ ${Number(r.discount_value || 0).toFixed(2)}` : '-'}
+                      {r.discount_type === 'percentage' ? `${Number(r.discount_value || 0)}%` : r.discount_type === 'fixed' ? formatBRL(r.discount_value) : '-'}
                     </TableCell>
                     <TableCell>{r.placement === 'product' ? 'Após o produto' : r.placement === 'both' ? 'Produto e finalização' : 'Antes do pagamento'}</TableCell>
                     <TableCell className="max-w-[420px] truncate">{r.message || '-'}</TableCell>
@@ -293,7 +294,7 @@ export default function UpsellManager({ context = 'marketing' }: { context?: 'ma
                 <SelectContent>
                   {products.map((p) => (
                     <SelectItem key={p.id} value={p.id}>
-                      {p.name} • R$ {Number(p.price || 0).toFixed(2)}
+                      {p.name} • {formatBRL(p.price)}
                     </SelectItem>
                   ))}
                 </SelectContent>

@@ -2,6 +2,10 @@ import { supabase } from '@/integrations/supabase/client';
 import { getOrderItemDetailGroups } from '@/lib/orderDetails';
 import { toast } from 'sonner';
 import { getPublicWebBaseUrl } from '@/utils/publicUrl';
+import { formatBRL } from '@/lib/currency';
+import { bridgeOpenCashDrawer, bridgePrintReceipt } from '@/services/bridgePrinterClient';
+import { discoverBridgeWebsocketUrl } from '@/services/bridgeDiscovery';
+import { loadPrinterConfig } from '@/services/printerConfig';
 
 // ESC/POS Commands
 const ESC = '\x1B';
@@ -644,7 +648,7 @@ function safeJsonParse<T>(value: string | null): T | null {
 }
 
 function formatCurrencyValue(value: number) {
-  return `R$ ${Number(value || 0).toFixed(2)}`;
+  return formatBRL(value);
 }
 
 function padRight(value: string, width: number) {
@@ -810,13 +814,20 @@ function buildOrderHtml(order: any, config: any, store?: any) {
 
   return `
       <!DOCTYPE html>
-      <html>
+      <html data-print-format="receipt" data-paper-width="${width}">
       <head>
         <meta charset="utf-8" />
         <title>Imprimir Pedido #${order.order_number}</title>
         <style>
           @page { margin: 0; size: ${width} auto; }
           * { box-sizing: border-box; }
+          html, body {
+            width: ${width};
+            max-width: ${width};
+            min-height: 0;
+            height: auto;
+            overflow: visible;
+          }
           body {
             font-family: 'Courier New', Courier, monospace;
             width: ${bodyWidth};
@@ -842,7 +853,11 @@ function buildOrderHtml(order: any, config: any, store?: any) {
           .bold { font-weight: 800; }
           .divider { border-top: 2px dashed #000; margin: 9px 0; }
           .flex { display: flex; justify-content: space-between; gap: 8px; }
-          .item-row { margin-bottom: 8px; }
+          .item-row {
+            margin-bottom: 8px;
+            page-break-inside: avoid;
+            break-inside: avoid;
+          }
           .brand-block { padding-bottom: 2px; }
           .ticket-code { font-size: 1.52em; letter-spacing: 0.08em; }
           .section-title { font-weight: 700; letter-spacing: 0.06em; }
@@ -893,7 +908,12 @@ function buildOrderHtml(order: any, config: any, store?: any) {
             font-size: 0.82em;
             line-height: 1.12;
           }
-          .total-row { font-size: 1.2em; margin-top: 10px; }
+          .total-row {
+            font-size: 1.2em;
+            margin-top: 10px;
+            page-break-inside: avoid;
+            break-inside: avoid;
+          }
           .muted { color: #000; font-size: 0.95em; font-weight: 700; }
         </style>
       </head>
@@ -1134,13 +1154,20 @@ function buildKitchenTicketHtml(order: any, config: any) {
 
   return `
       <!DOCTYPE html>
-      <html>
+      <html data-print-format="receipt" data-paper-width="${width}">
       <head>
         <meta charset="utf-8" />
         <title>Comanda Cozinha #${order.order_number || ''}</title>
         <style>
           @page { margin: 0; size: ${width} auto; }
           * { box-sizing: border-box; }
+          html, body {
+            width: ${width};
+            max-width: ${width};
+            min-height: 0;
+            height: auto;
+            overflow: visible;
+          }
           body {
             font-family: 'Courier New', Courier, monospace;
             width: ${bodyWidth};
@@ -1165,7 +1192,11 @@ function buildKitchenTicketHtml(order: any, config: any) {
           .title { font-size: 1.15em; letter-spacing: 0.06em; }
           .ticket-code { font-size: 1.52em; letter-spacing: 0.08em; }
           .section-title { font-weight: 700; letter-spacing: 0.06em; }
-          .item-row { margin-bottom: 10px; }
+          .item-row {
+            margin-bottom: 10px;
+            page-break-inside: avoid;
+            break-inside: avoid;
+          }
           .item-title {
             white-space: normal;
             word-break: break-word;
@@ -1355,7 +1386,7 @@ function buildReportHtml(
 
   return `
       <!DOCTYPE html>
-      <html>
+      <html data-print-format="receipt" data-paper-width="${paperWidth}">
       <head>
         <meta charset="utf-8" />
         <title>${title}</title>
@@ -1518,6 +1549,106 @@ async function openDrawerElectron() {
   return { success: true };
 }
 
+async function openDrawerWebUsb() {
+  if (!usbDevice?.opened) return { success: false, error: 'Impressora USB não conectada' };
+  try {
+    const command = new Uint8Array([0x1b, 0x70, 0x00, 0x19, 0xfa]);
+    await usbDevice.transferOut(1, command);
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error?.message || 'Falha ao acionar a gaveta pela impressora USB' };
+  }
+}
+
+async function openDrawerPopConnect() {
+  const configuredUrl = String(loadPrinterConfig().bridge.websocketUrl || 'ws://localhost:8766').trim();
+  if (configuredUrl && await bridgeOpenCashDrawer({ websocketUrl: configuredUrl })) {
+    return { success: true };
+  }
+
+  const discoveredUrl = await discoverBridgeWebsocketUrl({ timeoutMs: 650 });
+  if (discoveredUrl && discoveredUrl !== configuredUrl) {
+    const opened = await bridgeOpenCashDrawer({ websocketUrl: discoveredUrl });
+    if (opened) return { success: true };
+  }
+
+  return {
+    success: false,
+    error: 'Abra o Pop Connect e selecione a impressora conectada à gaveta',
+  };
+}
+
+async function openDrawerConnected() {
+  const api = typeof window !== 'undefined' ? (window as any)?.electronAPI : null;
+  if (api?.openCashDrawer) return openDrawerElectron();
+  if (usbDevice?.opened) return openDrawerWebUsb();
+  return openDrawerPopConnect();
+}
+
+function buildPopConnectReceiptPayload(order: any) {
+  return {
+    store: order.store || null,
+    order_number: order.order_number,
+    customer_name: order.customer_name || 'Balcão',
+    customer_phone: order.customer_phone || '',
+    customer_address: order.customer_address || '',
+    customer_address_display: resolveCustomerAddressLine(order),
+    delivery_zone_name: order.delivery_zone_name || '',
+    order_type: order.order_type || '',
+    date: order.created_at,
+    items: (Array.isArray(order.items) ? order.items : []).map((it: any) => ({
+      product_name: it.product_name || it.name,
+      name: it.product_name || it.name,
+      quantity: Number(it.quantity || 1),
+      price: Number(it.price || it.unit_price || 0),
+      subtotal: Number(it.subtotal || it.total || (Number(it.price || 0) * Number(it.quantity || 1)) || 0),
+      notes: it.notes || it.observations || '',
+      variations: [
+        ...(Array.isArray(it.receiptDescriptionLines) && it.receiptDescriptionLines.length > 0
+          ? [`Ingredientes: ${it.receiptDescriptionLines.join(', ')}`]
+          : []),
+        ...(Array.isArray(it.variations) ? it.variations : []),
+      ],
+    })),
+    total: Number(order.total || 0),
+    subtotal: Number(order.total || 0) - Number(order.delivery_fee || 0),
+    discount: Number(order.discount || 0),
+    delivery_fee: Number(order.delivery_fee || 0),
+    payment_method: formatPaymentMethodLabel(order.payment_method, order),
+    nfce: normalizeNfcePrintData(order),
+  };
+}
+
+async function printPopConnect(order: any, config: NormalizedPrintConfig) {
+  const printerConfig = loadPrinterConfig();
+  const configuredUrl = String(printerConfig.bridge.websocketUrl || 'ws://localhost:8766').trim();
+  const urls = configuredUrl ? [configuredUrl] : [];
+  const discoveredUrl = await discoverBridgeWebsocketUrl({ timeoutMs: 650 });
+  if (discoveredUrl && !urls.includes(discoveredUrl)) urls.push(discoveredUrl);
+  if (urls.length === 0) return { available: false, printed: false, printerConnected: false };
+
+  const payload = buildPopConnectReceiptPayload(order);
+  const copies = Math.max(1, Number(config.copies || 1) || 1);
+
+  for (const websocketUrl of urls) {
+    let lastResult = { available: false, printed: false, printerConnected: false };
+    for (let copy = 0; copy < copies; copy += 1) {
+      const result = await bridgePrintReceipt({
+        websocketUrl,
+        transport: printerConfig.bridge.transport,
+        address: printerConfig.bridge.address,
+        payload,
+      });
+      lastResult = result;
+      if (!result.printed) break;
+    }
+    if (lastResult.printed) return lastResult;
+    if (lastResult.available) return lastResult;
+  }
+
+  return { available: false, printed: false, printerConnected: false };
+}
+
 export const PrinterService = {
   // NF-e modelo 55 nunca passa pela rotina de cupom térmico. Este método
   // existe de forma explícita para impedir fallback acidental para NFC-e.
@@ -1559,7 +1690,6 @@ export const PrinterService = {
   async printOrder(order: any, options: PrintOrderOptions = {}) {
     const api = typeof window !== 'undefined' ? (window as any)?.electronAPI : null;
     const isElectron = Boolean(api?.printSystem && api?.printReceipt);
-    const canOpenCashDrawer = Boolean(api?.openCashDrawer);
     let drawerOpenedBeforePrint = false;
 
     // 1. Buscar configurações
@@ -1577,8 +1707,8 @@ export const PrinterService = {
       }
     }
 
-    if (options.openCashDrawer && canOpenCashDrawer) {
-      const drawerResult = await openDrawerElectron();
+    if (options.openCashDrawer) {
+      const drawerResult = await openDrawerConnected();
       drawerOpenedBeforePrint = Boolean(drawerResult?.success);
       if (!drawerOpenedBeforePrint) {
         console.warn('Falha ao abrir gaveta antes da impressão:', drawerResult?.error || drawerResult);
@@ -1707,7 +1837,7 @@ export const PrinterService = {
       if (!resp.success) {
         toast.error(resp.error || 'Falha ao imprimir');
         if (options.openCashDrawer && !drawerOpenedBeforePrint) {
-          const drawerResult = await openDrawerElectron();
+          const drawerResult = await openDrawerConnected();
           if (!drawerResult?.success) {
             console.warn('Falha ao abrir gaveta após erro de impressão:', drawerResult?.error || drawerResult);
           }
@@ -1716,7 +1846,23 @@ export const PrinterService = {
       return;
     }
 
-    // 2. Tentar impressão via USB (Silenciosa)
+    // 2. Tentar o Pop Connect primeiro. Quando ele está aberto e possui uma
+    // impressora selecionada, a impressão deve ser silenciosa e não pode cair
+    // no diálogo nativo do navegador.
+    const popConnectResult = await printPopConnect(enrichedOrder, config);
+    if (popConnectResult.printed) {
+      return;
+    }
+    if (popConnectResult.available) {
+      toast.error(
+        popConnectResult.printerConnected
+          ? 'O Pop Connect não conseguiu imprimir. Confira se a impressora está ligada e disponível.'
+          : 'Selecione e salve uma impressora no Pop Connect antes de imprimir.'
+      );
+      return;
+    }
+
+    // 3. Tentar impressão via USB (Silenciosa)
     if (usbDevice && usbDevice.opened) {
       try {
         await this.printUsb(enrichedOrder, config);
@@ -1727,15 +1873,12 @@ export const PrinterService = {
       }
     }
 
-    // 3. Fallback: Janela de Impressão HTML (Navegador)
+    // 4. Fallback: Janela de Impressão HTML (Navegador)
     this.printHtml(enrichedOrder, config);
   },
 
   async openCashDrawer() {
-    const api = typeof window !== 'undefined' ? (window as any)?.electronAPI : null;
-    const isElectron = Boolean(api?.openCashDrawer);
-    if (!isElectron) return { success: false, error: 'Abertura automática da gaveta disponível apenas no app desktop' };
-    return openDrawerElectron();
+    return openDrawerConnected();
   },
 
   async printOrderOnAccept(order: any) {

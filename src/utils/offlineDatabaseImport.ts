@@ -85,6 +85,23 @@ export type FirebirdConnectionOptions = {
   charset: 'UTF8' | 'WIN1252' | 'ISO8859_1' | 'NONE';
 };
 
+const gzipJsonFile = async (payload: string, outputName: string) => {
+  const jsonBlob = new Blob([payload], { type: 'application/json' });
+  if (typeof CompressionStream === 'undefined') {
+    return new File([jsonBlob], outputName, { type: 'application/json' });
+  }
+
+  const compressedStream = jsonBlob.stream().pipeThrough(new CompressionStream('gzip'));
+  const compressedBlob = await new Response(compressedStream).blob();
+  if (compressedBlob.size >= jsonBlob.size) {
+    return new File([jsonBlob], outputName, { type: 'application/json' });
+  }
+
+  // application/octet-stream já é permitido no bucket privado. A extensão
+  // informa à função de migração que o conteúdo deve ser descompactado.
+  return new File([compressedBlob], `${outputName}.gz`, { type: 'application/octet-stream' });
+};
+
 export async function convertFirebirdToImportFile(options: FirebirdConnectionOptions) {
   const api = window.electronAPI;
   if (!api?.isElectron || !api.analyzeFirebirdDatabase) {
@@ -94,9 +111,12 @@ export async function convertFirebirdToImportFile(options: FirebirdConnectionOpt
   if (!response.success || !response.payload) throw new Error(response.error || 'Não foi possível ler o banco Firebird.');
   const payload = JSON.stringify(response.payload);
   const outputName = `${(response.sourceName || 'banco-firebird').replace(/\.[^.]+$/, '')}-popsystem.json`;
+  const outputFile = await gzipJsonFile(payload, outputName);
   return {
-    file: new File([payload], outputName, { type: 'application/json' }),
+    file: outputFile,
     tableCount: response.tableCount || 0,
     rowCount: response.rowCount || 0,
+    compressed: outputFile.name.endsWith('.gz'),
+    originalSize: new Blob([payload]).size,
   };
 }

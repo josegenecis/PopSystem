@@ -4,15 +4,17 @@ import { Home, ClipboardList, CreditCard, Wallet, Ellipsis } from 'lucide-react'
 import { useSidebar } from '@/contexts/SidebarContext';
 import { FeatureKey } from '@/lib/featureAccess';
 import { useFeatureGate } from '@/components/subscription/FeatureGateProvider';
+import { canAccessOperatorArea, getLocalOperatorSession, OperatorArea } from '@/services/operatorAuth';
 
 const MobileBottomNav: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { toggleSidebar } = useSidebar();
-  const { canAccessFeature, openFeatureDialog } = useFeatureGate();
+  const { canAccessFeature, isFeatureAccessLoading, openFeatureDialog } = useFeatureGate();
+  const operatorSession = getLocalOperatorSession();
 
   const goToFeature = (path: string, feature: FeatureKey) => {
-    if (!canAccessFeature(feature)) {
+    if (!isFeatureAccessLoading && !canAccessFeature(feature)) {
       openFeatureDialog(feature);
       return;
     }
@@ -20,12 +22,12 @@ const MobileBottomNav: React.FC = () => {
   };
 
   const items = [
-    { key: 'home', label: 'Início', icon: Home, onClick: () => goToFeature('/dashboard', 'dashboard'), active: location.pathname === '/dashboard' },
-    { key: 'orders', label: 'Pedidos', icon: ClipboardList, onClick: () => goToFeature('/pedidos', 'orders'), active: location.pathname === '/pedidos' },
-    { key: 'pdv', label: 'PDV', icon: CreditCard, onClick: () => goToFeature('/pdv', 'pdv'), active: location.pathname === '/pdv' },
-    { key: 'cash', label: 'Caixa', icon: Wallet, onClick: () => goToFeature('/caixa', 'finance'), active: location.pathname === '/caixa' || location.pathname === '/financeiro' },
-    { key: 'more', label: 'Mais', icon: Ellipsis, onClick: () => toggleSidebar(), active: false },
-  ];
+    { key: 'home', label: 'Início', icon: Home, onClick: () => goToFeature('/dashboard', 'dashboard'), active: location.pathname === '/dashboard', area: 'dashboard' as OperatorArea },
+    { key: 'orders', label: 'Pedidos', icon: ClipboardList, onClick: () => goToFeature('/pedidos', 'orders'), active: location.pathname === '/pedidos', area: 'orders' as OperatorArea },
+    { key: 'pdv', label: 'PDV', icon: CreditCard, onClick: () => goToFeature('/pdv', 'pdv'), active: location.pathname === '/pdv', area: 'pdv' as OperatorArea },
+    { key: 'cash', label: 'Caixa', icon: Wallet, onClick: () => goToFeature('/caixa', 'finance'), active: location.pathname === '/caixa' || location.pathname === '/financeiro', area: 'cash' as OperatorArea },
+    { key: 'more', label: 'Mais', icon: Ellipsis, onClick: () => toggleSidebar(), active: false, area: undefined },
+  ].filter((item) => canAccessOperatorArea(operatorSession, item.area));
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-50 border-t border-[#FF6400]/10 bg-white/95 px-2 pb-[calc(env(safe-area-inset-bottom,0px)+0.35rem)] pt-1.5 shadow-[0_-16px_40px_-24px_rgba(0,50,35,0.28)] backdrop-blur-xl md:hidden">

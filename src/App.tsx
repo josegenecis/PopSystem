@@ -28,6 +28,7 @@ const ResetPassword = lazy(() => import('@/pages/ResetPassword'));
 const LandingPage = lazy(() => import('@/pages/LandingPage'));
 const LegalPage = lazy(() => import('@/pages/LegalPage'));
 const Dashboard = lazy(() => import('@/pages/Dashboard'));
+const Customers = lazy(() => import('@/pages/Customers'));
 const Products = lazy(() => import('@/pages/Products'));
 const Pricing = lazy(() => import('@/pages/Pricing'));
 const Orders = lazy(() => import('@/pages/Orders'));
@@ -105,6 +106,16 @@ function AppLoadingFallback() {
   );
 }
 
+function PwaEntry() {
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) return <AppLoadingFallback />;
+
+  return user
+    ? <Navigate to="/operator-login" replace />
+    : <Navigate to="/login" state={{ from: { pathname: '/operator-login' } }} replace />;
+}
+
 const Router = (() => {
   try {
     const isElectron = !!(window as any)?.electronAPI?.isElectron;
@@ -165,6 +176,7 @@ function AppContent() {
       
       {/* Rotas que precisam de autenticação */}
       <Route path="/" element={<Index />} />
+      <Route path="/pwa" element={<PwaEntry />} />
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Navigate to="/login?tab=register" replace />} />
       <Route path="/reset-password" element={<ResetPassword />} />
@@ -174,13 +186,14 @@ function AppContent() {
       
       {/* Rota específica para o aplicativo desktop - sem layout padrão */}
       <Route element={<RouteGuard><OperatorGate><Outlet /></OperatorGate></RouteGuard>}>
-        <Route path="/desktop" element={<FeatureRoute feature="desktop"><DesktopApp /></FeatureRoute>} />
+        <Route path="/desktop" element={<OperatorRoute area="desktop"><FeatureRoute feature="desktop"><DesktopApp /></FeatureRoute></OperatorRoute>} />
       </Route>
 
 
       <Route element={<RouteGuard><OperatorGate><Outlet /></OperatorGate></RouteGuard>}>
         <Route element={<DashboardLayout><Outlet /></DashboardLayout>}>
           <Route path="/dashboard" element={<OperatorRoute area="dashboard"><FeatureRoute feature="dashboard"><Dashboard /></FeatureRoute></OperatorRoute>} />
+          <Route path="/clientes" element={<OperatorRoute area="customers"><Customers /></OperatorRoute>} />
           <Route path="/produtos" element={<OperatorRoute area="products"><FeatureRoute feature="products"><Products /></FeatureRoute></OperatorRoute>} />
           <Route path="/precos" element={<OperatorRoute area="products"><FeatureRoute feature="products"><Pricing /></FeatureRoute></OperatorRoute>} />
           <Route path="/estoque" element={<OperatorRoute area="stock"><FeatureRoute feature="stock"><Ingredientes /></FeatureRoute></OperatorRoute>} />
@@ -197,27 +210,27 @@ function AppContent() {
           <Route path="/lojas" element={<FeatureRoute feature="multiStore"><Stores /></FeatureRoute>} />
           <Route path="/multilojas" element={<Navigate to="/lojas" replace />} />
           <Route path="/rede" element={<Navigate to="/lojas" replace />} />
-          <Route path="/loyalty" element={<FeatureRoute feature="marketing"><Loyalty /></FeatureRoute>} />
-          <Route path="/bairros-entrega" element={<OperatorRoute area="delivery"><FeatureRoute feature="delivery"><BairrosEntrega /></FeatureRoute></OperatorRoute>} />
-          <Route path="/entregadores" element={<OperatorRoute area="delivery"><FeatureRoute feature="deliveryTeam"><Entregadores /></FeatureRoute></OperatorRoute>} />
+          <Route path="/loyalty" element={<OperatorRoute area="marketing"><FeatureRoute feature="marketingEssential"><Loyalty /></FeatureRoute></OperatorRoute>} />
+          <Route path="/bairros-entrega" element={<OperatorRoute area="deliveryAreas"><FeatureRoute feature="delivery"><BairrosEntrega /></FeatureRoute></OperatorRoute>} />
+          <Route path="/entregadores" element={<OperatorRoute area="deliveryTeam"><FeatureRoute feature="deliveryTeam"><Entregadores /></FeatureRoute></OperatorRoute>} />
           <Route path="/motoboys" element={<Navigate to="/entregadores" replace />} />
           <Route path="/garcons" element={<OperatorRoute area="team"><FeatureRoute feature="team"><Garcons /></FeatureRoute></OperatorRoute>} />
-          <Route path="/ponto" element={<OperatorRoute area="team"><FeatureRoute feature="team"><ControlePonto /></FeatureRoute></OperatorRoute>} />
+          <Route path="/ponto" element={<OperatorRoute area="timeclock"><FeatureRoute feature="team"><ControlePonto /></FeatureRoute></OperatorRoute>} />
           <Route path="/fiscal" element={<OperatorRoute area="fiscal"><FeatureRoute feature="fiscal"><Fiscal /></FeatureRoute></OperatorRoute>} />
           <Route path="/nfce" element={<Navigate to="/fiscal" replace />} />
-          <Route path="/caixa" element={<OperatorRoute area="finance"><FeatureRoute feature="finance"><Financeiro /></FeatureRoute></OperatorRoute>} />
+          <Route path="/caixa" element={<OperatorRoute area="cash"><FeatureRoute feature="finance"><Financeiro /></FeatureRoute></OperatorRoute>} />
           <Route path="/financeiro" element={<OperatorRoute area="finance"><FeatureRoute feature="finance"><Financeiro /></FeatureRoute></OperatorRoute>} />
           <Route path="/financeiro/despesas" element={<Navigate to="/despesas" replace />} />
-          <Route path="/despesas" element={<OperatorRoute area="finance"><FeatureRoute feature="finance"><Despesas /></FeatureRoute></OperatorRoute>} />
+          <Route path="/despesas" element={<OperatorRoute area="expenses"><FeatureRoute feature="finance"><Despesas /></FeatureRoute></OperatorRoute>} />
           <Route path="/pagamentos" element={<OperatorRoute area="pix"><FeatureRoute feature="pix"><div className="space-y-4"><h1 className="text-2xl font-bold tracking-tight">Formas de Pagamento</h1><PaymentMethodsSettings /></div></FeatureRoute></OperatorRoute>} />
           <Route path="/security" element={<OperatorRoute area="security"><FeatureRoute feature="security"><SecurityDashboard /></FeatureRoute></OperatorRoute>} />
-          <Route path="/whatsapp-bot" element={<OperatorRoute area="marketing"><FeatureRoute feature="whatsapp"><WhatsAppBot /></FeatureRoute></OperatorRoute>} />
+          <Route path="/whatsapp-bot" element={<OperatorRoute area="whatsapp"><FeatureRoute feature="whatsapp"><WhatsAppBot /></FeatureRoute></OperatorRoute>} />
           <Route path="/downloads" element={<OperatorRoute area="desktop"><FeatureRoute feature="desktop"><Downloads /></FeatureRoute></OperatorRoute>} />
           <Route path="/pix" element={<OperatorRoute area="pix"><FeatureRoute feature="pix"><PixSetup /></FeatureRoute></OperatorRoute>} />
           {import.meta.env.DEV && <Route path="/debug-pix" element={<DebugPix />} />}
           <Route path="/cardapio" element={<OperatorRoute area="products"><FeatureRoute feature="menu"><Menu /></FeatureRoute></OperatorRoute>} />
           <Route path="/agente" element={<OperatorRoute area="agent"><FeatureRoute feature="agent"><AgentDashboard /></FeatureRoute></OperatorRoute>} />
-          <Route path="/marketing" element={<OperatorRoute area="marketing"><FeatureRoute feature="marketing"><Marketing /></FeatureRoute></OperatorRoute>} />
+          <Route path="/marketing" element={<OperatorRoute area="marketing"><FeatureRoute feature="marketingEssential"><Marketing /></FeatureRoute></OperatorRoute>} />
 
           {import.meta.env.DEV && <Route path="/system-check" element={<SystemCheck />} />}
           {import.meta.env.DEV && <Route path="/test" element={<TestPage />} />}
@@ -291,9 +304,6 @@ function HardwareAutoConnect() {
 
 function CashDrawerShortcut() {
   useEffect(() => {
-    const api = (window as any)?.electronAPI;
-    if (!api?.isElectron) return;
-
     const handleKeyDown = async (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const isTyping = ['INPUT', 'TEXTAREA', 'SELECT'].includes(String(target?.tagName || '')) || Boolean(target?.isContentEditable);

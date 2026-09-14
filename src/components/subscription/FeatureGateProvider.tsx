@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Clock, Crown, Lock, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -12,24 +12,28 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useAuth } from '@/contexts/AuthContext';
+import { formatBRL } from '@/lib/currency';
 import {
   FeatureKey,
   getFeatureDefinition,
   getRequiredPlan,
   hasFeatureAccess,
+  isFeatureAccessPending,
 } from '@/lib/featureAccess';
 
 type FeatureGateContextValue = {
   canAccessFeature: (feature: FeatureKey) => boolean;
   openFeatureDialog: (feature: FeatureKey) => void;
+  isFeatureAccessLoading: boolean;
 };
 
 const FeatureGateContext = createContext<FeatureGateContextValue | undefined>(undefined);
 
 export const FeatureGateProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { subscription } = useAuth();
+  const { subscription, subscriptionLoading } = useAuth();
   const navigate = useNavigate();
   const [feature, setFeature] = useState<FeatureKey | null>(null);
+  const isFeatureAccessLoading = isFeatureAccessPending(subscriptionLoading, subscription);
 
   const activeDefinition = feature ? getFeatureDefinition(feature) : null;
   const requiredPlan = feature ? getRequiredPlan(feature) : null;
@@ -37,8 +41,18 @@ export const FeatureGateProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const value = useMemo<FeatureGateContextValue>(() => ({
     canAccessFeature: (nextFeature) => hasFeatureAccess(nextFeature, subscription),
-    openFeatureDialog: (nextFeature) => setFeature(nextFeature),
-  }), [subscription]);
+    openFeatureDialog: (nextFeature) => {
+      if (isFeatureAccessLoading || hasFeatureAccess(nextFeature, subscription)) return;
+      setFeature(nextFeature);
+    },
+    isFeatureAccessLoading,
+  }), [isFeatureAccessLoading, subscription]);
+
+  useEffect(() => {
+    if (feature && (isFeatureAccessLoading || hasFeatureAccess(feature, subscription))) {
+      setFeature(null);
+    }
+  }, [feature, isFeatureAccessLoading, subscription]);
 
   const goToPlan = async () => {
     if (!requiredPlan) return;
@@ -52,7 +66,7 @@ export const FeatureGateProvider: React.FC<{ children: React.ReactNode }> = ({ c
     <FeatureGateContext.Provider value={value}>
       {children}
 
-      <Dialog open={Boolean(feature)} onOpenChange={(open) => !open && setFeature(null)}>
+      <Dialog open={Boolean(feature) && !isFeatureAccessLoading} onOpenChange={(open) => !open && setFeature(null)}>
         <DialogContent className="overflow-hidden border-0 p-0 shadow-[0_34px_90px_-35px_rgba(0,50,35,0.5)] sm:max-w-[520px]">
           <div className="bg-gradient-to-br from-[#003223] via-[#0B5137] to-[#FF6400] px-6 py-6 text-white">
             <div className="flex items-start justify-between gap-4">
@@ -86,8 +100,8 @@ export const FeatureGateProvider: React.FC<{ children: React.ReactNode }> = ({ c
                   {requiredPlan && (
                     <div className="mt-1 text-xs leading-5 text-slate-600">
                       {isMultiPlan
-                        ? `Liberado no plano Multi. O valor base é R$ ${requiredPlan.monthlyPrice.toFixed(2)} e cada loja adicional soma R$ ${(requiredPlan.extraStorePrice || 189).toFixed(2)}.`
-                        : `Incluído no plano ${requiredPlan.name}, com mensalidade de R$ ${requiredPlan.monthlyPrice.toFixed(2)}.`}
+                        ? `Liberado no plano Multi. O valor base é ${formatBRL(requiredPlan.monthlyPrice)} e cada loja adicional soma ${formatBRL(requiredPlan.extraStorePrice || 189)}.`
+                        : `Incluído no plano ${requiredPlan.name}, com mensalidade de ${formatBRL(requiredPlan.monthlyPrice)}.`}
                     </div>
                   )}
                 </div>

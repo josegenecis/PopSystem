@@ -1,10 +1,11 @@
-name: Bridge Installer
+name: Pop Connect Installer
 
 on:
   workflow_dispatch:
   push:
     tags:
       - "bridge-v*"
+      - "pop-connect-v*"
 
 permissions:
   contents: write
@@ -29,13 +30,13 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Build Bridge Installer
-        run: npm run dist:bridge
+      - name: Build Pop Connect Installer
+        run: npm run dist:pop-connect
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bridge-${{ matrix.os }}
+          name: pop-connect-${{ matrix.os }}
           path: |
             dist-bridge/**/*.exe
             dist-bridge/**/*.dmg
@@ -45,7 +46,7 @@ jobs:
             dist-bridge/**/*.blockmap
 
   release:
-    if: startsWith(github.ref, 'refs/tags/bridge-v')
+    if: startsWith(github.ref, 'refs/tags/bridge-v') || startsWith(github.ref, 'refs/tags/pop-connect-v')
     needs: build
     runs-on: ubuntu-latest
     steps:

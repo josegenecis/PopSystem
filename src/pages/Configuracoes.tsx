@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import ProfileSettings from '@/components/settings/ProfileSettings';
@@ -29,35 +29,73 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { IfoodLogo } from '@/components/icons/IfoodLogo';
 import { FeatureKey, getFeatureDefinition } from '@/lib/featureAccess';
 import { useFeatureGate } from '@/components/subscription/FeatureGateProvider';
+import { canAccessOperatorArea, getLocalOperatorSession, OperatorArea } from '@/services/operatorAuth';
+
+const SETTINGS_TAB_ORDER = [
+  'profile',
+  'appearance',
+  'delivery',
+  'payment-methods',
+  'pix',
+  'whatsapp',
+  'whatsapp-api',
+  'hardware',
+  'ifood',
+  'users',
+  'notifications',
+  'support',
+  'totem',
+] as const;
+
+const SETTINGS_TAB_FEATURES: Record<string, FeatureKey> = {
+  profile: 'settings',
+  appearance: 'settings',
+  delivery: 'delivery',
+  'payment-methods': 'pix',
+  pix: 'pix',
+  whatsapp: 'whatsapp',
+  'whatsapp-api': 'whatsapp',
+  hardware: 'hardware',
+  ifood: 'ifood',
+  users: 'team',
+  notifications: 'settings',
+  support: 'settings',
+  totem: 'settings',
+};
+
+const SETTINGS_TAB_AREAS: Record<string, OperatorArea> = {
+  profile: 'settings',
+  appearance: 'settings',
+  delivery: 'deliveryAreas',
+  'payment-methods': 'pix',
+  pix: 'pix',
+  whatsapp: 'whatsapp',
+  'whatsapp-api': 'whatsapp',
+  hardware: 'hardware',
+  ifood: 'integrations',
+  users: 'team',
+  notifications: 'settings',
+  support: 'settings',
+  totem: 'settings',
+};
 
 const Configuracoes: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const { subscription } = useAuth();
-  const { canAccessFeature, openFeatureDialog } = useFeatureGate();
+  const { canAccessFeature, isFeatureAccessLoading, openFeatureDialog } = useFeatureGate();
   const { ensureSubscribed } = usePushNotifications();
   const isDesktopApp = typeof window !== 'undefined' && !!(window as typeof window & { electronAPI?: unknown }).electronAPI;
-  
-  const tabFeatures: Record<string, FeatureKey> = {
-    profile: 'settings',
-    appearance: 'settings',
-    delivery: 'delivery',
-    'payment-methods': 'pix',
-    pix: 'pix',
-    whatsapp: 'whatsapp',
-    'whatsapp-api': 'whatsapp',
-    hardware: 'hardware',
-    ifood: 'ifood',
-    users: 'team',
-    notifications: 'settings',
-    support: 'settings',
-    totem: 'settings',
-  };
+  const operatorSession = useMemo(() => getLocalOperatorSession(), []);
 
-  const canOpenTab = (nextTab: string) => {
-    const feature = tabFeatures[nextTab];
-    return !feature || canAccessFeature(feature);
-  };
+  const canAccessOperatorTab = useCallback((nextTab: string) => {
+    return canAccessOperatorArea(operatorSession, SETTINGS_TAB_AREAS[nextTab]);
+  }, [operatorSession]);
+
+  const canOpenTab = useCallback((nextTab: string) => {
+    const feature = SETTINGS_TAB_FEATURES[nextTab];
+    return canAccessOperatorTab(nextTab) && (!feature || canAccessFeature(feature));
+  }, [canAccessFeature, canAccessOperatorTab]);
 
   const tabLabel = (label: React.ReactNode, feature?: FeatureKey) => {
     const definition = feature ? getFeatureDefinition(feature) : null;
@@ -73,27 +111,14 @@ const Configuracoes: React.FC = () => {
     );
   };
 
-  const getInitialTab = () => {
+  const getInitialTab = useCallback(() => {
     const requested = searchParams.get('tab') || 'profile';
-    const allowed = [
-      'profile',
-      'appearance',
-      'delivery',
-      'payment-methods',
-      'pix',
-      'whatsapp',
-      'whatsapp-api',
-      'hardware',
-      'ifood',
-      'users',
-      'notifications',
-      'support',
-      'totem'
-    ];
-    if (!allowed.includes(requested)) return 'profile';
-    if (!canOpenTab(requested)) return 'profile';
-    return requested;
-  };
+    if (SETTINGS_TAB_ORDER.includes(requested as typeof SETTINGS_TAB_ORDER[number]) && canOpenTab(requested)) {
+      return requested;
+    }
+
+    return SETTINGS_TAB_ORDER.find((candidate) => canOpenTab(candidate)) || 'profile';
+  }, [canOpenTab, searchParams]);
 
   const [tab, setTab] = useState(getInitialTab);
 
@@ -102,7 +127,9 @@ const Configuracoes: React.FC = () => {
   }, [navigate, searchParams]);
 
   const setTabAndUrl = (nextTab: string) => {
-    const feature = tabFeatures[nextTab];
+    if (!canAccessOperatorTab(nextTab)) return;
+
+    const feature = SETTINGS_TAB_FEATURES[nextTab];
     if (feature && !canAccessFeature(feature)) {
       openFeatureDialog(feature);
       return;
@@ -117,15 +144,16 @@ const Configuracoes: React.FC = () => {
   };
 
   useEffect(() => {
+    if (isFeatureAccessLoading) return;
     const requested = searchParams.get('tab');
     if (!requested) return;
-    const requestedFeature = tabFeatures[requested];
-    if (requestedFeature && !canAccessFeature(requestedFeature)) {
+    const requestedFeature = SETTINGS_TAB_FEATURES[requested];
+    if (canAccessOperatorTab(requested) && requestedFeature && !canAccessFeature(requestedFeature)) {
       openFeatureDialog(requestedFeature);
     }
     const next = getInitialTab();
     if (next !== tab) setTab(next);
-  }, [searchParams, tab]);
+  }, [canAccessFeature, canAccessOperatorTab, getInitialTab, isFeatureAccessLoading, openFeatureDialog, searchParams, tab]);
 
   return (
     <div className="space-y-6">
@@ -140,19 +168,19 @@ const Configuracoes: React.FC = () => {
               value={tab}
               onChange={(e) => setTabAndUrl(e.target.value)}
             >
-              <option value="profile">Perfil</option>
-              <option value="appearance">Cores do Cardápio</option>
-              <option value="delivery">Delivery</option>
-              <option value="payment-methods">Formas de Pagamento</option>
-              <option value="pix">PIX</option>
-              <option value="whatsapp">WhatsApp Mensagens</option>
-              {subscription?.plan_id === 2 && <option value="whatsapp-api">WhatsApp Global (Admin)</option>}
-              <option value="hardware">Impressão, Balança e Leitor</option>
-              <option value="totem">Totem</option>
-              <option value="ifood">iFood</option>
-              <option value="users">Usuários e Equipe</option>
-              <option value="notifications">Notificações</option>
-              <option value="support">Suporte</option>
+              {canAccessOperatorTab('profile') && <option value="profile">Perfil</option>}
+              {canAccessOperatorTab('appearance') && <option value="appearance">Cores do Cardápio</option>}
+              {canAccessOperatorTab('delivery') && <option value="delivery">Delivery</option>}
+              {canAccessOperatorTab('payment-methods') && <option value="payment-methods">Formas de Pagamento</option>}
+              {canAccessOperatorTab('pix') && <option value="pix">PIX</option>}
+              {canAccessOperatorTab('whatsapp') && <option value="whatsapp">WhatsApp Mensagens</option>}
+              {canAccessOperatorTab('whatsapp-api') && subscription?.plan_id === 2 && <option value="whatsapp-api">WhatsApp Global (Admin)</option>}
+              {canAccessOperatorTab('hardware') && <option value="hardware">Impressão, Balança e Leitor</option>}
+              {canAccessOperatorTab('totem') && <option value="totem">Totem</option>}
+              {canAccessOperatorTab('ifood') && <option value="ifood">iFood</option>}
+              {canAccessOperatorTab('users') && <option value="users">Usuários e Equipe</option>}
+              {canAccessOperatorTab('notifications') && <option value="notifications">Notificações</option>}
+              {canAccessOperatorTab('support') && <option value="support">Suporte</option>}
             </select>
           </div>
         </Tabs>
@@ -160,21 +188,21 @@ const Configuracoes: React.FC = () => {
 
       <Tabs value={tab} onValueChange={setTabAndUrl} className="w-full">
         <TabsList className="mb-4 hidden sm:flex flex-wrap justify-start overflow-x-auto scrollbar-hide">
-          <TabsTrigger value="profile">{tabLabel('Perfil', 'settings')}</TabsTrigger>
-          <TabsTrigger value="appearance">{tabLabel('Cores do Cardápio', 'settings')}</TabsTrigger>
-          <TabsTrigger value="delivery">{tabLabel('Delivery', 'delivery')}</TabsTrigger>
-          <TabsTrigger value="payment-methods">{tabLabel('Formas de Pagamento', 'pix')}</TabsTrigger>
-          <TabsTrigger value="pix">{tabLabel('PIX', 'pix')}</TabsTrigger>
-          <TabsTrigger value="whatsapp">{tabLabel('WhatsApp Mensagens', 'whatsapp')}</TabsTrigger>
-          {subscription?.plan_id === 2 && <TabsTrigger value="whatsapp-api">WhatsApp Global (Admin)</TabsTrigger>}
-          <TabsTrigger value="hardware">{tabLabel('Dispositivos', 'hardware')}</TabsTrigger>
-          <TabsTrigger value="totem">{tabLabel('Totem', 'settings')}</TabsTrigger>
-          <TabsTrigger value="ifood">
+          {canAccessOperatorTab('profile') && <TabsTrigger value="profile">{tabLabel('Perfil', 'settings')}</TabsTrigger>}
+          {canAccessOperatorTab('appearance') && <TabsTrigger value="appearance">{tabLabel('Cores do Cardápio', 'settings')}</TabsTrigger>}
+          {canAccessOperatorTab('delivery') && <TabsTrigger value="delivery">{tabLabel('Delivery', 'delivery')}</TabsTrigger>}
+          {canAccessOperatorTab('payment-methods') && <TabsTrigger value="payment-methods">{tabLabel('Formas de Pagamento', 'pix')}</TabsTrigger>}
+          {canAccessOperatorTab('pix') && <TabsTrigger value="pix">{tabLabel('PIX', 'pix')}</TabsTrigger>}
+          {canAccessOperatorTab('whatsapp') && <TabsTrigger value="whatsapp">{tabLabel('WhatsApp Mensagens', 'whatsapp')}</TabsTrigger>}
+          {canAccessOperatorTab('whatsapp-api') && subscription?.plan_id === 2 && <TabsTrigger value="whatsapp-api">WhatsApp Global (Admin)</TabsTrigger>}
+          {canAccessOperatorTab('hardware') && <TabsTrigger value="hardware">{tabLabel('Dispositivos', 'hardware')}</TabsTrigger>}
+          {canAccessOperatorTab('totem') && <TabsTrigger value="totem">{tabLabel('Totem', 'settings')}</TabsTrigger>}
+          {canAccessOperatorTab('ifood') && <TabsTrigger value="ifood">
             {tabLabel(<IfoodLogo className="h-4 w-auto" />, 'ifood')}
-          </TabsTrigger>
-          <TabsTrigger value="users">{tabLabel('Usuários e Equipe', 'team')}</TabsTrigger>
-          <TabsTrigger value="notifications">{tabLabel('Notificações', 'settings')}</TabsTrigger>
-          <TabsTrigger value="support">{tabLabel('Suporte', 'settings')}</TabsTrigger>
+          </TabsTrigger>}
+          {canAccessOperatorTab('users') && <TabsTrigger value="users">{tabLabel('Usuários e Equipe', 'team')}</TabsTrigger>}
+          {canAccessOperatorTab('notifications') && <TabsTrigger value="notifications">{tabLabel('Notificações', 'settings')}</TabsTrigger>}
+          {canAccessOperatorTab('support') && <TabsTrigger value="support">{tabLabel('Suporte', 'settings')}</TabsTrigger>}
         </TabsList>
         
         <TabsContent value="profile">

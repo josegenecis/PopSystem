@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { ArrowRight, Clock, Lock } from 'lucide-react';
+import { ArrowRight, Clock, Loader2, Lock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -12,17 +12,25 @@ type FeatureRouteProps = {
 };
 
 export const FeatureRoute: React.FC<FeatureRouteProps> = ({ feature, children }) => {
-  const { canAccessFeature, openFeatureDialog } = useFeatureGate();
+  const { canAccessFeature, isFeatureAccessLoading, openFeatureDialog } = useFeatureGate();
   const navigate = useNavigate();
   const definition = getFeatureDefinition(feature);
   const requiredPlan = getRequiredPlan(feature);
   const canAccess = canAccessFeature(feature);
 
   useEffect(() => {
-    if (!canAccess) {
+    if (!isFeatureAccessLoading && !canAccess) {
       openFeatureDialog(feature);
     }
-  }, [canAccess, feature, openFeatureDialog]);
+  }, [canAccess, feature, isFeatureAccessLoading, openFeatureDialog]);
+
+  if (isFeatureAccessLoading) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center" aria-busy="true" aria-label="Carregando permissões do plano">
+        <Loader2 className="h-7 w-7 animate-spin text-[#0B5137]" />
+      </div>
+    );
+  }
 
   if (canAccess) {
     return <>{children}</>;

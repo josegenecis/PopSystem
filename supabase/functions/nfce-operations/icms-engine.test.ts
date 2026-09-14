@@ -18,7 +18,13 @@ const retained = { vBCSTRet: 100, pST: 18, vICMSSubstituto: 8, vICMSSTRet: 10 };
 const credit = { pCredSN: 3 };
 
 function item(code: string, icms_config: Record<string, number> = {}) {
-  return { origem: "0", cst_icms: code, valor_total: 100, icms_config };
+  return {
+    regime_tributario: code.length === 3 ? 1 : 3,
+    origem: "0",
+    cst_icms: code,
+    valor_total: 100,
+    icms_config,
+  };
 }
 
 Deno.test("serializa todos os CSOSNs suportados no grupo correto", () => {
@@ -51,6 +57,29 @@ Deno.test("serializa todos os CSOSNs suportados no grupo correto", () => {
     assertStringIncludes(xml, `<${groups[code]}>`);
     assertStringIncludes(xml, `<CSOSN>${code}</CSOSN>`);
   }
+});
+
+Deno.test("serializa reducao do CSOSN 900 na ordem exigida pelo schema", () => {
+  const xml = buildIcmsXml(item("900", { ...own, pRedBC: 63 }), 1);
+  assertStringIncludes(
+    xml,
+    "<ICMSSN900><orig>0</orig><CSOSN>900</CSOSN><modBC>0</modBC><vBC>37.00</vBC><pRedBC>63.0000</pRedBC><pICMS>18.0000</pICMS><vICMS>6.66</vICMS>",
+  );
+  assertEquals(
+    calculateIcmsTotals([
+      item("900", { ...own, pRedBC: 63 }),
+    ]),
+    {
+      vBC: 37,
+      vICMS: 6.66,
+      vICMSDeson: 0,
+      vFCP: 0,
+      vBCST: 0,
+      vST: 0,
+      vFCPST: 0,
+      vFCPSTRet: 0,
+    },
+  );
 });
 
 Deno.test("serializa todos os CSTs do regime normal no grupo correto", () => {
@@ -112,4 +141,34 @@ Deno.test("normaliza CST por regime e soma totais ICMS", () => {
     vFCPST: 0,
     vFCPSTRet: 0,
   });
+});
+
+Deno.test("totaliza ICMS proprio sem misturar imposto retido do CSOSN 500", () => {
+  assertEquals(
+    calculateIcmsTotals([
+      item("900", { modBC: 0, pICMS: 20, pRedBC: 63 }),
+      item("500", {
+        pICMS: 20,
+        vBCSTRet: 100,
+        pST: 18,
+        vICMSSubstituto: 12,
+        vICMSSTRet: 6,
+        pRedBCEfet: 0,
+        vBCEfet: 100,
+        pICMSEfet: 18,
+        vICMSEfet: 18,
+      }),
+      item("900", { modBC: 0, pICMS: 20 }),
+    ]),
+    {
+      vBC: 137,
+      vICMS: 27.4,
+      vICMSDeson: 0,
+      vFCP: 0,
+      vBCST: 0,
+      vST: 0,
+      vFCPST: 0,
+      vFCPSTRet: 0,
+    },
+  );
 });

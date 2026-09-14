@@ -360,8 +360,13 @@ async function runAutoUpdateFlow() {
       console.log('[auto-update] Atualização baixada', info?.version || '');
       setTimeout(() => {
         try {
+          // A atualização precisa conseguir reiniciar o processo mesmo quando o
+          // renderer informou um caixa aberto. Sem isto, o listener de `close`
+          // cancela o quitAndInstall e o operador continua usando o bundle antigo.
+          allowWindowClose = true;
           autoUpdater.quitAndInstall(true, true);
         } catch {
+          allowWindowClose = false;
           done(true);
         }
       }, 500);
@@ -735,12 +740,13 @@ ipcMain.handle('get-pending-oauth-callback', async () => {
 });
 
 ipcMain.handle('print-system', async (event, { deviceName, html, silent = true } = {}) => {
+  let win;
   try {
     if (!html || typeof html !== 'string') {
       return { success: false, error: 'HTML inválido' };
     }
 
-    const win = new BrowserWindow({
+    win = new BrowserWindow({
       show: false,
       webPreferences: {
         nodeIntegration: false,
@@ -752,6 +758,53 @@ ipcMain.handle('print-system', async (event, { deviceName, html, silent = true }
     await win.loadURL(`data:text/html;charset=utf-8,${encoded}`);
 
     const isA4 = /data-print-format=["']a4["']/i.test(html);
+    let receiptPageSize;
+
+    if (!isA4) {
+      // `@page size: 58mm auto` nao e respeitado de forma consistente pelo
+      // Chromium/driver do Windows. Sem uma altura explicita, pedidos longos
+      // viram varias paginas e a guilhotina corta cada pagina. Medimos o
+      // documento pronto e enviamos o cupom inteiro como uma unica pagina.
+      const receiptMetrics = await win.webContents.executeJavaScript(`
+        (async () => {
+          try {
+            if (document.fonts && document.fonts.ready) await document.fonts.ready;
+            const images = Array.from(document.images || []);
+            await Promise.all(images.map((image) => {
+              if (image.complete) return Promise.resolve();
+              return new Promise((resolve) => {
+                image.addEventListener('load', resolve, { once: true });
+                image.addEventListener('error', resolve, { once: true });
+              });
+            }));
+          } catch {}
+
+          const root = document.documentElement;
+          const body = document.body;
+          const widthAttr = String(root?.dataset?.paperWidth || '58mm').toLowerCase();
+          const widthMm = widthAttr === '80mm' ? 80 : 58;
+          const heightPx = Math.max(
+            root?.scrollHeight || 0,
+            root?.offsetHeight || 0,
+            body?.scrollHeight || 0,
+            body?.offsetHeight || 0
+          );
+
+          return { widthMm, heightPx };
+        })()
+      `, true);
+
+      const widthMicrons = receiptMetrics?.widthMm === 80 ? 80000 : 58000;
+      const measuredHeightMicrons = Math.ceil(Math.max(1, Number(receiptMetrics?.heightPx || 0)) * 264.583333);
+      const heightMicrons = Math.max(50000, Math.min(3000000, measuredHeightMicrons + 8000));
+      receiptPageSize = { width: widthMicrons, height: heightMicrons };
+
+      await win.webContents.insertCSS(`
+        @page { margin: 0 !important; size: ${widthMicrons / 1000}mm ${heightMicrons / 1000}mm !important; }
+        html, body { min-height: 0 !important; height: auto !important; overflow: visible !important; }
+      `);
+    }
+
     const printResult = await new Promise((resolve) => {
       win.webContents.print(
         {
@@ -759,16 +812,12 @@ ipcMain.handle('print-system', async (event, { deviceName, html, silent = true }
           deviceName: deviceName || undefined,
           printBackground: true,
           margins: { marginType: isA4 ? 'default' : 'none' },
-          pageSize: isA4 ? 'A4' : undefined,
+          pageSize: isA4 ? 'A4' : receiptPageSize,
           scaleFactor: 100
         },
         (success, failureReason) => resolve({ success, failureReason })
       );
     });
-
-    try {
-      win.close();
-    } catch {}
 
     if (!printResult.success) {
       return { success: false, error: String(printResult.failureReason || 'Falha ao imprimir') };
@@ -778,6 +827,10 @@ ipcMain.handle('print-system', async (event, { deviceName, html, silent = true }
   } catch (error) {
     console.error('Erro ao imprimir via sistema:', error);
     return { success: false, error: error.message };
+  } finally {
+    try {
+      if (win && !win.isDestroyed()) win.close();
+    } catch {}
   }
 });
 

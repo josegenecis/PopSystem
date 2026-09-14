@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Banknote, Building2, CheckCircle2, ChevronDown, Clock3, CreditCard, QrCode, Split, X } from 'lucide-react';
+import { AlertTriangle, Banknote, Building2, CheckCircle2, ChevronDown, Clock3, CreditCard, Loader2, QrCode, Split, X } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,6 +18,11 @@ export type CheckoutPaymentMethod =
   | 'pagar_depois';
 
 export type CheckoutPaymentAmounts = Partial<Record<CheckoutPaymentMethod, string>>;
+
+export type FiscalValidationState = {
+  status: 'idle' | 'checking' | 'valid' | 'invalid';
+  message?: string;
+};
 
 const PAYMENT_OPTIONS: Array<{ value: CheckoutPaymentMethod; label: string }> = [
   { value: 'pix', label: 'PIX' },
@@ -93,12 +98,16 @@ interface CheckoutModalProps {
   cpfValue?: string;
   onCpfChange?: (value: string) => void;
   fiscalRecipient?: { name: string; document: string } | null;
+  fiscalModel?: '55' | '65';
+  fiscalValidation?: FiscalValidationState;
+  onFiscalModelChange?: (model: '55' | '65') => void;
   onFiscalRecipientClick?: () => void;
   onFiscalRecipientClear?: () => void;
   modeVariant?: 'express' | 'complete';
   inlineContent?: React.ReactNode;
   extraFields?: React.ReactNode;
   advancedContent?: React.ReactNode;
+  keyboardShortcutsEnabled?: boolean;
 }
 
 export function CheckoutModal({
@@ -127,12 +136,16 @@ export function CheckoutModal({
   cpfValue = '',
   onCpfChange,
   fiscalRecipient,
+  fiscalModel = '65',
+  fiscalValidation = { status: 'idle' },
+  onFiscalModelChange,
   onFiscalRecipientClick,
   onFiscalRecipientClear,
   modeVariant = 'complete',
   inlineContent,
   extraFields,
   advancedContent,
+  keyboardShortcutsEnabled = true,
 }: CheckoutModalProps) {
   const [mode, setMode] = useState<'main' | 'pix' | 'cash' | 'split'>('main');
   const [cardDialogOpen, setCardDialogOpen] = useState(false);
@@ -150,7 +163,9 @@ export function CheckoutModal({
   const cashPortion = hasManualSplit ? parsePaymentValue(paymentAmounts.dinheiro || '') : paymentMethod === 'dinheiro' ? total : 0;
   const cashReceivedValue = parsePaymentValue(cashReceived);
   const changeAmount = cashPortion > 0 ? Math.max(0, cashReceivedValue - cashPortion) : 0;
-  const canConfirm = !processing && total > 0 && (!hasManualSplit || remaining <= 0.009);
+  const fiscalReady = fiscalModel !== '55'
+    || Boolean(fiscalRecipient && fiscalValidation.status === 'valid');
+  const canConfirm = !processing && fiscalReady && total > 0 && (!hasManualSplit || remaining <= 0.009);
   const activePaymentCount = PAYMENT_OPTIONS.filter((option) => parsePaymentValue(paymentAmounts[option.value] || '') > 0.009).length;
   const shouldShowSummary = advancedOpen || mode === 'cash' || (mode === 'split' && (activePaymentCount > 1 || remaining > 0.009 || paidTotal - total > 0.009));
 
@@ -190,13 +205,40 @@ export function CheckoutModal({
   useEffect(() => {
     if (!open) return;
     const handler = (event: KeyboardEvent) => {
+      if (!keyboardShortcutsEnabled || cardDialogOpen) return;
+      const target = event.target;
+      const isEditing = target instanceof HTMLInputElement
+        || target instanceof HTMLTextAreaElement
+        || (target instanceof HTMLElement && target.isContentEditable);
+
       if (event.key === 'Escape') {
         event.preventDefault();
         goBack();
+        return;
       }
       if (event.key === 'Enter' && canConfirm) {
         event.preventDefault();
         onConfirm();
+        return;
+      }
+
+      if (!isEditing && mode === 'main' && !cardDialogOpen) {
+        const numericPaymentShortcuts: Partial<Record<string, () => void>> = {
+          '1': () => selectSinglePayment('dinheiro', 'cash'),
+          '2': () => selectSinglePayment('pix', 'pix'),
+          '3': () => selectSinglePayment('cartao_debito', 'main'),
+          '4': () => selectSinglePayment('cartao_credito', 'main'),
+          '5': () => selectSinglePayment('cartao_voucher', 'main'),
+          '6': () => selectSinglePayment('pagar_depois', 'main'),
+          '7': () => selectSinglePayment('cartao_outros', 'main'),
+          '8': openSplitMode,
+        };
+        const shortcut = numericPaymentShortcuts[event.key];
+        if (shortcut) {
+          event.preventDefault();
+          shortcut();
+          return;
+        }
       }
       if (event.key === 'F2') {
         event.preventDefault();
@@ -225,7 +267,7 @@ export function CheckoutModal({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [canConfirm, mode, modeVariant, onConfirm, onOpenChange, open, paymentAmounts]);
+  }, [canConfirm, cardDialogOpen, keyboardShortcutsEnabled, mode, modeVariant, onConfirm, onOpenChange, open, paymentAmounts]);
 
   const updateSplitAmount = (method: CheckoutPaymentMethod, value: string) => {
     onPaymentAmountChange(method, value);
@@ -351,11 +393,18 @@ export function CheckoutModal({
             )}
 
             {onFiscalRecipientClick && (
-              <FiscalRecipientSection
-                recipient={fiscalRecipient}
-                onSelect={onFiscalRecipientClick}
-                onClear={onFiscalRecipientClear}
-              />
+              <div className="space-y-3">
+                <FiscalRecipientSection
+                  recipient={fiscalRecipient}
+                  model={fiscalModel}
+                  onModelChange={onFiscalModelChange}
+                  onSelect={onFiscalRecipientClick}
+                  onClear={onFiscalRecipientClear}
+                />
+                {fiscalModel === '55' && (
+                  <FiscalValidationNotice validation={fiscalValidation} hasRecipient={Boolean(fiscalRecipient)} />
+                )}
+              </div>
             )}
 
             {inlineContent}
@@ -682,15 +731,28 @@ function CpfSection({
 
 function FiscalRecipientSection({
   recipient,
+  model,
+  onModelChange,
   onSelect,
   onClear,
 }: {
   recipient?: { name: string; document: string } | null;
+  model: '55' | '65';
+  onModelChange?: (model: '55' | '65') => void;
   onSelect: () => void;
   onClear?: () => void;
 }) {
   return (
-    <div className={`rounded-2xl border p-4 shadow-sm ${recipient ? 'border-emerald-200 bg-emerald-50/70' : 'border-blue-200 bg-blue-50/70'}`}>
+    <div className={`space-y-3 rounded-2xl border p-4 shadow-sm ${model === '55' ? 'border-blue-200 bg-blue-50/70' : 'border-emerald-200 bg-emerald-50/70'}`}>
+      <div className="grid grid-cols-2 gap-2">
+        <Button type="button" variant={model === '65' ? 'default' : 'outline'} onClick={() => onModelChange?.('65')}>
+          NFC-e • Modelo 65
+        </Button>
+        <Button type="button" variant={model === '55' ? 'default' : 'outline'} onClick={() => onModelChange?.('55')}>
+          NF-e • Modelo 55
+        </Button>
+      </div>
+      {model === '55' && (
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-start gap-3">
           <span className={`rounded-xl p-2 ${recipient ? 'bg-emerald-700 text-white' : 'bg-blue-700 text-white'}`}>
@@ -711,6 +773,57 @@ function FiscalRecipientSection({
             {recipient ? 'Alterar cliente' : 'Informar ou cadastrar cliente'}
           </Button>
         </div>
+      </div>
+      )}
+    </div>
+  );
+}
+
+function FiscalValidationNotice({
+  validation,
+  hasRecipient,
+}: {
+  validation: FiscalValidationState;
+  hasRecipient: boolean;
+}) {
+  if (!hasRecipient) {
+    return (
+      <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+        <div>
+          <p className="font-black">Informe o destinatário antes de emitir a NF-e.</p>
+          <p className="mt-0.5">O sistema validará automaticamente a tributação dos produtos para esse cliente.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (validation.status === 'checking' || validation.status === 'idle') {
+    return (
+      <div className="flex items-center gap-3 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-900">
+        <Loader2 className="h-5 w-5 shrink-0 animate-spin" />
+        Validando destinatário, produtos e regras fiscais da NF-e…
+      </div>
+    );
+  }
+
+  if (validation.status === 'valid') {
+    return (
+      <div className="flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-900">
+        <CheckCircle2 className="h-5 w-5 shrink-0" />
+        {validation.message || 'Tributação compatível com o destinatário e com a NF-e modelo 55.'}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-start gap-3 rounded-2xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-950">
+      <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+      <div>
+        <p className="font-black">Não é possível concluir esta NF-e com a configuração atual.</p>
+        <p className="mt-1 whitespace-pre-line leading-relaxed">
+          {validation.message || 'Revise o destinatário ou a regra fiscal dos produtos antes de fechar a venda.'}
+        </p>
       </div>
     </div>
   );

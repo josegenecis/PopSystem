@@ -11,6 +11,8 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+const MAX_DECOMPRESSED_BYTES = 140 * 1024 * 1024;
+
 type DatasetType =
   | "products"
   | "customers"
@@ -355,7 +357,11 @@ async function fetchPublicSource(rawUrl: string) {
   throw new Error("O link possui redirecionamentos demais.");
 }
 
-async function readLimited(response: Response, maximumBytes: number) {
+async function readLimited(
+  response: Response,
+  maximumBytes: number,
+  limitMessage = "O arquivo do link ultrapassa 50 MB.",
+) {
   if (!response.body) return new Uint8Array();
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -366,7 +372,7 @@ async function readLimited(response: Response, maximumBytes: number) {
     total += value.byteLength;
     if (total > maximumBytes) {
       await reader.cancel();
-      throw new Error("O arquivo do link ultrapassa 50 MB.");
+      throw new Error(limitMessage);
     }
     chunks.push(value);
   }
@@ -377,6 +383,33 @@ async function readLimited(response: Response, maximumBytes: number) {
     offset += chunk.byteLength;
   }
   return bytes;
+}
+
+async function decompressGzip(bytes: Uint8Array) {
+  const stream = new Blob([bytes.slice().buffer as ArrayBuffer]).stream().pipeThrough(
+    new DecompressionStream("gzip"),
+  );
+  return await readLimited(
+    new Response(stream),
+    MAX_DECOMPRESSED_BYTES,
+    "Os dados descompactados ultrapassam 140 MB. Solicite uma importação assistida.",
+  );
+}
+
+async function prepareLoadedSource(
+  bytes: Uint8Array,
+  filename: string,
+  contentType: string,
+  storageHint = "",
+) {
+  const compressed = /\.gz$/i.test(filename) || /\.gz(?:$|\?)/i.test(storageHint) ||
+    /(?:application\/gzip|application\/x-gzip)/i.test(contentType);
+  if (!compressed) return { bytes, filename, contentType };
+  return {
+    bytes: await decompressGzip(bytes),
+    filename: filename.replace(/\.gz$/i, "") || "dados.json",
+    contentType: "application/json",
+  };
 }
 
 async function sha256(bytes: Uint8Array) {
@@ -403,11 +436,16 @@ async function loadSource(admin: any, authUserId: string, source: any) {
         `Não consegui abrir o arquivo: ${error?.message || "arquivo ausente"}`,
       );
     }
-    const bytes = new Uint8Array(await data.arrayBuffer());
+    const storedBytes = new Uint8Array(await data.arrayBuffer());
+    const filename = clean(source.name) || path.split("/").pop() || "dados";
+    const prepared = await prepareLoadedSource(
+      storedBytes,
+      filename,
+      data.type || "",
+      path,
+    );
     return {
-      bytes,
-      filename: clean(source.name) || path.split("/").pop() || "dados",
-      contentType: data.type || "",
+      ...prepared,
       storagePath: path,
       sourceUrl: null,
     };
@@ -428,7 +466,7 @@ async function loadSource(admin: any, authUserId: string, source: any) {
     if (length > 52_428_800) {
       throw new Error("O arquivo do link ultrapassa 50 MB.");
     }
-    const bytes = await readLimited(response, 52_428_800);
+    const storedBytes = await readLimited(response, 52_428_800);
     const disposition = response.headers.get("content-disposition") || "";
     const dispositionName = disposition.match(
       /filename\*?=(?:UTF-8''|["']?)([^"';]+)/i,
@@ -437,10 +475,14 @@ async function loadSource(admin: any, authUserId: string, source: any) {
       dispositionName || new URL(sourceUrl).pathname.split("/").pop() ||
         "dados.csv",
     );
-    return {
-      bytes,
+    const prepared = await prepareLoadedSource(
+      storedBytes,
       filename,
-      contentType: response.headers.get("content-type") || "",
+      response.headers.get("content-type") || "",
+      sourceUrl,
+    );
+    return {
+      ...prepared,
       storagePath: null,
       sourceUrl,
     };

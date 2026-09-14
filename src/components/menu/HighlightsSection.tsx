@@ -3,6 +3,7 @@ import { Plus, Sparkles } from 'lucide-react';
 import { normalizeImageUrlForDisplay } from '@/utils/normalizeImageUrl';
 import AutoplayVideo from '@/components/media/AutoplayVideo';
 import { isVideoAsset } from '@/utils/videoAutoplay';
+import { formatBRL } from '@/lib/currency';
 
 interface Product {
   id: string;
@@ -84,15 +85,15 @@ const HighlightsSection: React.FC<HighlightsSectionProps> = ({ products, onProdu
                 {product.original_price && product.discount_percentage ? (
                   <div className="space-y-1">
                     <div className="flex items-end gap-2">
-                      <span className="text-base font-black tracking-normal" style={{ color: 'var(--menu-price, #EF6C20)' }}>R$ {product.price.toFixed(2)}</span>
-                      <span className="text-[11px] text-gray-500 line-through">R$ {Number(product.original_price).toFixed(2)}</span>
+                      <span className="text-base font-black tracking-normal" style={{ color: 'var(--menu-price, #EF6C20)' }}>{formatBRL(product.price)}</span>
+                      <span className="text-[11px] text-gray-500 line-through">{formatBRL(product.original_price)}</span>
                     </div>
                     <div className="inline-flex items-center rounded-full bg-green-100 text-green-700 px-2 py-0.5 text-xs font-semibold">
                       -{Math.round(Number(product.discount_percentage))}%
                     </div>
                   </div>
                 ) : (
-                  <div className="text-sm font-black tracking-normal sm:text-base" style={{ color: 'var(--menu-price, #EF6C20)' }}>R$ {product.price.toFixed(2)}</div>
+                  <div className="text-sm font-black tracking-normal sm:text-base" style={{ color: 'var(--menu-price, #EF6C20)' }}>{formatBRL(product.price)}</div>
                 )}
                 <span className="flex h-7 w-7 flex-none items-center justify-center rounded-full text-white shadow-md sm:h-10 sm:w-10" style={{ backgroundColor: 'var(--menu-primary, #85C441)' }}><Plus className="h-4 w-4 sm:h-5 sm:w-5" /></span>
               </div>

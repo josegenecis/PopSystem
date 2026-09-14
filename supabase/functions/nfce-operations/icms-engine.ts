@@ -34,6 +34,13 @@ export const NORMAL_CST = [
 ] as const;
 
 export interface IcmsConfig {
+  // Por padrão, a base própria é recalculada a partir do valor líquido do item.
+  // Use "explicit" somente quando a legislação exigir uma base monetária fixa
+  // informada pela regra (e nunca como exemplo cadastral reutilizável).
+  baseMode?: "operation" | "explicit";
+  // "state_modal" acompanha a alíquota interna vigente da UF do emitente.
+  // "explicit" preserva uma alíquota especial aprovada para o produto.
+  rateMode?: "state_modal" | "explicit";
   modBC?: number;
   pRedBC?: number;
   vBC?: number;
@@ -73,6 +80,7 @@ export interface IcmsConfig {
 }
 
 export interface IcmsItem {
+  regime_tributario?: number;
   origem: string;
   cst_icms: string;
   valor_total: number;
@@ -171,7 +179,26 @@ function baseAndTax(config: IcmsConfig, item: IcmsItem): IcmsConfig {
   const operationBase = money(
     Math.max(0, number(item.valor_total) - number(item.valor_desconto)),
   );
-  if (!has(result, "vBC") && has(result, "pICMS")) result.vBC = operationBase;
+  const calculateOwnTax = has(result, "pICMS") &&
+    result.baseMode !== "explicit";
+  if (calculateOwnTax) {
+    result.vBC = money(
+      operationBase * (1 - rate(result.pRedBC) / 100),
+    );
+    result.vICMSOp = money(number(result.vBC) * rate(result.pICMS) / 100);
+    if (has(result, "pDif")) {
+      result.vICMSDif = money(
+        number(result.vICMSOp) * rate(result.pDif) / 100,
+      );
+      result.vICMS = money(
+        number(result.vICMSOp) - number(result.vICMSDif),
+      );
+    } else {
+      result.vICMS = result.vICMSOp;
+    }
+  } else if (!has(result, "vBC") && has(result, "pICMS")) {
+    result.vBC = operationBase;
+  }
   if (
     !has(result, "vICMS") && !has(result, "pDif") && has(result, "vBC") &&
     has(result, "pICMS")
@@ -179,7 +206,8 @@ function baseAndTax(config: IcmsConfig, item: IcmsItem): IcmsConfig {
     result.vICMS = money(number(result.vBC) * rate(result.pICMS) / 100);
   }
   if (!has(result, "vCredICMSSN") && has(result, "pCredSN")) {
-    result.vCredICMSSN = money(operationBase * rate(result.pCredSN) / 100);
+    const creditBase = has(result, "vBC") ? number(result.vBC) : operationBase;
+    result.vCredICMSSN = money(creditBase * rate(result.pCredSN) / 100);
   }
   if (!has(result, "vICMSOp") && has(result, "vBC") && has(result, "pICMS")) {
     result.vICMSOp = money(number(result.vBC) * rate(result.pICMS) / 100);
@@ -221,6 +249,17 @@ function normalTax(config: IcmsConfig): string {
   }${optionalTag(config, "vBCFCP")}${optionalTag(config, "pFCP", 4)}${
     optionalTag(config, "vFCP")
   }`;
+}
+
+// O grupo ICMSSN900 tem uma ordem diferente dos grupos do regime normal:
+// modBC, vBC e somente então pRedBC. Como o XSD usa xs:sequence, reutilizar
+// normalTax aqui faz a SEFAZ rejeitar o XML com cStat 225 quando há redução.
+function simplesOtherTax(config: IcmsConfig): string {
+  return `<modBC>${number(config.modBC)}</modBC>${tag("vBC", config.vBC)}${
+    optionalTag(config, "pRedBC", 4)
+  }${tag("pICMS", config.pICMS, 4)}${tag("vICMS", config.vICMS)}${
+    optionalTag(config, "vBCFCP")
+  }${optionalTag(config, "pFCP", 4)}${optionalTag(config, "vFCP")}`;
 }
 
 function stTax(config: IcmsConfig): string {
@@ -339,7 +378,8 @@ export function buildIcmsXml(item: IcmsItem, regimeValue: number): string {
       throw new Error("CSOSN 900 exige configuração ICMS explícita");
     }
     const own = has(config, "modBC")
-      ? (required(config, ["vBC", "pICMS", "vICMS"], code), normalTax(config))
+      ? (required(config, ["vBC", "pICMS", "vICMS"], code),
+        simplesOtherTax(config))
       : "";
     const st = has(config, "modBCST")
       ? (required(config, ["vBCST", "pICMSST", "vICMSST"], code), stTax(config))
@@ -455,14 +495,45 @@ export function validateIcmsItem(item: IcmsItem, regime: number): void {
 export function calculateIcmsTotals(items: IcmsItem[]): IcmsTotals {
   return items.reduce<IcmsTotals>((totals, item) => {
     const config = baseAndTax(parseConfig(item.icms_config), item);
-    totals.vBC += number(config.vBC);
-    totals.vICMS += number(config.vICMS);
-    totals.vICMSDeson += number(config.vICMSDeson);
-    totals.vFCP += number(config.vFCP);
-    totals.vBCST += number(config.vBCST);
-    totals.vST += number(config.vICMSST);
-    totals.vFCPST += number(config.vFCPST);
-    totals.vFCPSTRet += number(config.vFCPSTRet);
+    const regime = Number(
+      item.regime_tributario ||
+        (String(item.cst_icms || "").replace(/\D/g, "").length === 3 ? 1 : 3),
+    );
+    const code = normalizeIcmsCode(regime, item.cst_icms);
+
+    // ICMSTot deve refletir somente os grupos efetivamente serializados no
+    // item. Em especial, CSOSN 500/CST 60 informam imposto anteriormente
+    // retido (e, opcionalmente, ICMS efetivo), mas esses valores nao compoem
+    // vBC/vICMS nem vBCST/vST do documento atual.
+    const hasOwnTax = regime === 1
+      ? code === "900" && has(config, "modBC")
+      : ["00", "10", "20", "51", "70"].includes(code) ||
+        (code === "90" && has(config, "modBC"));
+    const hasStTax = regime === 1
+      ? ["201", "202", "203"].includes(code) ||
+        (code === "900" && has(config, "modBCST"))
+      : ["10", "30", "70"].includes(code) ||
+        (code === "90" && has(config, "modBCST"));
+    const hasDesoneracao = regime !== 1 &&
+      ["20", "30", "40", "41", "50", "70", "90"].includes(code);
+    const hasRetainedTax = regime === 1 ? code === "500" : code === "60";
+
+    if (hasOwnTax) {
+      totals.vBC += number(config.vBC);
+      totals.vICMS += number(config.vICMS);
+      totals.vFCP += number(config.vFCP);
+    }
+    if (hasStTax) {
+      totals.vBCST += number(config.vBCST);
+      totals.vST += number(config.vICMSST);
+      totals.vFCPST += number(config.vFCPST);
+    }
+    if (hasDesoneracao) {
+      totals.vICMSDeson += number(config.vICMSDeson);
+    }
+    if (hasRetainedTax) {
+      totals.vFCPSTRet += number(config.vFCPSTRet);
+    }
     return totals;
   }, {
     vBC: 0,

@@ -6,23 +6,24 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { Plus, Minus, Trash2, Calculator, Search, Store, Wallet, ChevronLeft, ChevronRight, Scale, AlertTriangle, ScanLine } from 'lucide-react';
+import { Plus, Minus, Trash2, Calculator, Search, Store, Wallet, ChevronLeft, ChevronRight, Scale, AlertTriangle, ScanLine, Keyboard } from 'lucide-react';
 import OperatorSwitcher from '@/components/OperatorSwitcher';
 import { useToast } from '@/hooks/use-toast';
 import { normalizeImageUrlForDisplay } from '@/utils/normalizeImageUrl';
 import { formatBRL } from '@/lib/currency';
+import { normalizeSuggestedProductSearch } from '@/lib/whatsappCentral';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import ProductVariationModal from '@/components/pdv/ProductVariationModal';
 import PixCheckoutModal from '@/components/payment/PixCheckoutModal';
-import CheckoutModal, { CheckoutPaymentMethod } from '@/components/checkout/CheckoutModal';
+import CheckoutModal, { CheckoutPaymentMethod, type FiscalValidationState } from '@/components/checkout/CheckoutModal';
 import ReceivableContactSelect, { type ReceivableContact } from '@/components/receivables/ReceivableContactSelect';
 import ElectronicCommandDialog, { type ElectronicCommandLookup } from '@/components/pdv/ElectronicCommandDialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import FirstOperatorDialog from '@/components/pdv/FirstOperatorDialog';
 import AdminPinDialog from '@/components/security/AdminPinDialog';
-import { canGiveDiscount, getLocalOperatorSession, isAdminOperator } from '@/services/operatorAuth';
+import { canCloseCash, canGiveDiscount, canOpenCash, getLocalOperatorSession, isAdminOperator } from '@/services/operatorAuth';
 import { verifyAdminPin } from '@/services/adminPin';
 import { useTefSettings } from '@/hooks/useTefSettings';
 import { PrinterService } from '@/utils/printerService';
@@ -52,11 +53,14 @@ import FiscalRecipientsManager, { type FiscalCustomer } from '@/components/fisca
 import { pwaScaleService } from '@/services/ScaleService';
 import BarcodeCameraScanner from '@/components/devices/BarcodeCameraScanner';
 import PageContentSkeleton from '@/components/ui/page-content-skeleton';
+import { applyEffectivePrices } from '@/services/pricingEngine';
+import { warmImageCache } from '@/utils/imageCache';
 
 interface Product {
   id: string;
   name: string;
   barcode?: string | null;
+  internal_code?: string | null;
   price: number;
   image_url?: string;
   available: boolean;
@@ -74,6 +78,12 @@ interface Product {
   fiscal_origem?: string | null;
   fiscal_cest?: string | null;
   fiscal_beneficio?: string | null;
+  base_price?: number;
+  effective_price?: number;
+  price_table_id?: string | null;
+  price_rule_id?: string | null;
+  price_table_name?: string | null;
+  price_source?: 'base' | 'price_table';
 }
 
 const ProductCardImage: React.FC<{ product: Product }> = ({ product }) => {
@@ -103,6 +113,55 @@ const ProductCardImage: React.FC<{ product: Product }> = ({ product }) => {
 interface CategoryConfig extends PizzaCategoryConfig {
   id: string;
   name: string;
+}
+
+type PdvCatalogSnapshot = {
+  savedAt: number;
+  products: Product[];
+  categories: CategoryConfig[];
+};
+
+const PDV_CATALOG_CACHE_PREFIX = 'popsystem_pdv_catalog_v1';
+const PDV_CATALOG_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const pdvCatalogMemory = new Map<string, PdvCatalogSnapshot>();
+
+function getPdvCatalogCacheKey(userId: string) {
+  return `${PDV_CATALOG_CACHE_PREFIX}:${userId}`;
+}
+
+function readPdvCatalogCache(userId: string): PdvCatalogSnapshot | null {
+  const memorySnapshot = pdvCatalogMemory.get(userId);
+  if (memorySnapshot && Date.now() - memorySnapshot.savedAt <= PDV_CATALOG_CACHE_TTL_MS) {
+    return memorySnapshot;
+  }
+
+  try {
+    const raw = localStorage.getItem(getPdvCatalogCacheKey(userId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PdvCatalogSnapshot;
+    if (!Array.isArray(parsed.products) || !Array.isArray(parsed.categories)) return null;
+    if (Date.now() - Number(parsed.savedAt || 0) > PDV_CATALOG_CACHE_TTL_MS) return null;
+    pdvCatalogMemory.set(userId, parsed);
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writePdvCatalogCache(userId: string, patch: Partial<Pick<PdvCatalogSnapshot, 'products' | 'categories'>>) {
+  if (!userId) return;
+  const current = readPdvCatalogCache(userId);
+  const snapshot: PdvCatalogSnapshot = {
+    savedAt: Date.now(),
+    products: patch.products ?? current?.products ?? [],
+    categories: patch.categories ?? current?.categories ?? [],
+  };
+  pdvCatalogMemory.set(userId, snapshot);
+  try {
+    localStorage.setItem(getPdvCatalogCacheKey(userId), JSON.stringify(snapshot));
+  } catch {
+    // O cache em memoria ainda evita recarga durante a sessao.
+  }
 }
 
 interface ProductVariation {
@@ -176,6 +235,18 @@ const getPaymentMethodLabel = (method: PdvPaymentMethod | string) => {
 const normalizeProductLookupCode = (value: unknown) =>
   String(value || '').trim().replace(/\s+/g, '').toLowerCase();
 
+const matchesInternalProductCode = (internalCode: unknown, typedCode: unknown) => {
+  const stored = normalizeProductLookupCode(internalCode);
+  const typed = normalizeProductLookupCode(typedCode);
+  if (!stored || !typed) return false;
+  if (stored === typed) return true;
+
+  // O código automático P000017 também pode ser digitado como 17 no caixa.
+  if (!/^\d+$/.test(typed)) return false;
+  const storedNumber = stored.match(/^(?:p)?0*(\d+)$/)?.[1];
+  return storedNumber ? Number(storedNumber) === Number(typed) : false;
+};
+
 const formatFiscalDocument = (value: unknown) => {
   const digits = String(value || '').replace(/\D/g, '');
   if (digits.length === 11) return digits.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
@@ -196,6 +267,7 @@ interface CashCloseSummary {
   pix: number;
   card: number;
   cash: number;
+  receivable: number;
   total: number;
   inAmount: number;
   outAmount: number;
@@ -231,8 +303,11 @@ const PDV = () => {
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
+  const [whatsappConversationId, setWhatsappConversationId] = useState<string | null>(null);
   const [customerDocument, setCustomerDocument] = useState('');
   const [selectedFiscalRecipient, setSelectedFiscalRecipient] = useState<FiscalCustomer | null>(null);
+  const [selectedFiscalModel, setSelectedFiscalModel] = useState<'55' | '65'>('65');
+  const [fiscalValidation, setFiscalValidation] = useState<FiscalValidationState>({ status: 'idle' });
   const [fiscalRecipientOpen, setFiscalRecipientOpen] = useState(false);
   const [deliveryCustomerFound, setDeliveryCustomerFound] = useState('');
   const [orderType, setOrderType] = useState<'delivery' | 'pickup' | 'dine_in' | 'counter'>('counter');
@@ -250,6 +325,8 @@ const PDV = () => {
   const [receivableDueDate, setReceivableDueDate] = useState('');
   const [receivableNotes, setReceivableNotes] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [productCodeQuery, setProductCodeQuery] = useState('');
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -292,7 +369,7 @@ const PDV = () => {
   const [commandQuery, setCommandQuery] = useState('');
   const [commandLookup, setCommandLookup] = useState<ElectronicCommandLookup | null>(null);
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { user, session } = useAuth();
   const { lookupCustomer, isLoading: customerLookupLoading } = useCustomerLookup(user?.id || '');
   const { isMobile } = useSidebar();
   const { settings: tefSettings } = useTefSettings();
@@ -309,6 +386,8 @@ const PDV = () => {
   const scannerLastKeyAtRef = useRef(0);
   const scannerClearTimerRef = useRef<number | null>(null);
   const scannerInputTargetRef = useRef<{ element: HTMLInputElement | HTMLTextAreaElement; value: string } | null>(null);
+  const productSearchInputRef = useRef<HTMLInputElement>(null);
+  const productCodeInputRef = useRef<HTMLInputElement>(null);
 
   const getPdvDraftKey = () => `boracume_pdv_draft_v1:${user?.id || 'anonymous'}`;
 
@@ -359,12 +438,25 @@ const PDV = () => {
   };
 
   useEffect(() => {
-    if (user) {
-      fetchData();
+    if (user?.id) {
+      const cachedCatalog = readPdvCatalogCache(user.id);
+      if (cachedCatalog) {
+        setProducts(cachedCatalog.products);
+        setCategories(cachedCatalog.categories);
+        warmImageCache(cachedCatalog.products.map((product) => product.image_url));
+        hasLoadedDataRef.current = true;
+        setLoading(false);
+        void fetchData({ background: true });
+      } else {
+        hasLoadedDataRef.current = false;
+        setProducts([]);
+        setCategories([]);
+        void fetchData();
+      }
       fetchOpenCashSession();
       checkFirstOperator();
     }
-  }, [user]);
+  }, [user?.id]);
 
   useEffect(() => {
     if (!user?.id || draftRestoredUserIdRef.current === user.id) return;
@@ -421,6 +513,34 @@ const PDV = () => {
       clearPdvDraft();
     }
   }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    try {
+      const raw = sessionStorage.getItem('popsystem_whatsapp_order_handoff');
+      if (!raw) return;
+      sessionStorage.removeItem('popsystem_whatsapp_order_handoff');
+      const handoff = JSON.parse(raw);
+      if (!handoff?.createdAt || Date.now() - Number(handoff.createdAt) > 10 * 60_000) return;
+      if (typeof handoff.customerName === 'string') setCustomerName(handoff.customerName);
+      if (typeof handoff.customerPhone === 'string') setCustomerPhone(handoff.customerPhone);
+      if (typeof handoff.customerAddress === 'string') setCustomerAddress(handoff.customerAddress);
+      if (typeof handoff.conversationId === 'string') setWhatsappConversationId(handoff.conversationId);
+      if (Array.isArray(handoff.suggestedItems) && handoff.suggestedItems.length > 0) {
+        setSearchTerm(normalizeSuggestedProductSearch(handoff.suggestedItems[0]));
+      }
+      setOrderType(handoff.customerAddress ? 'delivery' : 'pickup');
+      setActiveTab('products');
+      toast({
+        title: 'Cliente carregado do WhatsApp',
+        description: Array.isArray(handoff.suggestedItems) && handoff.suggestedItems.length > 0
+          ? `Sugestão identificada: ${handoff.suggestedItems.join(', ')}. Confirme produtos, variações e preços atuais.`
+          : 'Adicione os produtos usando o mesmo fluxo normal do PDV.',
+      });
+    } catch {
+      sessionStorage.removeItem('popsystem_whatsapp_order_handoff');
+    }
+  }, [toast, user?.id]);
 
   useEffect(() => {
     if (!user?.id || draftRestoredUserIdRef.current !== user.id) return;
@@ -507,6 +627,7 @@ const PDV = () => {
   const normalizePaymentBucket = (order: any) => {
     const raw = String(order?.payment_method || '').trim().toLowerCase();
     if (!raw) return 'other';
+    if (raw.includes('pagar_depois') || raw.includes('conta') || raw.includes('receiv')) return 'receivable';
     if (raw.includes('pix')) return 'pix';
     if (raw.includes('dinheiro')) return 'cash';
     if (raw.includes('voucher') || raw.includes('refeicao') || raw.includes('refeição') || raw.includes('aliment')) return 'voucher';
@@ -621,6 +742,7 @@ const PDV = () => {
     let debit = 0;
     let voucher = 0;
     let genericCard = 0;
+    let receivable = 0;
 
     for (const order of sales) {
       const total = Number(order?.total || 0);
@@ -635,6 +757,7 @@ const PDV = () => {
         else if (bucket === 'debit') debit += line.amount;
         else if (bucket === 'voucher') voucher += line.amount;
         else if (bucket === 'card') genericCard += line.amount;
+        else if (bucket === 'receivable') receivable += line.amount;
       }
     }
 
@@ -659,6 +782,7 @@ const PDV = () => {
       pix,
       card: credit + debit + genericCard,
       cash,
+      receivable,
       total: grossRevenue,
       inAmount,
       outAmount,
@@ -745,6 +869,7 @@ const PDV = () => {
       row('Débito:', formatBRL(summary.debit)),
       row('Voucher/Refeição:', formatBRL(summary.voucher)),
       ...(summary.genericCard > 0 ? [row('Cartão:', formatBRL(summary.genericCard))] : []),
+      row('Contas a Receber:', formatBRL(summary.receivable)),
       '',
       row('TOTAL RECEBIDO:', formatBRL(summary.totalReceived)),
       '',
@@ -797,6 +922,16 @@ const PDV = () => {
   };
 
   const openCashDialog = async (mode: 'open' | 'close') => {
+    const operatorSession = getOperatorSession();
+    const allowed = mode === 'open' ? canOpenCash(operatorSession) : canCloseCash(operatorSession);
+    if (!allowed) {
+      toast({
+        title: 'Sem permissão para operar o caixa',
+        description: 'O administrador precisa liberar a permissão "Abrir/Fechar Caixa" em Usuários e Equipe.',
+        variant: 'destructive',
+      });
+      return;
+    }
     setCashDialogMode(mode);
     setCashCloseSummary(null);
     setCashAmountInput('');
@@ -820,12 +955,22 @@ const PDV = () => {
 
   const handleCashSubmit = async () => {
     if (!user?.id) return;
+    const operatorSession = getOperatorSession();
+    const allowed = cashDialogMode === 'open' ? canOpenCash(operatorSession) : canCloseCash(operatorSession);
+    if (!allowed) {
+      toast({
+        title: 'Sem permissão para operar o caixa',
+        description: 'O administrador precisa liberar a permissão "Abrir/Fechar Caixa" em Usuários e Equipe.',
+        variant: 'destructive',
+      });
+      setCashDialogOpen(false);
+      return;
+    }
     const amount = parseBRL(cashAmountInput);
     if (!Number.isFinite(amount)) {
       toast({ title: 'Valor inválido', description: 'Informe um valor válido', variant: 'destructive' });
       return;
     }
-    const operatorSession = getOperatorSession();
     const waiterId = operatorSession?.id || null;
 
     try {
@@ -863,7 +1008,7 @@ const PDV = () => {
           userId: user.id,
           lines: [
             `Data/Hora: ${new Date().toLocaleString('pt-BR')}`,
-            `Valor inicial: R$ ${amount.toFixed(2)}`,
+            `Valor inicial: ${formatBRL(amount)}`,
             operatorSession?.name ? `Operador: ${operatorSession.name}` : ''
           ].filter(Boolean) as string[]
         });
@@ -983,7 +1128,7 @@ const PDV = () => {
         userId: user.id,
         lines: [
           `Data/Hora: ${new Date().toLocaleString('pt-BR')}`,
-          `Valor: R$ ${amount.toFixed(2)}`,
+          `Valor: ${formatBRL(amount)}`,
           cashMoveDesc ? `Descrição: ${cashMoveDesc}` : '',
           session?.name ? `Operador: ${session.name}` : ''
         ].filter(Boolean) as string[]
@@ -1054,7 +1199,10 @@ const PDV = () => {
       }
 
       if (error) throw error;
-      setProducts(data || []);
+      const pricedProducts = await applyEffectivePrices((data || []) as Product[], user?.id || '', 'pdv');
+      setProducts(pricedProducts);
+      warmImageCache(pricedProducts.map((product) => product.image_url));
+      if (user?.id) writePdvCatalogCache(user.id, { products: pricedProducts });
     } catch (error) {
       console.error('Erro ao carregar produtos:', error);
       if (!hasLoadedDataRef.current) setProducts([]);
@@ -1121,7 +1269,8 @@ const PDV = () => {
     return products.filter((product) => {
       const matchesSearch = !query ||
         product.name.toLowerCase().includes(query) ||
-        normalizeProductLookupCode(product.barcode).includes(codeQuery);
+        normalizeProductLookupCode(product.barcode).includes(codeQuery) ||
+        normalizeProductLookupCode(product.internal_code).includes(codeQuery);
       const matchesCategory =
         activeCategoryId === 'all' ||
         (activeCategoryId === 'uncategorized' && (!product.category_id || !categoryById.has(product.category_id))) ||
@@ -1283,9 +1432,19 @@ const PDV = () => {
     const safeWeight = Math.max(0, Number(weightKg || 0));
     if (!safeWeight) {
       toast({ title: 'Peso inválido', description: 'Informe um peso maior que zero.', variant: 'destructive' });
-      return;
+      return false;
     }
     addToCart(product, Number(safeWeight.toFixed(3)));
+    return true;
+  };
+
+  const confirmManualWeight = () => {
+    if (!pendingWeightProduct) return;
+    const weightKg = Number(manualWeight.replace(',', '.'));
+    if (!addWeightedProductToCart(pendingWeightProduct, weightKg)) return;
+    setWeightDialogOpen(false);
+    setPendingWeightProduct(null);
+    setManualWeight('');
   };
 
   const openManualWeightDialog = (product: Product) => {
@@ -1396,6 +1555,7 @@ const PDV = () => {
 
     const product = products.find((item) =>
       normalizeProductLookupCode(item.barcode) === code ||
+      matchesInternalProductCode(item.internal_code, code) ||
       normalizeProductLookupCode(item.id) === code
     );
 
@@ -1673,8 +1833,10 @@ const PDV = () => {
     setCustomerName('');
     setCustomerPhone('');
     setCustomerAddress('');
+    setWhatsappConversationId(null);
     setCustomerDocument('');
     setSelectedFiscalRecipient(null);
+    setSelectedFiscalModel('65');
     setFiscalRecipientOpen(false);
     setSelectedDeliveryZone('');
     setSelectedTable('');
@@ -1724,7 +1886,9 @@ const PDV = () => {
       }
 
       if (error) throw error;
-      setCategories(((data || []) as any[]).map((category) => enrichCategoryWithMetadata(category)) as CategoryConfig[]);
+      const nextCategories = ((data || []) as any[]).map((category) => enrichCategoryWithMetadata(category)) as CategoryConfig[];
+      setCategories(nextCategories);
+      if (user?.id) writePdvCatalogCache(user.id, { categories: nextCategories });
     } catch (error) {
       console.error('Erro ao carregar categorias do PDV:', error);
       if (!hasLoadedDataRef.current) setCategories([]);
@@ -1820,6 +1984,12 @@ const PDV = () => {
         product_id: item.id,
         product_name: item.name,
         price: item.price,
+        base_price: item.base_price ?? item.price,
+        effective_price: item.effective_price ?? item.price,
+        price_table_id: item.price_table_id ?? null,
+        price_rule_id: item.price_rule_id ?? null,
+        price_table_name: item.price_table_name ?? null,
+        price_source: item.price_source ?? 'base',
         quantity: item.quantity,
         subtotal: item.price * item.quantity,
         sale_unit: item.weight_based ? 'kg' : 'un',
@@ -1977,13 +2147,77 @@ const PDV = () => {
     setCheckoutOpen(true);
   };
 
+  const addProductByTypedCode = async () => {
+    const rawCode = productCodeQuery.trim();
+    const code = normalizeProductLookupCode(rawCode);
+    if (!code) return;
+
+    const product = products.find((item) =>
+      matchesInternalProductCode(item.internal_code, code) ||
+      normalizeProductLookupCode(item.barcode) === code
+    );
+
+    if (!product) {
+      toast({
+        title: 'Produto não encontrado',
+        description: `Nenhum produto possui o código ${rawCode}.`,
+        variant: 'destructive',
+      });
+      productCodeInputRef.current?.select();
+      return;
+    }
+
+    await handleProductClick(product);
+    setProductCodeQuery('');
+    window.requestAnimationFrame(() => productCodeInputRef.current?.focus());
+  };
+
+  useEffect(() => {
+    if (activeTab !== 'products') return;
+
+    const handlePdvShortcut = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      const target = event.target;
+      const isEditing = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || (target instanceof HTMLElement && target.isContentEditable);
+
+      if (event.key === 'F1' && !isEditing) {
+        event.preventDefault();
+        setShortcutsOpen(true);
+        return;
+      }
+
+      if (showVariationModal || weightDialogOpen || cashDialogOpen || adminPinOpen || tefOpen || tableLaunchOpen || commandLookupOpen || commandQueryOpen || checkoutOpen || shortcutsOpen) return;
+
+      if (event.key === 'F2' && !isEditing) {
+        event.preventDefault();
+        productSearchInputRef.current?.focus();
+        productSearchInputRef.current?.select();
+      } else if (event.key === 'F3' && !isEditing) {
+        event.preventDefault();
+        productCodeInputRef.current?.focus();
+        productCodeInputRef.current?.select();
+      } else if (event.key === 'F4' && !isEditing) {
+        event.preventDefault();
+        void openCheckout();
+      }
+    };
+
+    window.addEventListener('keydown', handlePdvShortcut);
+    return () => window.removeEventListener('keydown', handlePdvShortcut);
+  }, [activeTab, adminPinOpen, cashDialogOpen, checkoutOpen, commandLookupOpen, commandQueryOpen, shortcutsOpen, showVariationModal, tableLaunchOpen, tefOpen, weightDialogOpen, cart]);
+
   const isFiscalEmissionActive = async (modelCode: '55' | '65' = '65') => {
     if (!user?.id) return false;
 
     const { data, status } = await invokeEdgeFunction<any>('nfce-operations', {
       operation: 'politica_emissao',
       model_code: modelCode,
-    }, { timeoutMs: 15000 });
+    }, {
+      timeoutMs: 15000,
+      // Usa a sessão já mantida pelo AuthContext. Isso evita disputar o lock
+      // interno do Supabase Auth durante o fechamento da venda.
+      authToken: session?.access_token || null,
+    });
 
     if (status < 200 || status >= 300 || !data?.success) {
       throw new Error(
@@ -2032,7 +2266,7 @@ const PDV = () => {
   const emitNfceForOrder = async (order: any) => {
     if (!order?.id) throw new Error('Pedido inválido para emissão fiscal.');
     const recipient = order?.variations?.fiscal_recipient || null;
-    const modelCode: '55' | '65' = recipient ? '55' : '65';
+    const modelCode: '55' | '65' = order?.variations?.fiscal_model === '55' ? '55' : '65';
 
     const { data, status } = await invokeEdgeFunction<any>('nfce-operations', {
       operation: 'emitir',
@@ -2059,7 +2293,10 @@ const PDV = () => {
           }
         : null,
       observacoes: '',
-    }, { timeoutMs: 120000 });
+    }, {
+      timeoutMs: 120000,
+      authToken: session?.access_token || null,
+    });
 
     if (status < 200 || status >= 300) {
       throw new Error(data?.error || data?.message || `Erro ao emitir documento fiscal modelo ${modelCode}.`);
@@ -2071,8 +2308,179 @@ const PDV = () => {
     return data;
   };
 
+  const buildFiscalValidationItems = () => cart.map((item) => {
+    const { options, variationLines } = unpackSelectedVariations(item.selectedVariations);
+    return {
+      product_id: item.id,
+      product_name: item.name,
+      price: item.price,
+      base_price: item.base_price ?? item.price,
+      effective_price: item.effective_price ?? item.price,
+      quantity: item.quantity,
+      subtotal: item.price * item.quantity,
+      sale_unit: item.weight_based ? 'kg' : 'un',
+      fiscal_ncm: item.fiscal_ncm || null,
+      fiscal_cfop: item.fiscal_cfop || null,
+      fiscal_csosn: item.fiscal_csosn || null,
+      fiscal_cst_pis: item.fiscal_cst_pis || null,
+      fiscal_cst_cofins: item.fiscal_cst_cofins || null,
+      fiscal_origem: item.fiscal_origem || null,
+      fiscal_cest: item.fiscal_cest || null,
+      fiscal_beneficio: item.fiscal_beneficio || null,
+      options,
+      variations: variationLines,
+      notes: item.notes || '',
+    };
+  });
+
+  const buildFiscalConsumerData = (recipient: any, orderData?: any) => recipient
+      ? {
+          nome: recipient.name || orderData?.customer_name || null,
+          cpf_cnpj: String(recipient.cpf_cnpj || orderData?.customer_document || '').replace(/\D/g, '') || null,
+          email: recipient.email || null,
+          state_registration: recipient.state_registration || null,
+          state_registration_indicator: recipient.state_registration_indicator || 9,
+          address: recipient.address || null,
+          address_number: recipient.address_number || null,
+          address_complement: recipient.address_complement || null,
+          neighborhood: recipient.neighborhood || null,
+          city: recipient.city || null,
+          state: recipient.state || null,
+          postal_code: recipient.postal_code || null,
+          city_code: recipient.city_code || null,
+          country_code: recipient.country_code || '1058',
+          country_name: recipient.country_name || 'BRASIL',
+          final_consumer: recipient.final_consumer !== false && recipient.final_consumer_default !== false,
+        }
+      : null;
+
+  const formatFiscalValidationError = (rawMessage: string, _modelCode: '55' | '65') => rawMessage;
+
+  const requestFiscalPrevalidation = async ({
+    modelCode,
+    recipient,
+    items,
+    deliveryFee,
+    discount,
+    orderData,
+  }: {
+    modelCode: '55' | '65';
+    recipient: any;
+    items: any[];
+    deliveryFee: number;
+    discount: number;
+    orderData?: any;
+  }) => {
+    const consumerData = buildFiscalConsumerData(recipient, orderData);
+
+    const { data, status } = await invokeEdgeFunction<any>('nfce-operations', {
+      operation: 'validar_pre_emissao',
+      model_code: modelCode,
+      consumer_data: consumerData,
+      items,
+      delivery_fee: deliveryFee || 0,
+      discount: discount || 0,
+    }, {
+      timeoutMs: 30000,
+      authToken: session?.access_token || null,
+    });
+
+    if (status < 200 || status >= 300 || !data?.success) {
+      const rawMessage = data?.error || data?.message || `Não foi possível validar o documento fiscal modelo ${modelCode}.`;
+      throw new Error(formatFiscalValidationError(rawMessage, modelCode));
+    }
+
+    return data;
+  };
+
+  const validateFiscalSaleBeforeCreate = async (orderData: any) => {
+    const recipient = orderData?.variations?.fiscal_recipient || null;
+    const modelCode: '55' | '65' = orderData?.variations?.fiscal_model === '55' ? '55' : '65';
+
+    try {
+      await requestFiscalPrevalidation({
+        modelCode,
+        recipient,
+        items: orderData.items,
+        deliveryFee: orderData.delivery_fee || 0,
+        discount: orderData.discount || 0,
+        orderData,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`${message}\n\nA venda não foi registrada.`);
+    }
+  };
+
+  useEffect(() => {
+    if (!checkoutOpen || selectedFiscalModel !== '55') {
+      setFiscalValidation({ status: 'idle' });
+      return;
+    }
+
+    if (!selectedFiscalRecipient) {
+      setFiscalValidation({
+        status: 'invalid',
+        message: 'Selecione o destinatário para que o sistema valide a tributação da NF-e.',
+      });
+      return;
+    }
+
+    if (cart.length === 0) {
+      setFiscalValidation({ status: 'idle' });
+      return;
+    }
+
+    let cancelled = false;
+    setFiscalValidation({ status: 'checking' });
+
+    const timer = window.setTimeout(async () => {
+      try {
+        await requestFiscalPrevalidation({
+          modelCode: '55',
+          recipient: selectedFiscalRecipient,
+          items: buildFiscalValidationItems(),
+          deliveryFee: getDeliveryFee(),
+          discount: parseBRL(discountAmount),
+        });
+        if (!cancelled) {
+          setFiscalValidation({
+            status: 'valid',
+            message: 'Destinatário e tributação dos produtos validados para NF-e modelo 55.',
+          });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setFiscalValidation({
+            status: 'invalid',
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    checkoutOpen,
+    selectedFiscalModel,
+    selectedFiscalRecipient,
+    cart,
+    discountAmount,
+    orderType,
+    selectedDeliveryZone,
+    deliveryZones,
+  ]);
+
   const printOrderAfterSale = async (order: any, fiscalActive?: boolean) => {
-    const modelCode: '55' | '65' = order?.variations?.fiscal_recipient ? '55' : '65';
+    // O modelo escolhido no fechamento acompanha a venda. A presenca de um
+    // destinatario nao pode decidir o modelo: consumidor identificado tambem
+    // e permitido na NFC-e, enquanto a NF-e precisa ser uma escolha explicita.
+    const modelCode: '55' | '65' = order?.variations?.fiscal_model === '55'
+      ? '55'
+      : '65';
     const shouldEmitFiscal = typeof fiscalActive === 'boolean' ? fiscalActive : await isFiscalEmissionActive(modelCode);
 
     if (!shouldEmitFiscal) {
@@ -2265,28 +2673,13 @@ const PDV = () => {
 
       const orderNumber = generateOrderNumber();
       
-        const orderItems = cart.map(item => {
-          const { options, variationLines } = unpackSelectedVariations(item.selectedVariations);
-          return {
-        product_id: item.id,
-        product_name: item.name,
-        price: item.price,
-        quantity: item.quantity,
-        subtotal: item.price * item.quantity,
-        sale_unit: item.weight_based ? 'kg' : 'un',
-        fiscal_ncm: item.fiscal_ncm || null,
-        fiscal_cfop: item.fiscal_cfop || null,
-        fiscal_csosn: item.fiscal_csosn || null,
-        fiscal_cst_pis: item.fiscal_cst_pis || null,
-        fiscal_cst_cofins: item.fiscal_cst_cofins || null,
-        fiscal_origem: item.fiscal_origem || null,
-        fiscal_cest: item.fiscal_cest || null,
-        fiscal_beneficio: item.fiscal_beneficio || null,
-        options,
-        variations: variationLines,
-        notes: item.notes || ''
-          };
-        });
+        const orderItems = buildFiscalValidationItems().map((item, index) => ({
+          ...item,
+          price_table_id: cart[index].price_table_id ?? null,
+          price_rule_id: cart[index].price_rule_id ?? null,
+          price_table_name: cart[index].price_table_name ?? null,
+          price_source: cart[index].price_source ?? 'base',
+        }));
 
       const operatorSession = (() => {
         return getOperatorSession();
@@ -2363,12 +2756,15 @@ const PDV = () => {
         acceptance_status: isCounterPdvSale ? 'accepted' : (paymentMethod === 'pix' ? 'awaiting_pix_payment' : 'accepted'),
         order_number: orderNumber,
         user_id: user?.id,
+        source: whatsappConversationId ? 'WHATSAPP' : 'PDV',
+        conversation_id: whatsappConversationId,
         estimated_time: '30-45 min',
         waiter_id: operatorSession?.id || null,
         cash_register_session_id: cashSession?.id || null,
         variations: {
           operator: operatorSession ? { id: operatorSession.id, name: operatorSession.name } : null,
-          source: 'PDV',
+          source: whatsappConversationId ? 'WHATSAPP' : 'PDV',
+          conversation_id: whatsappConversationId,
           financial_adjustments: {
             subtotal: getTotalValue(),
             discount: parseBRL(discountAmount),
@@ -2395,6 +2791,7 @@ const PDV = () => {
                 notes: receivableNotes.trim() || null,
               }
             : null,
+          fiscal_model: selectedFiscalModel,
           fiscal_recipient: selectedFiscalRecipient ? {
             customer_id: selectedFiscalRecipient.id,
             name: selectedFiscalRecipient.name,
@@ -2486,9 +2883,17 @@ const PDV = () => {
 
       // Consulta o valor fiscal atual em toda venda, mas inicia em paralelo com
       // a gravação para não adicionar uma espera sequencial ao checkout.
-      const fiscalActivePromise = isFiscalEmissionActive(selectedFiscalRecipient ? '55' : '65');
-      if (selectedFiscalRecipient && !(await fiscalActivePromise)) {
+      if (selectedFiscalModel === '55' && !selectedFiscalRecipient) {
+        throw new Error('Selecione o destinatário para emitir NF-e modelo 55.');
+      }
+      const fiscalActivePromise = isFiscalEmissionActive(selectedFiscalModel);
+      const fiscalActiveForSale = await fiscalActivePromise;
+      if (selectedFiscalModel === '55' && !fiscalActiveForSale) {
         throw new Error('A NF-e modelo 55 está desativada. Ative o modelo 55 em Configurações fiscais antes de concluir esta venda.');
+      }
+
+      if (fiscalActiveForSale) {
+        await validateFiscalSaleBeforeCreate(orderData);
       }
 
       const { data, error } = await supabase
@@ -2521,7 +2926,6 @@ const PDV = () => {
         }
       }
 
-      const fiscalActiveForSale = await fiscalActivePromise;
       runNonBlockingSaleTasks({
         created,
         orderNumber,
@@ -2553,22 +2957,29 @@ const PDV = () => {
       }
 
       let printResult: { fiscal: boolean; nfce: any | null } = { fiscal: fiscalActiveForSale, nfce: null };
+      let fiscalEmissionError: Error | null = null;
       try {
         printResult = await printOrderAfterSale(created, fiscalActiveForSale);
       } catch (e: any) {
         console.warn('Falha ao emitir/imprimir após a venda:', e);
+        fiscalEmissionError = e instanceof Error ? e : new Error(String(e?.message || e || 'Falha desconhecida'));
+        const fiscalModel = selectedFiscalModel === '55' ? 'NF-e' : 'NFC-e';
         toast({
-          title: fiscalActiveForSale ? 'Venda registrada, NFC-e não concluída' : 'Venda registrada, mas não imprimiu',
-          description: e?.message || 'Verifique as configurações fiscais e a impressora.',
+          title: fiscalActiveForSale ? `Venda registrada, ${fiscalModel} não emitida` : 'Venda registrada, mas não imprimiu',
+          description: e?.message || 'Verifique as configurações fiscais e tente reenviar o documento.',
           variant: 'destructive',
         });
       }
-      toast({
-        title: "Venda finalizada!",
-        description: printResult.fiscal && printResult.nfce
-          ? `Pedido #${orderNumber} finalizado com NFC-e emitida automaticamente.`
-          : `Pedido #${orderNumber} finalizado com sucesso. Total: ${formatCurrency(getFinalTotal())}.`,
-      });
+      // Não encobrir uma rejeição/indisponibilidade fiscal com um segundo toast
+      // de sucesso. A venda permanece registrada, mas a emissão precisa ficar
+      // explicitamente pendente para o operador agir.
+      if (!fiscalEmissionError) {
+        const fiscalModel = selectedFiscalModel === '55' ? 'NF-e' : 'NFC-e';
+        toast({
+          title: 'Venda finalizada e documento autorizado!',
+          description: `Pedido #${orderNumber} finalizado com ${fiscalModel} emitida automaticamente.`,
+        });
+      }
       setMobileCartOpen(false);
       setCheckoutOpen(false);
       resetCurrentSale(getNextSaleOrderType());
@@ -2640,10 +3051,30 @@ const PDV = () => {
                 <div className="relative w-[150px] shrink-0 sm:w-[210px] xl:w-[240px]">
                   <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#003223]/40" />
                   <Input
+                    ref={productSearchInputRef}
                     placeholder="Buscar produtos..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="h-9 w-full rounded-xl border-[#FF6400]/15 bg-white/90 pl-9 text-sm text-[#003223] transition-colors focus:bg-white focus-visible:ring-[#FF6400]/25"
+                  />
+                </div>
+                <div className="relative hidden w-[150px] shrink-0 md:block xl:w-[180px]">
+                  <Keyboard className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#003223]/40" />
+                  <Input
+                    ref={productCodeInputRef}
+                    aria-label="Código do produto"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    placeholder="Código + Enter"
+                    value={productCodeQuery}
+                    onChange={(event) => setProductCodeQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key !== 'Enter') return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      void addProductByTypedCode();
+                    }}
+                    className="h-9 w-full rounded-xl border-[#FF6400]/15 bg-white/90 pl-9 font-mono text-sm text-[#003223] transition-colors focus:bg-white focus-visible:ring-[#FF6400]/25"
                   />
                 </div>
                 <Button
@@ -2655,6 +3086,17 @@ const PDV = () => {
                   onClick={() => setCameraScannerOpen(true)}
                 >
                   <ScanLine className="h-4 w-4" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="hidden h-9 w-9 shrink-0 rounded-xl md:inline-flex"
+                  title="Atalhos do teclado (F1)"
+                  aria-label="Ver atalhos do teclado"
+                  onClick={() => setShortcutsOpen(true)}
+                >
+                  <Keyboard className="h-4 w-4" />
                 </Button>
                 {(categories.length > 0 || categoryOptions.hasUncategorized) && (
                   <div className="flex min-w-0 flex-1 items-center gap-1.5">
@@ -3381,10 +3823,17 @@ const PDV = () => {
             <div className="space-y-2">
               <Label>Peso em kg</Label>
               <Input
+                autoFocus
                 inputMode="decimal"
                 placeholder="0,100"
                 value={manualWeight}
                 onChange={(event) => setManualWeight(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter') return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  confirmManualWeight();
+                }}
               />
               {pwaScaleService.isSupported() && !pwaScaleService.isConnected() && (
                 <Button
@@ -3413,14 +3862,7 @@ const PDV = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setWeightDialogOpen(false)}>Cancelar</Button>
             <Button
-              onClick={() => {
-                if (!pendingWeightProduct) return;
-                const weightKg = Number(manualWeight.replace(',', '.'));
-                addWeightedProductToCart(pendingWeightProduct, weightKg);
-                setWeightDialogOpen(false);
-                setPendingWeightProduct(null);
-                setManualWeight('');
-              }}
+              onClick={confirmManualWeight}
             >
               Adicionar
             </Button>
@@ -3468,6 +3910,57 @@ const PDV = () => {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={shortcutsOpen} onOpenChange={setShortcutsOpen}>
+        <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Keyboard className="h-5 w-5 text-[#FF6400]" />
+              Atalhos do PDV
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 text-sm">
+            <p className="pt-1 text-xs font-black uppercase tracking-[0.16em] text-[#FF6400]">Operação do PDV</p>
+            {[
+              ['F1', 'Mostrar esta lista de atalhos'],
+              ['F2', 'Buscar produto pelo nome'],
+              ['F3', 'Digitar código interno ou código de barras'],
+              ['F4', 'Fechar o pedido e abrir o pagamento'],
+              ['Enter', 'Confirmar o código digitado'],
+            ].map(([key, description]) => (
+              <div key={key} className="flex items-center justify-between gap-4 rounded-xl border border-[#003223]/10 bg-[#F8FAF8] px-3 py-2.5">
+                <span className="text-[#003223]/75">{description}</span>
+                <kbd className="min-w-14 rounded-lg border border-[#003223]/15 bg-white px-2 py-1 text-center font-mono font-bold text-[#003223] shadow-sm">
+                  {key}
+                </kbd>
+              </div>
+            ))}
+            <p className="pt-3 text-xs font-black uppercase tracking-[0.16em] text-[#FF6400]">Na tela de pagamento</p>
+            {[
+              ['1', 'Dinheiro'],
+              ['2', 'PIX'],
+              ['3', 'Cartão de débito'],
+              ['4', 'Cartão de crédito'],
+              ['5', 'Voucher'],
+              ['6', 'Contas a receber'],
+              ['7', 'Outros cartões'],
+              ['8', 'Dividir pagamento'],
+              ['Enter', 'Confirmar pagamento'],
+              ['Esc', 'Voltar ou fechar'],
+            ].map(([key, description]) => (
+              <div key={`payment-${key}`} className="flex items-center justify-between gap-4 rounded-xl border border-[#003223]/10 bg-[#F8FAF8] px-3 py-2.5">
+                <span className="text-[#003223]/75">{description}</span>
+                <kbd className="min-w-14 rounded-lg border border-[#003223]/15 bg-white px-2 py-1 text-center font-mono font-bold text-[#003223] shadow-sm">
+                  {key}
+                </kbd>
+              </div>
+            ))}
+            <p className="pt-1 text-xs leading-relaxed text-muted-foreground">
+              Os números funcionam também no teclado numérico. Eles não mudam a forma de pagamento enquanto você estiver digitando em algum campo.
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <ElectronicCommandDialog
         open={commandLookupOpen}
         onOpenChange={setCommandLookupOpen}
@@ -3494,6 +3987,7 @@ const PDV = () => {
         onCashReceivedChange={setChangeAmount}
         onClearSplit={clearPaymentSplit}
         onConfirm={handleFinalizeSale}
+        keyboardShortcutsEnabled={!shortcutsOpen}
         processing={processing || cart.length === 0}
         modeVariant={checkoutSettings.mode}
         cpfValue={customerDocument}
@@ -3502,8 +3996,19 @@ const PDV = () => {
           name: selectedFiscalRecipient.name,
           document: formatFiscalDocument(selectedFiscalRecipient.cpf_cnpj),
         } : null}
+        fiscalModel={selectedFiscalModel}
+        fiscalValidation={fiscalValidation}
+        onFiscalModelChange={(model) => {
+          setSelectedFiscalModel(model);
+          setFiscalValidation({ status: model === '55' ? 'checking' : 'idle' });
+          if (model === '55' && !selectedFiscalRecipient) setFiscalRecipientOpen(true);
+          if (model === '65') setSelectedFiscalRecipient(null);
+        }}
         onFiscalRecipientClick={() => setFiscalRecipientOpen(true)}
-        onFiscalRecipientClear={() => setSelectedFiscalRecipient(null)}
+        onFiscalRecipientClear={() => {
+          setSelectedFiscalRecipient(null);
+          setFiscalValidation({ status: 'invalid', message: 'Selecione o destinatário para validar a NF-e.' });
+        }}
         inlineContent={paymentMethod === 'pagar_depois' ? (
           <div className="space-y-3">
             <ReceivableContactSelect
@@ -3636,6 +4141,7 @@ const PDV = () => {
           <FiscalRecipientsManager
             onRecipientSelected={(customer) => {
               setSelectedFiscalRecipient(customer);
+              setSelectedFiscalModel('55');
               setFiscalRecipientOpen(false);
               toast({
                 title: 'Cliente informado para a NF-e',
@@ -3725,8 +4231,11 @@ const PDV = () => {
                     customer_name: customerName,
                   } as any);
 
-                const fiscalActiveForSale = await isFiscalEmissionActive(selectedFiscalRecipient ? '55' : '65');
-                if (selectedFiscalRecipient && !fiscalActiveForSale) {
+                if (selectedFiscalModel === '55' && !selectedFiscalRecipient) {
+                  throw new Error('Selecione o destinatário para emitir NF-e modelo 55.');
+                }
+                const fiscalActiveForSale = await isFiscalEmissionActive(selectedFiscalModel);
+                if (selectedFiscalModel === '55' && !fiscalActiveForSale) {
                   throw new Error('A NF-e modelo 55 está desativada. Ative o modelo 55 em Configurações fiscais.');
                 }
                 let printResult: { fiscal: boolean; nfce: any | null } = { fiscal: fiscalActiveForSale, nfce: null };
@@ -3853,7 +4362,7 @@ const PDV = () => {
       />
 
       <Dialog open={cashDialogOpen} onOpenChange={setCashDialogOpen}>
-        <DialogContent>
+        <DialogContent className={cashDialogMode === 'close' ? 'sm:max-w-2xl' : undefined}>
           <DialogHeader>
             <DialogTitle>{cashDialogMode === 'open' ? 'Abrir Caixa' : 'Fechar Caixa'}</DialogTitle>
           </DialogHeader>
@@ -3868,7 +4377,7 @@ const PDV = () => {
                 <div className="text-sm text-muted-foreground">Carregando resumo do caixa...</div>
               ) : cashCloseSummary ? (
                 <>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                     <div className="border rounded-md p-3">
                       <div className="text-xs text-muted-foreground">Abertura</div>
                       <div className="text-lg font-bold">{formatCurrency(cashCloseSummary.initial)}</div>
@@ -3882,9 +4391,19 @@ const PDV = () => {
                       <div className="text-lg font-bold">{formatCurrency(cashCloseSummary.pix)}</div>
                     </div>
                     <div className="border rounded-md p-3">
-                      <div className="text-xs text-muted-foreground">Cartão</div>
-                      <div className="text-lg font-bold">{formatCurrency(cashCloseSummary.card)}</div>
+                      <div className="text-xs text-muted-foreground">Débito</div>
+                      <div className="text-lg font-bold">{formatCurrency(cashCloseSummary.debit)}</div>
                     </div>
+                    <div className="border rounded-md p-3">
+                      <div className="text-xs text-muted-foreground">Crédito</div>
+                      <div className="text-lg font-bold">{formatCurrency(cashCloseSummary.credit)}</div>
+                    </div>
+                    {cashCloseSummary.genericCard > 0 && (
+                      <div className="border rounded-md p-3">
+                        <div className="text-xs text-muted-foreground">Outros cartões</div>
+                        <div className="text-lg font-bold">{formatCurrency(cashCloseSummary.genericCard)}</div>
+                      </div>
+                    )}
                     <div className="border rounded-md p-3">
                       <div className="text-xs text-muted-foreground">Dinheiro (vendas)</div>
                       <div className="text-lg font-bold">{formatCurrency(cashCloseSummary.cash)}</div>
@@ -3894,6 +4413,11 @@ const PDV = () => {
                       <div className="text-lg font-bold">
                         {formatCurrency(cashCloseSummary.inAmount)} / {formatCurrency(cashCloseSummary.outAmount)}
                       </div>
+                    </div>
+                    <div className="rounded-md border border-sky-200 bg-sky-50 p-3">
+                      <div className="text-xs text-sky-700">Contas a receber</div>
+                      <div className="text-lg font-bold text-sky-950">{formatCurrency(cashCloseSummary.receivable)}</div>
+                      <div className="mt-1 text-[11px] text-sky-700">Somente para controle</div>
                     </div>
                   </div>
 

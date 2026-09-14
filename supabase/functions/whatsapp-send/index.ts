@@ -42,6 +42,84 @@ function getManualPauseWindow() {
   };
 }
 
+function pickProviderMessageId(data: any) {
+  return String(data?.key?.id || data?.data?.key?.id || data?.messageId || data?.id || '').trim();
+}
+
+async function readJson(response: Response) {
+  try {
+    return await response.json();
+  } catch {
+    return {};
+  }
+}
+
+async function sendEvolutionMessage(params: {
+  baseUrl: string;
+  globalApiKey: string;
+  instanceName: string;
+  instanceToken: string;
+  number: string;
+  message: string;
+  mediaUrl?: string;
+  mediaType?: string;
+  mimeType?: string;
+  fileName?: string;
+}) {
+  const normalizedNumber = normalizePhone(params.number);
+  if (!params.mediaUrl) {
+    const response = await fetch(`${params.baseUrl}/message/sendText/${encodeURIComponent(params.instanceName)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: params.globalApiKey },
+      body: JSON.stringify({ number: normalizedNumber, text: params.message, delay: 300 })
+    });
+    if (response.ok) return { response, data: await readJson(response) };
+
+    const fallback = await fetch(`${params.baseUrl}/send/text`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: params.instanceToken },
+      body: JSON.stringify({ number: normalizedNumber, text: params.message })
+    });
+    return { response: fallback, data: await readJson(fallback) };
+  }
+
+  const mediaType = ['image', 'video', 'audio', 'document'].includes(String(params.mediaType)) ? String(params.mediaType) : 'document';
+  const standardUrl = mediaType === 'audio'
+    ? `${params.baseUrl}/message/sendWhatsAppAudio/${encodeURIComponent(params.instanceName)}`
+    : `${params.baseUrl}/message/sendMedia/${encodeURIComponent(params.instanceName)}`;
+  const standardBody = mediaType === 'audio'
+    ? { number: normalizedNumber, audio: params.mediaUrl, delay: 300, encoding: true }
+    : {
+        number: normalizedNumber,
+        mediatype: mediaType,
+        mimetype: params.mimeType || 'application/octet-stream',
+        media: params.mediaUrl,
+        caption: params.message,
+        fileName: params.fileName || 'arquivo',
+        delay: 300
+      };
+  const response = await fetch(standardUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: params.globalApiKey },
+    body: JSON.stringify(standardBody)
+  });
+  if (response.ok) return { response, data: await readJson(response) };
+
+  const fallback = await fetch(`${params.baseUrl}/send/media`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: params.instanceToken },
+    body: JSON.stringify({
+      number: normalizedNumber,
+      url: params.mediaUrl,
+      type: mediaType,
+      mimetype: params.mimeType,
+      fileName: params.fileName,
+      caption: params.message
+    })
+  });
+  return { response: fallback, data: await readJson(fallback) };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -69,51 +147,26 @@ serve(async (req) => {
     const baseUrl = evolutionBaseUrl();
     const globalApiKey = evolutionApiKey();
 
-    const { number, message } = await req.json();
+    const { number, message = '', mediaUrl, mediaType, mimeType, fileName } = await req.json();
 
-    if (!number || !message) {
-      return new Response(JSON.stringify({ error: 'Missing number or message' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    if (!number || (!String(message).trim() && !mediaUrl)) {
+      return new Response(JSON.stringify({ error: 'Missing number or content' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    let evoRes = await fetch(`${baseUrl}/message/sendText/${encodeURIComponent(instanceName)}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': globalApiKey
-      },
-      body: JSON.stringify({
-        number: normalizePhone(number),
-        text: message,
-        delay: 500
-      })
+    const sent = await sendEvolutionMessage({
+      baseUrl,
+      globalApiKey,
+      instanceName,
+      instanceToken,
+      number,
+      message: String(message || '').trim(),
+      mediaUrl: String(mediaUrl || '').trim() || undefined,
+      mediaType,
+      mimeType,
+      fileName
     });
-
-    let evoData;
-    try {
-      evoData = await evoRes.json();
-    } catch(e) {
-      evoData = {};
-    }
-
-    if (!evoRes.ok) {
-      evoRes = await fetch(`${baseUrl}/send/text`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': instanceToken
-        },
-        body: JSON.stringify({
-          number: number,
-          text: message
-        })
-      });
-
-      try {
-        evoData = await evoRes.json();
-      } catch(e) {
-        evoData = {};
-      }
-    }
+    const evoRes = sent.response;
+    const evoData = sent.data;
 
     if (!evoRes.ok) {
       console.error("Evolution API Error (Send Message):", evoData);
@@ -191,7 +244,7 @@ serve(async (req) => {
         .in('phone', phoneCandidates);
     }
 
-    return new Response(JSON.stringify({ success: true, data: evoData }), {
+    return new Response(JSON.stringify({ success: true, data: evoData, providerMessageId: pickProviderMessageId(evoData) || null }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

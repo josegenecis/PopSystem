@@ -43,7 +43,23 @@ export const useDeviceIntegration = () => {
     const ok = await bridgePrinter.connect(config.transport as any, config.address);
     setBridgeConnected(ok);
     if (ok) {
-      setDevices(prev => prev.map(d => d.id === 'bridge_printer' ? { ...d, status: 'connected' } : d));
+      const bridgeStatus = await bridgePrinter.getStatus().catch(() => null);
+      setDevices(prev => {
+        const connectedPrinter = prev.map(d => d.id === 'bridge_printer' ? { ...d, status: 'connected' as const } : d);
+        const withoutBridgeScale = connectedPrinter.filter(d => d.id !== 'bridge_scale');
+        if (!bridgeStatus?.scale?.connected) return withoutBridgeScale;
+        return [
+          ...withoutBridgeScale,
+          {
+            id: 'bridge_scale',
+            name: `Balança via Pop Connect${bridgeStatus.scale.config?.portPath ? ` (${bridgeStatus.scale.config.portPath})` : ''}`,
+            type: 'scale' as const,
+            connectionType: 'usb' as const,
+            status: 'connected' as const,
+            address: bridgeStatus.scale.config?.portPath || '',
+          },
+        ];
+      });
       const saved = loadPrinterConfig()
       savePrinterConfig({
         ...saved,

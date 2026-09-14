@@ -37,9 +37,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
 import { toast } from 'sonner';
 import ClientOperationsWorkspace from '@/components/admin/ClientOperationsWorkspace';
+import RepresentativeManagement from '@/components/admin/RepresentativeManagement';
 
 type MetricMap = Record<string, number>;
 
@@ -48,9 +48,13 @@ export interface AdminClientRow {
   restaurantName: string;
   email?: string;
   phone?: string;
+  ownerPhone?: string;
+  restaurantPhone?: string;
   address?: string;
   city?: string;
   state?: string;
+  postalCode?: string;
+  locationVerifiedByPostalCode?: boolean;
   createdAt?: string;
   updatedAt?: string | null;
   lastSignInAt?: string | null;
@@ -89,6 +93,31 @@ export interface AdminClientRow {
   latestInvoice?: { status?: string; amount?: number; due_date?: string; invoice_url?: string } | null;
 }
 
+export interface AdminMember {
+  id: string;
+  email: string;
+  display_name: string;
+  role: string;
+  active?: boolean;
+}
+
+export interface CommercialLead {
+  id: string;
+  representative_member_id: string;
+  restaurant_name: string;
+  owner_name: string;
+  owner_phone: string;
+  email?: string | null;
+  postal_code: string;
+  city: string;
+  state: string;
+  interest_level: string;
+  commercial_stage: string;
+  marketing_consent: boolean;
+  last_visit_at: string;
+  internal_admin_members?: { display_name?: string; email?: string } | null;
+}
+
 interface ChartPoint {
   label?: string;
   value?: number;
@@ -112,8 +141,9 @@ interface AdminDashboardData {
     neverAccessed: AdminClientRow[];
     paidThisMonth: AdminClientRow[];
     portfolio: AdminClientRow[];
+    commercialLeads: CommercialLead[];
   };
-  members?: Array<{ id: string; email: string; display_name: string; role: string }>;
+  members?: AdminMember[];
   analytics?: {
     cityHeatmap: ChartPoint[];
     stateHeatmap: ChartPoint[];
@@ -122,6 +152,7 @@ interface AdminDashboardData {
     signupTrend: ChartPoint[];
     accessTrend: ChartPoint[];
     orderTrend: ChartPoint[];
+    representativeLeadStages: ChartPoint[];
   };
 }
 
@@ -138,13 +169,13 @@ const formatPercent = (value?: number, total?: number) => {
   return `${Math.round((Number(value || 0) / Number(total || 1)) * 100)}%`;
 };
 
-const POP_COLORS = ['#004b36', '#85c441', '#ff5b00', '#0ea5e9', '#ef4444', '#64748b'];
+const POP_COLORS = ['#047857', '#7c3aed', '#f97316', '#84cc16', '#c026d3', '#f59e0b'];
 
 const normalizePhoneForWhatsApp = (phone?: string) => {
   const digits = String(phone || '').replace(/\D/g, '');
   if (!digits) return '';
-  if (digits.startsWith('55')) return digits;
-  if (digits.length >= 10) return `55${digits}`;
+  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) return digits;
+  if (digits.length === 10 || digits.length === 11) return `55${digits}`;
   return digits;
 };
 
@@ -209,12 +240,12 @@ function MetricCard({
   value: string;
   detail: string;
   icon: React.ElementType;
-  tone?: 'emerald' | 'orange' | 'blue' | 'red' | 'slate';
+  tone?: 'emerald' | 'orange' | 'violet' | 'red' | 'slate';
 }) {
   const tones = {
     emerald: 'bg-emerald-50 text-emerald-700 border-emerald-100',
     orange: 'bg-orange-50 text-orange-700 border-orange-100',
-    blue: 'bg-blue-50 text-blue-700 border-blue-100',
+    violet: 'bg-violet-50 text-violet-700 border-violet-100',
     red: 'bg-red-50 text-red-700 border-red-100',
     slate: 'bg-slate-50 text-slate-700 border-slate-100',
   };
@@ -267,7 +298,10 @@ function ClientList({
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate font-semibold text-slate-950">{client.restaurantName}</p>
-                  <p className="truncate text-sm text-slate-500">{client.email || client.phone || 'Sem contato cadastrado'}</p>
+                  <p className="truncate text-sm text-slate-500">{client.email || 'E-mail não informado'}</p>
+                  <p className="mt-1 truncate text-xs font-semibold text-emerald-700">
+                    {client.phone ? `WhatsApp do proprietário: ${client.phone}` : 'WhatsApp do proprietário não informado'}
+                  </p>
                   {(client.city || client.state) && (
                     <p className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-slate-400">
                       <MapPin className="h-3.5 w-3.5" />
@@ -407,9 +441,6 @@ export default function SystemAdminDashboard() {
   const [data, setData] = useState<AdminDashboardData | null>(null);
   const [loading, setLoading] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
-  const [popPayRestaurantEmail, setPopPayRestaurantEmail] = useState('');
-  const [popPayCreditFee, setPopPayCreditFee] = useState('0.50');
-  const [popPayFeeSaving, setPopPayFeeSaving] = useState(false);
   const [releasingClientId, setReleasingClientId] = useState('');
 
   const metrics = data?.metrics || {};
@@ -476,28 +507,6 @@ export default function SystemAdminDashboard() {
     sessionStorage.removeItem(SESSION_KEY);
     setToken('');
     setData(null);
-  };
-
-  const savePopPayCreditFee = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setPopPayFeeSaving(true);
-    try {
-      const { data: response, error } = await supabase.functions.invoke('admin-dashboard', {
-        body: {
-          action: 'set_poppay_credit_fee',
-          token,
-          restaurantEmail: popPayRestaurantEmail,
-          feePercent: Number(popPayCreditFee.replace(',', '.')),
-        },
-      });
-      if (error) throw error;
-      if (!response?.ok) throw new Error(response?.error || 'Não foi possível atualizar a tarifa.');
-      toast.success(`Tarifa de ${Number(response.creditFeePercent || 0).toLocaleString('pt-BR')}% aplicada a ${response.restaurant}. O crédito online foi desativado até um novo aceite.`);
-    } catch (error: any) {
-      toast.error(error?.message || 'Não foi possível atualizar a tarifa.');
-    } finally {
-      setPopPayFeeSaving(false);
-    }
   };
 
   const releaseClientFor24Hours = async (client: AdminClientRow) => {
@@ -617,69 +626,29 @@ export default function SystemAdminDashboard() {
       </header>
 
       <div className="mx-auto max-w-[1600px] space-y-6 px-4 py-6 lg:px-8">
-        <Card className="rounded-lg border-emerald-200 bg-white shadow-sm">
-          <CardHeader className="p-5 pb-3">
-            <CardTitle className="flex items-center gap-2 text-lg text-slate-950">
-              <DollarSign className="h-5 w-5 text-emerald-600" />
-              Tarifa do crédito online PopPay
-            </CardTitle>
-            <p className="text-sm text-slate-500">Controle interno por restaurante. O padrão é 0,5%; qualquer alteração exige novo aceite da loja.</p>
-          </CardHeader>
-          <CardContent className="p-5 pt-0">
-            <form onSubmit={savePopPayCreditFee} className="grid gap-3 md:grid-cols-[1fr_180px_auto] md:items-end">
-              <div className="space-y-2">
-                <Label htmlFor="poppay-restaurant-email">E-mail do restaurante</Label>
-                <Input
-                  id="poppay-restaurant-email"
-                  type="email"
-                  value={popPayRestaurantEmail}
-                  onChange={(event) => setPopPayRestaurantEmail(event.target.value)}
-                  placeholder="restaurante@email.com"
-                  required
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="poppay-credit-fee">Tarifa PopPay (%)</Label>
-                <Input
-                  id="poppay-credit-fee"
-                  type="number"
-                  min="0"
-                  max="10"
-                  step="0.01"
-                  value={popPayCreditFee}
-                  onChange={(event) => setPopPayCreditFee(event.target.value)}
-                  required
-                />
-              </div>
-              <Button type="submit" className="bg-emerald-700 hover:bg-emerald-800" disabled={popPayFeeSaving}>
-                {popPayFeeSaving ? 'Salvando...' : 'Aplicar tarifa'}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-
-        <section className="rounded-lg bg-[#003d2e] p-6 text-white shadow-sm">
+        <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#064e3b] via-[#123f35] to-[#4c1d95] p-6 text-white shadow-xl shadow-emerald-950/10 lg:p-8">
+          <div className="absolute -right-20 -top-24 h-72 w-72 rounded-full bg-orange-500/25 blur-3xl" />
           <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-            <div>
-              <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-sm font-semibold text-emerald-100">
+            <div className="relative">
+              <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-sm font-semibold text-emerald-100">
                 <Activity className="h-4 w-4" />
                 Visão executiva
               </div>
-              <h2 className="mt-4 text-3xl font-bold">Base, uso e risco em tempo real</h2>
+              <h2 className="mt-4 text-3xl font-black lg:text-4xl">Base, receita e oportunidades em tempo real</h2>
               <p className="mt-3 max-w-2xl text-emerald-50/85">
                 Acompanhe onde a PopSystem está crescendo, quais clientes estão ativos, quem precisa de contato e quais regiões concentram mais uso.
               </p>
             </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-lg bg-white/10 p-4">
+            <div className="relative grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur">
                 <p className="text-xs font-semibold uppercase text-emerald-100">Uso em 7 dias</p>
                 <p className="mt-2 text-3xl font-bold">{accessHealth}</p>
               </div>
-              <div className="rounded-lg bg-white/10 p-4">
+              <div className="rounded-2xl border border-white/10 bg-violet-400/15 p-4 backdrop-blur">
                 <p className="text-xs font-semibold uppercase text-emerald-100">Sem acesso</p>
                 <p className="mt-2 text-3xl font-bold">{formatNumber(metrics.noAccess7Days)}</p>
               </div>
-              <div className="rounded-lg bg-orange-500 p-4 text-white">
+              <div className="rounded-2xl bg-orange-500 p-4 text-white shadow-lg shadow-orange-950/20">
                 <p className="text-xs font-semibold uppercase text-orange-50">Ação hoje</p>
                 <p className="mt-2 text-3xl font-bold">{formatNumber((lists?.attention || []).length)}</p>
               </div>
@@ -688,7 +657,7 @@ export default function SystemAdminDashboard() {
         </section>
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <MetricCard title="Clientes cadastrados" value={formatNumber(metrics.totalClients)} detail={`${formatNumber(metrics.newToday)} hoje, ${formatNumber(metrics.newMonth)} no mês`} icon={Users} tone="blue" />
+          <MetricCard title="Clientes cadastrados" value={formatNumber(metrics.totalClients)} detail={`${formatNumber(metrics.newToday)} hoje, ${formatNumber(metrics.newMonth)} no mês`} icon={Users} tone="violet" />
           <MetricCard title="Acessaram hoje" value={formatNumber(metrics.accessedToday)} detail={`${accessHealth} acessaram nos últimos 7 dias`} icon={Activity} tone="emerald" />
           <MetricCard title="Ativos por assinatura" value={formatNumber(metrics.activeClients)} detail={`${formatNumber(metrics.paidThisMonth)} pagaram ou renovaram no mês`} icon={UserCheck} tone="emerald" />
           <MetricCard title="Inadimplentes" value={formatNumber(metrics.delinquentClients)} detail="Precisam de contato ou bloqueio acompanhado" icon={AlertTriangle} tone="red" />
@@ -697,19 +666,12 @@ export default function SystemAdminDashboard() {
           <MetricCard title="Nunca acessaram" value={formatNumber(metrics.neverAccessed)} detail="Cadastros que precisam de onboarding" icon={ShieldCheck} tone="orange" />
           <MetricCard title="MRR previsto" value={formatCurrency(metrics.mrr)} detail="Receita recorrente estimada da PopSystem" icon={DollarSign} tone="emerald" />
           <MetricCard title="Pedidos no mês" value={formatNumber(metrics.ordersMonth)} detail={`${formatNumber(metrics.noOrders7Days)} restaurantes sem pedido há 7 dias`} icon={TrendingUp} tone="slate" />
-          <MetricCard title="WhatsApp conectado" value={formatNumber(metrics.whatsappConfigured)} detail={`${formatNumber(metrics.nfceRejectedMonth)} NFC-e rejeitadas no mês`} icon={MessageCircle} tone="blue" />
+          <MetricCard title="WhatsApp conectado" value={formatNumber(metrics.whatsappConfigured)} detail={`${formatNumber(metrics.nfceRejectedMonth)} NFC-e rejeitadas no mês`} icon={MessageCircle} tone="violet" />
           <MetricCard title="Valor vencido" value={formatCurrency(metrics.overdueAmount)} detail="Cobranças vencidas identificadas nos webhooks" icon={DollarSign} tone="red" />
           <MetricCard title="Chamados abertos" value={formatNumber(metrics.openTickets)} detail={`${formatNumber(metrics.openTasks)} tarefas internas pendentes`} icon={MessageCircle} tone="orange" />
           <MetricCard title="Clientes críticos" value={formatNumber(metrics.criticalClients)} detail="Acesso, cobrança, uso e suporte combinados" icon={AlertTriangle} tone="red" />
+          <MetricCard title="Localização por CEP" value={formatNumber(metrics.clientsWithVerifiedPostalCode)} detail={`${formatNumber(metrics.clientsWithoutVerifiedPostalCode)} clientes ainda sem CEP fiscal confirmado`} icon={MapPin} tone="violet" />
         </section>
-
-        <ClientOperationsWorkspace
-          token={token}
-          clients={lists?.portfolio || []}
-          members={data?.members || []}
-          onRefresh={() => loadDashboard(token)}
-          onRelease24h={releaseClientFor24Hours}
-        />
 
         <section className="grid gap-6 xl:grid-cols-3">
           <ChartCard title="Cadastros recentes" description="Novos restaurantes entrando na base nos últimos 14 dias.">
@@ -766,28 +728,19 @@ export default function SystemAdminDashboard() {
         <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
           <HeatmapList
             title="Mapa de calor por estado"
-            description="Onde a PopSystem tem mais restaurantes cadastrados."
+            description="Estados confirmados pelo CEP cadastrado no fiscal."
             items={analytics?.stateHeatmap || []}
           />
           <HeatmapList
             title="Mapa de calor por cidade"
-            description="Cidades com maior concentração de clientes na base."
+            description="Cidades confirmadas pelo CEP, sem inferência por rua ou endereço livre."
             items={analytics?.cityHeatmap || []}
           />
         </section>
 
-        <section className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
-          <ClientList
-            title="Clientes que precisam de ação"
-            description="Prioridade para suporte, financeiro e sucesso do cliente."
-            clients={lists?.attention || []}
-            emptyText="Nenhum alerta crítico agora."
-            showWhatsAppAction
-            onRelease24h={releaseClientFor24Hours}
-            releasingClientId={releasingClientId}
-          />
-
-          <Card className="rounded-lg border-slate-200 shadow-sm">
+        <section className="flex flex-col gap-6">
+          <Card className="order-1 overflow-hidden rounded-2xl border-0 shadow-lg shadow-emerald-950/5">
+            <div className="h-1.5 bg-gradient-to-r from-emerald-500 via-violet-500 to-orange-500" />
             <CardHeader className="p-5 pb-3">
               <CardTitle className="flex items-center gap-2 text-lg text-slate-950">
                 <TrendingUp className="h-5 w-5 text-emerald-600" />
@@ -798,9 +751,9 @@ export default function SystemAdminDashboard() {
             <CardContent className="space-y-5 p-5 pt-0">
               {[
                 { label: 'Ativos', value: metrics.activeClients, total: metrics.totalClients, color: 'bg-emerald-500' },
-                { label: 'Acessaram em 7 dias', value: metrics.accessed7Days, total: metrics.totalClients, color: 'bg-emerald-500' },
-                { label: 'WhatsApp configurado', value: metrics.whatsappConfigured, total: metrics.totalClients, color: 'bg-blue-500' },
-                { label: 'Inadimplentes', value: metrics.delinquentClients, total: metrics.totalClients, color: 'bg-red-500' },
+                { label: 'Acessaram em 7 dias', value: metrics.accessed7Days, total: metrics.totalClients, color: 'bg-lime-500' },
+                { label: 'WhatsApp configurado', value: metrics.whatsappConfigured, total: metrics.totalClients, color: 'bg-violet-500' },
+                { label: 'Inadimplentes', value: metrics.delinquentClients, total: metrics.totalClients, color: 'bg-rose-500' },
                 { label: 'Em teste', value: metrics.trialClients, total: metrics.totalClients, color: 'bg-orange-500' },
               ].map((item) => {
                 const percent = item.total ? Math.round((Number(item.value || 0) / Number(item.total || 1)) * 100) : 0;
@@ -810,7 +763,7 @@ export default function SystemAdminDashboard() {
                       <span>{item.label}</span>
                       <span>{percent}%</span>
                     </div>
-                    <Progress value={percent} className="h-2" />
+                    <div className="h-2.5 overflow-hidden rounded-full bg-slate-100"><div className={`h-full rounded-full transition-[width] ${item.color}`} style={{ width: `${percent}%` }} /></div>
                   </div>
                 );
               })}
@@ -822,7 +775,33 @@ export default function SystemAdminDashboard() {
               </div>
             </CardContent>
           </Card>
+          <div className="order-2">
+            <ClientList
+              title="Clientes que precisam de ação"
+              description="Fila única priorizada para suporte, financeiro e sucesso do cliente."
+              clients={lists?.attention || []}
+              emptyText="Nenhum alerta crítico agora."
+              showWhatsAppAction
+              onRelease24h={releaseClientFor24Hours}
+              releasingClientId={releasingClientId}
+            />
+          </div>
         </section>
+
+        <ClientOperationsWorkspace
+          token={token}
+          clients={lists?.portfolio || []}
+          members={(data?.members || []).filter((member) => member.role !== 'representative')}
+          onRefresh={() => loadDashboard(token)}
+          onRelease24h={releaseClientFor24Hours}
+        />
+
+        <RepresentativeManagement
+          token={token}
+          members={data?.members || []}
+          leads={lists?.commercialLeads || []}
+          onRefresh={() => loadDashboard(token)}
+        />
 
         <section className="grid gap-6 xl:grid-cols-2">
           <ClientList
@@ -893,7 +872,8 @@ export default function SystemAdminDashboard() {
                   <tr key={`rank-${client.id}`} className="text-slate-700">
                     <td className="py-4">
                       <div className="font-semibold text-slate-950">{client.restaurantName}</div>
-                      <div className="text-xs text-slate-500">{client.email || client.phone || 'Sem contato'}</div>
+                      <div className="text-xs text-slate-500">{client.email || 'E-mail não informado'}</div>
+                      <div className="text-xs font-semibold text-emerald-700">{client.phone || 'Sem WhatsApp do proprietário'}</div>
                     </td>
                     <td className="py-4">
                       <Badge className={statusClassName(client.subscriptionStatus)} variant="outline">

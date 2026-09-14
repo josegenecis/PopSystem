@@ -51,6 +51,8 @@ import { getOpenTableCount } from '@/services/openTables';
 import { getCashSessionDeadline } from '@/utils/cashSession';
 import FiscalRecipientsManager, { type FiscalCustomer } from '@/components/fiscal/FiscalRecipientsManager';
 import { pwaScaleService } from '@/services/ScaleService';
+import { bridgeReadScaleWeight } from '@/services/bridgePrinterClient';
+import { discoverBridgeWebsocketUrl } from '@/services/bridgeDiscovery';
 import BarcodeCameraScanner from '@/components/devices/BarcodeCameraScanner';
 import PageContentSkeleton from '@/components/ui/page-content-skeleton';
 import { applyEffectivePrices } from '@/services/pricingEngine';
@@ -369,6 +371,7 @@ const PDV = () => {
   const [cameraScannerOpen, setCameraScannerOpen] = useState(false);
   const [pendingWeightProduct, setPendingWeightProduct] = useState<Product | null>(null);
   const [manualWeight, setManualWeight] = useState('');
+  const [readingScale, setReadingScale] = useState(false);
   const [commandLookupOpen, setCommandLookupOpen] = useState(false);
   const [commandQueryOpen, setCommandQueryOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState('');
@@ -1458,6 +1461,36 @@ const PDV = () => {
     setManualWeight('');
   };
 
+  const readWeightFromPopConnect = async () => {
+    const websocketUrl = await discoverBridgeWebsocketUrl({ timeoutMs: 900 });
+    if (!websocketUrl) throw new Error('Pop Connect não encontrado neste computador');
+
+    const result = await bridgeReadScaleWeight({ websocketUrl, timeoutMs: 4500 });
+    if (!result.scaleConnected) throw new Error('Conecte a balança no Pop Connect');
+    if (!result.reading) throw new Error('A balança não enviou o peso');
+    return result.reading;
+  };
+
+  const fillWeightFromPopConnect = async () => {
+    if (readingScale) return;
+    setReadingScale(true);
+    try {
+      const reading = await readWeightFromPopConnect();
+      const weightKg = normalizeScaleWeightToKg(reading.weight, reading.unit);
+      if (!weightKg) throw new Error('Coloque o produto na balança e tente novamente');
+      setManualWeight(weightKg.toFixed(3).replace('.', ','));
+      toast({ title: 'Peso recebido do Pop Connect', description: `${weightKg.toFixed(3).replace('.', ',')} kg` });
+    } catch (error: unknown) {
+      toast({
+        title: 'Leitura da balança indisponível',
+        description: error instanceof Error ? error.message : 'Tente novamente.',
+        variant: 'destructive',
+      });
+    } finally {
+      setReadingScale(false);
+    }
+  };
+
   const handleWeightedProductClick = async (product: Product) => {
     const api = (window as any)?.electronAPI;
     const scalePort = localStorage.getItem('hw.scale.port') || '';
@@ -1470,8 +1503,7 @@ const PDV = () => {
       } else if (pwaScaleService.isConnected()) {
         reading = await pwaScaleService.getReading(1800);
       } else {
-        openManualWeightDialog(product);
-        return;
+        reading = await readWeightFromPopConnect();
       }
       const weightKg = normalizeScaleWeightToKg(reading.weight, reading.unit);
       if (!weightKg) throw new Error('Peso zerado');
@@ -3879,6 +3911,16 @@ const PDV = () => {
                   confirmManualWeight();
                 }}
               />
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                disabled={readingScale}
+                onClick={() => void fillWeightFromPopConnect()}
+              >
+                <Scale className="mr-2 h-4 w-4" />
+                {readingScale ? 'Lendo no Pop Connect…' : 'Ler peso do Pop Connect'}
+              </Button>
               {pwaScaleService.isSupported() && !pwaScaleService.isConnected() && (
                 <Button
                   type="button"

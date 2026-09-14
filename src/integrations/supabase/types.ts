@@ -1261,6 +1261,7 @@ export type Database = {
           next_order_number: number | null
           onboarding_completed: boolean | null
           opening_hours: string | null
+          owner_phone: string | null
           phone: string | null
           restaurant_name: string | null
           updated_at: string
@@ -1279,6 +1280,7 @@ export type Database = {
           next_order_number?: number | null
           onboarding_completed?: boolean | null
           opening_hours?: string | null
+          owner_phone?: string | null
           phone?: string | null
           restaurant_name?: string | null
           updated_at?: string
@@ -1297,6 +1299,7 @@ export type Database = {
           next_order_number?: number | null
           onboarding_completed?: boolean | null
           opening_hours?: string | null
+          owner_phone?: string | null
           phone?: string | null
           restaurant_name?: string | null
           updated_at?: string

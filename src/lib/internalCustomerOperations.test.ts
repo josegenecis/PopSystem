@@ -21,3 +21,13 @@ test('busca carteira ignorando maiúsculas', () => {
   const result = filterInternalClients([{ restaurantName: 'Açaí do João', city: 'Fortaleza' }], { search: 'JOÃO' });
   assert.equal(result.length, 1);
 });
+
+test('filtro de pagos inclui pagamento confirmado e período de assinatura pago', () => {
+  const clients = [
+    { restaurantName: 'Pagamento confirmado', financialStatus: 'paid' },
+    { restaurantName: 'Assinatura vigente', financialStatus: 'paid_period' },
+    { restaurantName: 'Pendente', financialStatus: 'pending' },
+  ];
+  const result = filterInternalClients(clients, { financial: 'paid' });
+  assert.deepEqual(result.map((item) => item.restaurantName).sort(), ['Assinatura vigente', 'Pagamento confirmado']);
+});

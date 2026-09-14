@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
@@ -142,14 +143,15 @@ export default function ClientOperationsWorkspace({ token, clients, members, onR
   };
 
   return (
-    <Card className="rounded-lg border-slate-200 shadow-sm">
-      <CardHeader className="gap-4 border-b border-slate-100 p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3"><div><CardTitle className="flex items-center gap-2"><UserRoundCog className="h-5 w-5 text-emerald-700" />Carteira operacional</CardTitle><p className="mt-1 text-sm text-slate-500">Todos os clientes, priorizados por risco real e situação financeira.</p></div><Button type="button" variant="outline" onClick={exportPortfolio}><Download className="mr-2 h-4 w-4" />Exportar CSV</Button></div>
+    <Card className="overflow-hidden rounded-2xl border-0 shadow-xl shadow-emerald-950/5">
+      <div className="h-1.5 bg-gradient-to-r from-violet-600 via-emerald-500 to-orange-500" />
+      <CardHeader className="gap-4 border-b border-slate-100 bg-gradient-to-r from-violet-50/70 via-white to-orange-50/60 p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3"><div><CardTitle className="flex items-center gap-2"><span className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-100"><UserRoundCog className="h-5 w-5 text-emerald-700" /></span>Carteira operacional <Badge className="ml-1 bg-violet-100 text-violet-800">{visible.length} clientes</Badge></CardTitle><p className="mt-2 text-sm text-slate-500">Todos os clientes, priorizados por risco real e situação financeira.</p></div><Button type="button" variant="outline" onClick={exportPortfolio}><Download className="mr-2 h-4 w-4" />Exportar CSV</Button></div>
         <div className="grid gap-2 lg:grid-cols-[minmax(240px,1fr)_180px_160px_160px]">
-          <label className="relative"><Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" /><Input value={search} onChange={(event) => setSearch(event.target.value)} className="pl-9" placeholder="Nome, e-mail, telefone, cidade..." /></label>
-          <select value={financialFilter} onChange={(event) => setFinancialFilter(event.target.value)} className="h-10 rounded-md border bg-white px-3 text-sm"><option value="all">Todos os pagamentos</option><option value="paid">Pagos</option><option value="pending">Pendentes</option><option value="overdue">Vencidos</option><option value="chargeback">Chargeback</option></select>
-          <select value={healthFilter} onChange={(event) => setHealthFilter(event.target.value)} className="h-10 rounded-md border bg-white px-3 text-sm"><option value="all">Toda saúde</option><option value="healthy">Saudável</option><option value="attention">Atenção</option><option value="risk">Risco</option><option value="critical">Crítico</option></select>
-          <select value={accessFilter} onChange={(event) => setAccessFilter(event.target.value)} className="h-10 rounded-md border bg-white px-3 text-sm"><option value="all">Todo acesso</option><option value="allowed">Liberado</option><option value="temporary_release">Cortesia</option><option value="blocked">Bloqueado</option></select>
+          <label className="relative"><span className="sr-only">Buscar clientes</span><Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" /><Input value={search} onChange={(event) => setSearch(event.target.value)} className="bg-white pl-9" placeholder="Nome, e-mail, telefone, cidade..." /></label>
+          <Select value={financialFilter} onValueChange={setFinancialFilter}><SelectTrigger className="bg-white" aria-label="Filtrar por situação financeira"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">Todos os pagamentos</SelectItem><SelectItem value="paid">Pagos</SelectItem><SelectItem value="pending">Pendentes</SelectItem><SelectItem value="overdue">Vencidos</SelectItem><SelectItem value="chargeback">Chargeback</SelectItem></SelectContent></Select>
+          <Select value={healthFilter} onValueChange={setHealthFilter}><SelectTrigger className="bg-white" aria-label="Filtrar por saúde do cliente"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">Toda saúde</SelectItem><SelectItem value="healthy">Saudável</SelectItem><SelectItem value="attention">Atenção</SelectItem><SelectItem value="risk">Risco</SelectItem><SelectItem value="critical">Crítico</SelectItem></SelectContent></Select>
+          <Select value={accessFilter} onValueChange={setAccessFilter}><SelectTrigger className="bg-white" aria-label="Filtrar por situação de acesso"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">Todo acesso</SelectItem><SelectItem value="allowed">Liberado</SelectItem><SelectItem value="temporary_release">Cortesia</SelectItem><SelectItem value="blocked">Bloqueado</SelectItem></SelectContent></Select>
         </div>
       </CardHeader>
       <CardContent className="p-0">
@@ -167,7 +169,7 @@ export default function ClientOperationsWorkspace({ token, clients, members, onR
               <td className="pr-3 text-right"><Button size="sm" variant="outline" onClick={() => void loadDetail(client)}>Abrir 360°</Button></td>
             </tr>)}</tbody>
           </table>
-          {!visible.length ? <p className="p-8 text-center text-sm text-slate-500">Nenhum cliente corresponde aos filtros.</p> : null}
+          {!visible.length ? <div className="p-8 text-center text-sm text-slate-500"><p>Nenhum cliente corresponde aos filtros.</p><Button type="button" variant="outline" className="mt-3" onClick={() => { setSearch(''); setFinancialFilter('all'); setHealthFilter('all'); setAccessFilter('all'); }}>Limpar filtros</Button></div> : null}
         </div>
       </CardContent>
 

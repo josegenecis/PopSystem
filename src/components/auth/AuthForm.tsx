@@ -11,7 +11,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useInputValidation } from '@/hooks/useInputValidation';
-import { loginSchema, signupSchema, type LoginData, type SignupData } from '@/schemas/authSchemas';
+import { formatOwnerPhoneInput, loginSchema, normalizeOwnerPhone, signupSchema, type LoginData, type SignupData } from '@/schemas/authSchemas';
 import { logSecurityEvent, logSignupEvent } from '@/utils/securityLogger';
 import { Eye, EyeOff, Loader2 } from 'lucide-react';
 import { debugLogger } from '@/utils/debugLogger';
@@ -63,7 +63,8 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login', embedded = fa
     password: '',
     confirmPassword: '',
     restaurantName: '',
-    name: ''
+    name: '',
+    ownerPhone: '',
   });
   
   // Validation hooks
@@ -133,7 +134,13 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login', embedded = fa
     }
     
     try {
-      await signUp(signupData.email, signupData.password, signupData.restaurantName);
+      await signUp(
+        signupData.email,
+        signupData.password,
+        signupData.restaurantName,
+        normalizeOwnerPhone(signupData.ownerPhone),
+        signupData.name,
+      );
       await logSignupEvent(signupData.email);
       console.log('✅ [AUTH FORM] Cadastro realizado com sucesso');
     } catch (error: unknown) {
@@ -456,6 +463,30 @@ const AuthForm: React.FC<AuthFormProps> = ({ defaultTab = 'login', embedded = fa
                 />
                 {signupValidation.errors.restaurantName && (
                   <p className="text-sm text-red-500">{signupValidation.errors.restaurantName}</p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="ownerPhone" className={labelClassName}>WhatsApp do proprietário</Label>
+                <Input
+                  id="ownerPhone"
+                  type="tel"
+                  inputMode="tel"
+                  placeholder="(85) 99999-9999"
+                  value={signupData.ownerPhone}
+                  onChange={(e) => setSignupData({ ...signupData, ownerPhone: formatOwnerPhoneInput(e.target.value) })}
+                  disabled={isSubmittingSignup}
+                  required
+                  autoComplete="tel"
+                  maxLength={15}
+                  className={fieldClassName}
+                  aria-describedby="ownerPhoneHelp"
+                />
+                <p id="ownerPhoneHelp" className="text-xs leading-5 text-slate-500">
+                  Usaremos este contato para ajudar na ativação e enviar novidades do PopSystem.
+                </p>
+                {signupValidation.errors.ownerPhone && (
+                  <p className="text-sm text-red-500">{signupValidation.errors.ownerPhone}</p>
                 )}
               </div>
               

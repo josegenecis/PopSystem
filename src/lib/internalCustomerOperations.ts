@@ -18,10 +18,17 @@ export function filterInternalClients<T extends InternalClientFilterRow>(clients
   access?: string;
 }) {
   const query = String(filters.search || '').trim().toLocaleLowerCase('pt-BR');
+  const acceptedFinancialStatuses = filters.financial === 'paid'
+    ? new Set(['paid', 'paid_period'])
+    : null;
   return clients.filter((client) => {
     const searchable = `${client.restaurantName} ${client.email || ''} ${client.phone || ''} ${client.city || ''} ${client.state || ''}`.toLocaleLowerCase('pt-BR');
     if (query && !searchable.includes(query)) return false;
-    if (filters.financial && filters.financial !== 'all' && client.financialStatus !== filters.financial) return false;
+    if (filters.financial && filters.financial !== 'all') {
+      if (acceptedFinancialStatuses) {
+        if (!acceptedFinancialStatuses.has(String(client.financialStatus || ''))) return false;
+      } else if (client.financialStatus !== filters.financial) return false;
+    }
     if (filters.health && filters.health !== 'all' && client.healthClassification !== filters.health) return false;
     if (filters.access && filters.access !== 'all' && client.accessStatus !== filters.access) return false;
     return true;

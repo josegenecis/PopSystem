@@ -1,13 +1,35 @@
 import type { PrinterTransport } from '@/services/printerConfig'
 
-type BridgeResponse =
-  | { ok: boolean; event?: string; error?: string }
-  | { ok: boolean; error: string }
+type BridgeResponse = {
+  ok: boolean
+  event?: string
+  error?: string
+  printer?: { connected?: boolean }
+  scale?: {
+    connected?: boolean
+    config?: { portPath?: string }
+    reading?: BridgeScaleReading | null
+  }
+  reading?: Partial<BridgeScaleReading>
+}
 
 export type BridgePrintResult = {
   available: boolean
   printerConnected: boolean
   printed: boolean
+  error?: string
+}
+
+export type BridgeScaleReading = {
+  weight: number
+  unit: string
+  stable: boolean
+}
+
+export type BridgeScaleResult = {
+  available: boolean
+  scaleConnected: boolean
+  reading?: BridgeScaleReading
   error?: string
 }
 
@@ -27,6 +49,7 @@ const waitForEvent = (ws: WebSocket, event: string, timeoutMs: number) => {
           resolve(data)
         }
       } catch {
+        // Ignore unrelated or malformed bridge messages while waiting for the expected event.
       }
     }
 
@@ -46,36 +69,100 @@ const sendAndWait = (
   return response
 }
 
+const openBridgeSocket = async (websocketUrl: string, timeoutMs: number) => {
+  const ws = new WebSocket(websocketUrl)
+  const opened = await new Promise<boolean>((resolve) => {
+    const timeout = window.setTimeout(() => resolve(false), Math.min(3000, timeoutMs))
+    ws.onopen = () => {
+      window.clearTimeout(timeout)
+      resolve(true)
+    }
+    ws.onerror = () => {
+      window.clearTimeout(timeout)
+      resolve(false)
+    }
+  })
+  return { ws, opened }
+}
+
+export const bridgeReadScaleWeight = async (params: {
+  websocketUrl: string
+  timeoutMs?: number
+}): Promise<BridgeScaleResult> => {
+  const timeoutMs = Math.max(1000, params.timeoutMs ?? 4000)
+  const { ws, opened } = await openBridgeSocket(params.websocketUrl, timeoutMs)
+
+  if (!opened) {
+    try { ws.close() } catch { /* Socket did not finish opening. */ }
+    return { available: false, scaleConnected: false, error: 'bridge_unavailable' }
+  }
+
+  let scaleConnected = false
+  try {
+    const status = await sendAndWait(ws, 'get_status', {}, 'status', timeoutMs)
+    if (!status?.ok || !status?.scale?.connected) {
+      return { available: true, scaleConnected: false, error: 'scale_not_connected' }
+    }
+    scaleConnected = true
+
+    const response = await sendAndWait(
+      ws,
+      'read_weight',
+      { timeoutMs: Math.max(1800, timeoutMs - 1000) },
+      'weight_read',
+      timeoutMs,
+    )
+    if (!response?.ok || !response?.reading) {
+      return {
+        available: true,
+        scaleConnected: true,
+        error: response?.error || 'scale_read_timeout',
+      }
+    }
+
+    const weight = Number(response.reading.weight)
+    if (!Number.isFinite(weight) || weight < 0) {
+      return { available: true, scaleConnected: true, error: 'invalid_scale_reading' }
+    }
+
+    return {
+      available: true,
+      scaleConnected: true,
+      reading: {
+        weight,
+        unit: String(response.reading.unit || 'kg'),
+        stable: response.reading.stable !== false,
+      },
+    }
+  } catch (error: unknown) {
+    return {
+      available: true,
+      scaleConnected,
+      error: error instanceof Error ? error.message : 'bridge_command_failed',
+    }
+  } finally {
+    try { ws.close() } catch { /* Connection cleanup is best effort. */ }
+  }
+}
+
 export const bridgePrintReceipt = async (params: {
   websocketUrl: string
   transport: PrinterTransport
   address?: string
-  payload: any
+  payload: unknown
   timeoutMs?: number
 }): Promise<BridgePrintResult> => {
   const timeoutMs = Math.max(1000, params.timeoutMs ?? 10000)
-  const ws = new WebSocket(params.websocketUrl)
-
-  const opened = await new Promise<boolean>((resolve) => {
-    const t = window.setTimeout(() => resolve(false), Math.min(3000, timeoutMs))
-    ws.onopen = () => {
-      window.clearTimeout(t)
-      resolve(true)
-    }
-    ws.onerror = () => {
-      window.clearTimeout(t)
-      resolve(false)
-    }
-  })
+  const { ws, opened } = await openBridgeSocket(params.websocketUrl, timeoutMs)
 
   if (!opened) {
-    try { ws.close() } catch {}
+    try { ws.close() } catch { /* Socket did not finish opening. */ }
     return { available: false, printerConnected: false, printed: false, error: 'bridge_unavailable' }
   }
 
   try {
     const status = await sendAndWait(ws, 'get_status', {}, 'status', timeoutMs)
-    const printerConnected = Boolean((status as any)?.printer?.connected)
+    const printerConnected = Boolean(status?.printer?.connected)
 
     if (!printerConnected) {
       const address = String(params.address || '').trim()
@@ -102,14 +189,14 @@ export const bridgePrintReceipt = async (params: {
       printed: !!printed?.ok,
       error: printed?.ok ? undefined : printed?.error || 'print_failed',
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     return {
       available: true,
       printerConnected: false,
       printed: false,
-      error: error?.message || 'bridge_command_failed',
+      error: error instanceof Error ? error.message : 'bridge_command_failed',
     }
   } finally {
-    try { ws.close() } catch {}
+    try { ws.close() } catch { /* Connection cleanup is best effort. */ }
   }
 }

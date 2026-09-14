@@ -78,6 +78,7 @@ const DebugPix = lazy(() => import('@/pages/DebugPix'));
 import ErrorBoundary from '@/components/ErrorBoundary';
 const Marketing = lazy(() => import('@/pages/Marketing'));
 const SystemAdminDashboard = lazy(() => import('@/pages/SystemAdminDashboard'));
+const RepresentativePortal = lazy(() => import('@/pages/RepresentativePortal'));
 const ChecklistPublic = lazy(() => import('@/pages/ChecklistPublic'));
 const MotoboyLogin = lazy(() => import('@/pages/MotoboyLogin'));
 const MotoboyApp = lazy(() => import('@/pages/MotoboyApp'));
@@ -143,6 +144,7 @@ function AppContent() {
       <Route path="/mp/callback" element={<MpCallback />} />
       <Route path="/poppay/callback" element={<PopPayCallback />} />
       <Route path="/admin-popsystem" element={<SystemAdminDashboard />} />
+      <Route path="/representante" element={<RepresentativePortal />} />
       
       {/* Rotas do Garçom */}
       <Route path="/garcom" element={<Navigate to="/waiter-login" replace />} />

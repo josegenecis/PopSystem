@@ -191,6 +191,11 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/admin-dashboard/index.ts"
 
+[functions.representative-portal]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/representative-portal/index.ts"
+
 [functions.create-asaas-subscription]
 enabled = true
 verify_jwt = true

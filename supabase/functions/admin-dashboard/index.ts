@@ -58,65 +58,18 @@ function maxDateIso(...values: unknown[]) {
   return max ? new Date(max).toISOString() : null;
 }
 
-const BRAZIL_UF = new Set([
-  "AC",
-  "AL",
-  "AP",
-  "AM",
-  "BA",
-  "CE",
-  "DF",
-  "ES",
-  "GO",
-  "MA",
-  "MT",
-  "MS",
-  "MG",
-  "PA",
-  "PB",
-  "PR",
-  "PE",
-  "PI",
-  "RJ",
-  "RN",
-  "RS",
-  "RO",
-  "RR",
-  "SC",
-  "SP",
-  "SE",
-  "TO",
-]);
-
 function cleanText(value: unknown) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
-function extractLocation(address: unknown) {
-  const text = cleanText(address);
-  if (!text) return { city: "Não informado", state: "NI" };
-
-  const parts = text.split(",").map((part) => cleanText(part)).filter(Boolean);
-  const stateMatch = text.toUpperCase().match(/(?:^|[\s,/-])([A-Z]{2})(?:$|[\s,/-])/);
-  const state = stateMatch && BRAZIL_UF.has(stateMatch[1]) ? stateMatch[1] : "NI";
-
-  let city = "";
-  if (state !== "NI") {
-    const stateIndex = parts.findIndex((part) => part.toUpperCase() === state || part.toUpperCase().endsWith(` ${state}`));
-    if (stateIndex > 0) city = parts[stateIndex - 1];
-    if (!city) {
-      const beforeState = text.slice(0, text.toUpperCase().lastIndexOf(state)).split(",").map((part) => cleanText(part)).filter(Boolean);
-      city = beforeState[beforeState.length - 1] || "";
-    }
+function locationFromPostalRecord(fiscalSettings: any) {
+  const postalCode = String(fiscalSettings?.endereco_cep || "").replace(/\D/g, "");
+  const city = cleanText(fiscalSettings?.endereco_municipio).slice(0, 100);
+  const state = cleanText(fiscalSettings?.endereco_uf).toUpperCase().slice(0, 2);
+  if (postalCode.length !== 8 || !city || !/^[A-Z]{2}$/.test(state)) {
+    return { postalCode: "", city: "Não informado", state: "NI", locationVerifiedByPostalCode: false };
   }
-
-  if (!city && parts.length >= 2) city = parts[parts.length - 2];
-  if (!city) city = "Não informado";
-
-  return {
-    city: city.slice(0, 48),
-    state,
-  };
+  return { postalCode, city, state, locationVerifiedByPostalCode: true };
 }
 
 function groupCount<T>(items: T[], keyGetter: (item: T) => string) {
@@ -317,6 +270,7 @@ function toClientRow(params: {
   lastActivityAt?: string | null;
   openTickets?: number;
   assignment?: any;
+  fiscalSettings?: any;
 }) {
   const lastOrderAt = params.orders.reduce((latest, order) => Math.max(latest, dateMs(order.created_at)), 0);
   const status = normalizeStatus(params.subscription?.status || "sem_assinatura");
@@ -326,13 +280,16 @@ function toClientRow(params: {
   const health = healthForClient({ accessAllowed, financial, lastActivityAt: lastAccessAt, lastOrderAt: lastOrderAt ? new Date(lastOrderAt).toISOString() : null, openTickets: params.openTickets || 0, nfceRejected: params.nfceRejectedMonth });
   const periodEnd = billingPeriodEnd(params.subscription);
   const overdueDays = !accessAllowed && periodEnd && dateMs(periodEnd) < Date.now() ? Math.max(0, Math.floor((Date.now() - dateMs(periodEnd)) / 86400000)) : 0;
+  const location = locationFromPostalRecord(params.fiscalSettings);
   return {
     id: params.profile.id,
     restaurantName: params.profile.restaurant_name || "Restaurante sem nome",
     email: params.profile.email || params.authUser?.email || "",
-    phone: params.profile.phone || "",
+    phone: params.profile.owner_phone || params.profile.phone || "",
+    ownerPhone: params.profile.owner_phone || "",
+    restaurantPhone: params.profile.phone || "",
     address: params.profile.address || "",
-    ...extractLocation(params.profile.address),
+    ...location,
     createdAt: params.profile.created_at,
     updatedAt: params.profile.updated_at || null,
     lastSignInAt: params.authUser?.last_sign_in_at || null,
@@ -378,6 +335,9 @@ serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const user = await authenticate(body, req);
     if (!user) return json({ ok: false, error: "Login interno inválido." }, 401);
+    if (user.role === "representative") {
+      return json({ ok: false, error: "Representantes devem usar o portal exclusivo." }, 403);
+    }
     const canMutate = user.role !== "viewer";
     const canFinance = ["owner", "finance"].includes(user.role);
     const canAssign = ["owner", "operations", "success"].includes(user.role);
@@ -390,53 +350,43 @@ serve(async (req) => {
       return json({ ok: true, token: await createToken(user.email, user.role, user.memberId), user });
     }
 
-    if (body?.action === "set_poppay_credit_fee") {
-      if (!canFinance) return json({ ok: false, error: "Seu perfil não pode alterar tarifas." }, 403);
-      const restaurantEmail = cleanText(body?.restaurantEmail).toLowerCase();
-      const feePercent = Number(body?.feePercent);
-      const feeBps = Math.round(feePercent * 100);
-      if (!restaurantEmail || !Number.isFinite(feePercent) || feeBps < 0 || feeBps > 1000) {
-        return json({ ok: false, error: "Informe o e-mail e uma tarifa entre 0% e 10%." }, 400);
+    if (body?.action === "create_representative") {
+      if (user.role !== "owner") return json({ ok: false, error: "Somente o proprietário pode criar representantes." }, 403);
+      const representativeName = cleanText(body?.name);
+      const representativeEmail = cleanText(body?.email).toLowerCase();
+      const representativePassword = String(body?.password || "");
+      if (representativeName.length < 2 || !representativeEmail.includes("@") || representativePassword.length < 8) {
+        return json({ ok: false, error: "Informe nome, e-mail válido e senha com pelo menos 8 caracteres." }, 400);
       }
-      const { data: profile, error: profileError } = await supabase
-        .from("profiles")
-        .select("id,restaurant_name,email")
-        .ilike("email", restaurantEmail)
-        .limit(1)
-        .maybeSingle();
-      if (profileError || !profile?.id) return json({ ok: false, error: "Restaurante não encontrado." }, 404);
 
-      const { data: connection, error: updateError } = await supabase
-        .from("poppay_connections")
-        .update({
-          credit_fee_bps: feeBps,
-          credit_online_enabled: false,
-          credit_terms_version: null,
-          credit_terms_accepted_at: null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("user_id", profile.id)
-        .select("credit_fee_bps,credit_online_enabled")
-        .maybeSingle();
-      if (updateError || !connection) return json({ ok: false, error: "A conta ainda não possui conexão PopPay." }, 409);
+      const { data: created, error: createError } = await supabase.auth.admin.createUser({
+        email: representativeEmail,
+        password: representativePassword,
+        email_confirm: true,
+        user_metadata: { full_name: representativeName, internal_account_type: "representative" },
+      });
+      if (createError || !created.user) return json({ ok: false, error: createError?.message || "Representante não criado." }, 409);
 
+      const { data: member, error: memberError } = await supabase.from("internal_admin_members").insert({
+        auth_user_id: created.user.id,
+        email: representativeEmail,
+        display_name: representativeName,
+        role: "representative",
+        permissions: { representative_portal: true },
+        active: true,
+      }).select("id,email,display_name,role,active").single();
+      if (memberError || !member) {
+        await supabase.auth.admin.deleteUser(created.user.id);
+        return json({ ok: false, error: memberError?.message || "Acesso do representante não criado." }, 500);
+      }
       await supabase.from("internal_admin_audit_events").insert({
         actor_email: user.email,
-        action: "poppay_credit_fee_changed",
-        client_user_id: profile.id,
-        entity_type: "poppay_connection",
-        entity_id: profile.id,
-        reason: cleanText(body?.reason || "Ajuste comercial de tarifa"),
-        after_data: { credit_fee_bps: feeBps, credit_online_enabled: false, requires_new_acceptance: true },
+        action: "representative_created",
+        entity_type: "internal_admin_member",
+        entity_id: member.id,
+        after_data: member,
       });
-
-      return json({
-        ok: true,
-        restaurant: profile.restaurant_name || profile.email,
-        creditFeePercent: Number(connection.credit_fee_bps || 0) / 100,
-        creditOnlineEnabled: connection.credit_online_enabled === true,
-        requiresNewAcceptance: true,
-      });
+      return json({ ok: true, representative: member });
     }
 
     if (body?.action === "grant_subscription_access_24h") {
@@ -609,9 +559,12 @@ serve(async (req) => {
       ticketsResp,
       tasksResp,
       membersResp,
+      fiscalSettingsResp,
+      commercialLeadsResp,
+      representativeVisitsResp,
     ] = await Promise.all([
       listAuthUsers(supabase),
-      supabase.from("profiles").select("id, restaurant_name, email, phone, address, created_at, updated_at").order("created_at", { ascending: false }).limit(5000),
+      supabase.from("profiles").select("id, restaurant_name, email, owner_phone, phone, address, created_at, updated_at").order("created_at", { ascending: false }).limit(5000),
       supabase.from("subscriptions").select("id, user_id, status, plan_id, trial_start, trial_end, current_period_start, current_period_end, billing_exempt, access_override_until, access_override_granted_at, access_override_granted_for_period_end, created_at, updated_at").limit(5000),
       supabase.from("subscription_plans").select("id, name, price").limit(100),
       supabase.from("orders").select("id, user_id, status, created_at, order_type").gte("created_at", addDays(now, -365).toISOString()).limit(50000),
@@ -625,6 +578,9 @@ serve(async (req) => {
       supabase.from("support_tickets").select("id,user_id,status,priority,created_at,updated_at").limit(20000),
       supabase.from("internal_client_tasks").select("id,client_user_id,status,due_at,priority").neq("status", "done").neq("status", "cancelled").limit(20000),
       supabase.from("internal_admin_members").select("id,email,display_name,role,active").eq("active", true).order("display_name"),
+      supabase.from("fiscal_settings").select("user_id,endereco_cep,endereco_municipio,endereco_uf").limit(5000),
+      supabase.from("commercial_leads").select("*,internal_admin_members(display_name,email)").order("updated_at", { ascending: false }).limit(5000),
+      supabase.from("representative_visits").select("id,lead_id,representative_member_id,visited_at,outcome").order("visited_at", { ascending: false }).limit(10000),
     ]);
 
     const profiles = Array.isArray(profilesResp.data) ? profilesResp.data : [];
@@ -641,6 +597,9 @@ serve(async (req) => {
     const tickets = Array.isArray(ticketsResp.data) ? ticketsResp.data : [];
     const tasks = Array.isArray(tasksResp.data) ? tasksResp.data : [];
     const members = Array.isArray(membersResp.data) ? membersResp.data : [];
+    const fiscalSettings = Array.isArray(fiscalSettingsResp.data) ? fiscalSettingsResp.data : [];
+    const commercialLeads = Array.isArray(commercialLeadsResp.data) ? commercialLeadsResp.data : [];
+    const representativeVisits = Array.isArray(representativeVisitsResp.data) ? representativeVisitsResp.data : [];
 
     const subscriptionByUser = new Map<string, any>();
     for (const subscription of subscriptions.sort((a: any, b: any) => dateMs(b.updated_at) - dateMs(a.updated_at))) {
@@ -649,6 +608,7 @@ serve(async (req) => {
     const planById = new Map(plans.map((p: any) => [Number(p.id), p]));
     const authById = new Map(authUsers.map((u: any) => [u.id, u]));
     const assignmentByUser = new Map(assignments.map((row: any) => [row.client_user_id, row]));
+    const fiscalSettingsByUser = new Map(fiscalSettings.map((row: any) => [row.user_id, row]));
     const invoicesByUser = new Map<string, any[]>();
     invoices.forEach((row: any) => { const list = invoicesByUser.get(row.user_id) || []; list.push(row); invoicesByUser.set(row.user_id, list); });
     const latestActivityByUser = new Map<string, string>();
@@ -714,6 +674,7 @@ serve(async (req) => {
         lastActivityAt: latestActivityByUser.get(profile.id) || null,
         openTickets: openTicketsByUser.get(profile.id) || 0,
         assignment: assignmentByUser.get(profile.id),
+        fiscalSettings: fiscalSettingsByUser.get(profile.id),
       });
     });
 
@@ -795,8 +756,10 @@ serve(async (req) => {
       .sort((a: any, b: any) => dateMs(b.lastAccessAt) - dateMs(a.lastAccessAt))
       .slice(0, 12);
 
-    const cityHeatmap = groupCount(clients, (client: any) => `${client.city}/${client.state}`).slice(0, 16);
-    const stateHeatmap = groupCount(clients, (client: any) => client.state || "NI").slice(0, 12);
+    const locatedClients = clients.filter((client: any) => client.locationVerifiedByPostalCode === true);
+    const cityHeatmap = groupCount(locatedClients, (client: any) => `${client.city} · ${client.state}`).slice(0, 16);
+    const stateHeatmap = groupCount(locatedClients, (client: any) => client.state).slice(0, 12);
+    const representativeLeadStages = groupCount(commercialLeads, (lead: any) => lead.commercial_stage || "new");
     const statusBreakdown = [
       { label: "Ativos", value: activeClients.length },
       { label: "Teste", value: trialClients.length },
@@ -844,6 +807,11 @@ serve(async (req) => {
         openTickets: Array.from(openTicketsByUser.values()).reduce((sum, value) => sum + value, 0),
         openTasks: tasks.length,
         criticalClients: clients.filter((client: any) => client.healthClassification === "critical").length,
+        clientsWithVerifiedPostalCode: locatedClients.length,
+        clientsWithoutVerifiedPostalCode: clients.length - locatedClients.length,
+        commercialLeads: commercialLeads.length,
+        representativeVisits: representativeVisits.length,
+        marketingOptIns: commercialLeads.filter((lead: any) => lead.marketing_consent === true).length,
       },
       lists: {
         portfolio: clients,
@@ -858,6 +826,7 @@ serve(async (req) => {
           .slice(0, 20),
         neverAccessed: neverAccessed.slice(0, 20),
         paidThisMonth: paidThisMonth.slice(0, 20),
+        commercialLeads,
       },
       analytics: {
         cityHeatmap,
@@ -867,6 +836,7 @@ serve(async (req) => {
         signupTrend,
         accessTrend,
         orderTrend,
+        representativeLeadStages,
       },
     });
   } catch (error) {

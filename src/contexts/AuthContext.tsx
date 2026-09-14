@@ -24,6 +24,7 @@ interface Profile {
   restaurant_name?: string;
   description?: string;
   phone?: string;
+  owner_phone?: string;
   address?: string;
   opening_hours?: string;
   logo_url?: string;
@@ -93,7 +94,7 @@ interface AuthContextType {
   refreshStores: () => Promise<void>;
   signOut: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, restaurantName: string) => Promise<void>;
+  signUp: (email: string, password: string, restaurantName: string, ownerPhone: string, ownerName: string) => Promise<void>;
   refreshSubscription: () => Promise<void>;
   refreshUser: () => Promise<void>;
   syncGoogleUserData: (googleUser: any) => Promise<void>;
@@ -732,7 +733,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signUp = async (email: string, password: string, restaurantName: string) => {
+  const signUp = async (email: string, password: string, restaurantName: string, ownerPhone: string, ownerName: string) => {
     try {
       setLoading(true);
       
@@ -746,6 +747,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           emailRedirectTo: redirectUrl,
           data: {
             restaurant_name: restaurantName,
+            owner_phone: ownerPhone,
+            full_name: ownerName,
           }
         }
       });

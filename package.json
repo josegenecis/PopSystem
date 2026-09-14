@@ -1,7 +1,7 @@
 {
   "name": "vite_react_shadcn_ts",
   "private": true,
-  "version": "1.0.303",
+  "version": "1.0.304",
   "description": "PopSystem - Sistema de gestao para estabelecimentos alimenticios",
   "author": "PopSystem Team",
   "type": "module",
@@ -32,6 +32,7 @@
     "test:team": "esbuild tests/team-attendance.unit.test.ts --bundle --platform=node --format=esm --outfile=/tmp/popsystem-team-test.mjs && node --test /tmp/popsystem-team-test.mjs",
     "test:whatsapp": "esbuild src/lib/whatsappCentral.test.ts --bundle --platform=node --format=esm --outfile=/tmp/popsystem-whatsapp-test.mjs && node --test /tmp/popsystem-whatsapp-test.mjs",
     "test:internal-clients": "esbuild src/lib/internalCustomerOperations.test.ts --bundle --platform=node --format=esm --outfile=/tmp/popsystem-internal-clients-test.mjs && node --test /tmp/popsystem-internal-clients-test.mjs",
+    "test:bridge": "node --test native-bridge/receipt.test.js && esbuild src/services/bridgePrinterClient.test.ts --bundle --platform=node --format=esm --outfile=/tmp/popsystem-bridge-client-test.mjs && node --test /tmp/popsystem-bridge-client-test.mjs",
     "test:fiscal": "deno test --no-check --allow-env --allow-run supabase/functions/nfce-operations/icms-engine.test.ts supabase/functions/nfce-operations/rtc-engine.test.ts supabase/functions/nfce-operations/index.test.ts supabase/functions/nfce-operations/schema-matrix.test.ts",
     "dist:bridge": "node scripts/build-bridge.cjs",
     "pack:bridge": "node scripts/build-bridge.cjs --dir",

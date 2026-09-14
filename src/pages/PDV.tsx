@@ -1462,10 +1462,10 @@ const PDV = () => {
   };
 
   const readWeightFromPopConnect = async () => {
-    const websocketUrl = await discoverBridgeWebsocketUrl({ timeoutMs: 900 });
+    const websocketUrl = await discoverBridgeWebsocketUrl({ timeoutMs: 450 });
     if (!websocketUrl) throw new Error('Pop Connect não encontrado neste computador');
 
-    const result = await bridgeReadScaleWeight({ websocketUrl, timeoutMs: 4500 });
+    const result = await bridgeReadScaleWeight({ websocketUrl, timeoutMs: 2500 });
     if (!result.scaleConnected) throw new Error('Conecte a balança no Pop Connect');
     if (!result.reading) throw new Error('A balança não enviou o peso');
     return result.reading;

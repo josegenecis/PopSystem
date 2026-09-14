@@ -24,6 +24,7 @@ export type BridgeScaleReading = {
   weight: number
   unit: string
   stable: boolean
+  readAt?: number
 }
 
 export type BridgeScaleResult = {
@@ -85,6 +86,27 @@ const openBridgeSocket = async (websocketUrl: string, timeoutMs: number) => {
   return { ws, opened }
 }
 
+const normalizeScaleReading = (reading?: Partial<BridgeScaleReading> | null): BridgeScaleReading | undefined => {
+  const weight = Number(reading?.weight)
+  if (!Number.isFinite(weight) || weight < 0) return undefined
+  const readAt = Number(reading?.readAt)
+  return {
+    weight,
+    unit: String(reading?.unit || 'kg'),
+    stable: reading?.stable !== false,
+    ...(Number.isFinite(readAt) && readAt > 0 ? { readAt } : {}),
+  }
+}
+
+export const isRecentBridgeScaleReading = (
+  reading?: Partial<BridgeScaleReading> | null,
+  now = Date.now(),
+  maxAgeMs = 2000,
+) => {
+  const normalized = normalizeScaleReading(reading)
+  return Boolean(normalized?.readAt && now - normalized.readAt >= 0 && now - normalized.readAt <= maxAgeMs)
+}
+
 export const bridgeReadScaleWeight = async (params: {
   websocketUrl: string
   timeoutMs?: number
@@ -105,6 +127,11 @@ export const bridgeReadScaleWeight = async (params: {
     }
     scaleConnected = true
 
+    const statusReading = normalizeScaleReading(status.scale.reading)
+    if (statusReading && statusReading.weight > 0 && isRecentBridgeScaleReading(statusReading)) {
+      return { available: true, scaleConnected: true, reading: statusReading }
+    }
+
     const response = await sendAndWait(
       ws,
       'read_weight',
@@ -120,19 +147,15 @@ export const bridgeReadScaleWeight = async (params: {
       }
     }
 
-    const weight = Number(response.reading.weight)
-    if (!Number.isFinite(weight) || weight < 0) {
+    const reading = normalizeScaleReading(response.reading)
+    if (!reading) {
       return { available: true, scaleConnected: true, error: 'invalid_scale_reading' }
     }
 
     return {
       available: true,
       scaleConnected: true,
-      reading: {
-        weight,
-        unit: String(response.reading.unit || 'kg'),
-        stable: response.reading.stable !== false,
-      },
+      reading,
     }
   } catch (error: unknown) {
     return {

@@ -3,6 +3,7 @@ import os from 'os'
 import net from 'net'
 import printerLib from '@thiagoelg/node-printer'
 import { SerialPort } from 'serialport'
+import { buildEscposReceipt } from './receipt.js'
 
 const bridgePort = Number(process.env.POP_CONNECT_PORT || process.env.BRIDGE_PORT || 8766)
 const bridgeHost = process.env.POP_CONNECT_HOST || process.env.BRIDGE_HOST || '127.0.0.1'
@@ -117,6 +118,11 @@ async function writeScaleCommand(command) {
 async function readScaleWeight(timeoutMs = 2200) {
   if (!scalePort?.isOpen || !scaleConfig) return { ok: false, error: 'scale_not_connected' }
   const protocol = SCALE_PROTOCOLS[scaleConfig.protocol] || SCALE_PROTOCOLS.generic
+  const cachedReading = latestScaleReading
+  if (cachedReading?.weight > 0 && Date.now() - cachedReading.readAt <= 1200) {
+    void writeScaleCommand(protocol.request)
+    return { ok: true, reading: cachedReading, cached: true }
+  }
   const startedAt = Date.now()
   await writeScaleCommand(protocol.request)
   return await new Promise((resolve) => {
@@ -198,7 +204,13 @@ async function printRawNetwork(data) {
 }
 
 async function printTest() {
-  const data = buildEscpos({ header: 'Teste de Impressão', items: [{ name: 'Item', qty: 1, subtotal: 0 }], total: 0, order_number: 'TESTE' })
+  const data = buildEscposReceipt({
+    store: { restaurant_name: 'POPSYSTEM' },
+    receipt: { footer: 'Impressão de teste concluída.' },
+    items: [{ name: 'Item de teste', qty: 1, subtotal: 0 }],
+    total: 0,
+    order_number: 'TESTE',
+  })
   if (systemPrinterName) {
     return await printRawSystem(data)
   }
@@ -207,8 +219,7 @@ async function printTest() {
 }
 
 async function printReceipt(data) {
-  const { order_number, customer_name, customer_phone, items = [], total = 0 } = data || {}
-  const escposData = buildEscpos({ header: `Pedido #${order_number}`, customer_name, customer_phone, items, total, order_number })
+  const escposData = buildEscposReceipt(data)
   if (systemPrinterName) {
     return await printRawSystem(escposData)
   }
@@ -228,40 +239,6 @@ async function openCashDrawer(payload = {}) {
 
   if (systemPrinterName) return await printRawSystem(command)
   return await printRawNetwork(command)
-}
-
-function buildEscpos({ header = 'BORA CUME HUB', customer_name, customer_phone, items = [], total = 0, order_number }) {
-  let d = ''
-  d += '\x1B\x61\x01' // center
-  d += '\x1B\x45\x01' // bold on
-  d += 'BORA CUME HUB\n'
-  d += '\x1B\x45\x00' // bold off
-  d += '--------------------------------\n'
-  d += '\x1B\x61\x00' // left
-  if (order_number) d += `Pedido: #${order_number}\n`
-  if (customer_name) d += `Cliente: ${customer_name}\n`
-  if (customer_phone) d += `Telefone: ${customer_phone}\n`
-  d += '--------------------------------\n'
-  items.forEach((it) => {
-    const name = it.product_name || it.name || ''
-    const qty = it.quantity || it.qty || 1
-    const sub = Number(it.subtotal || it.price || 0)
-    d += `${qty}x ${name}\n`
-    d += '\x1B\x61\x02' // right
-    d += `R$ ${sub.toFixed(2)}\n`
-    d += '\x1B\x61\x00' // left
-    if (it.notes) d += `Obs: ${it.notes}\n`
-  })
-  d += '--------------------------------\n'
-  d += '\x1B\x61\x02' // right
-  d += '\x1B\x45\x01' // bold on
-  d += `TOTAL: R$ ${Number(total).toFixed(2)}\n`
-  d += '\x1B\x45\x00' // bold off
-  d += '\x1B\x61\x01' // center
-  d += '--------------------------------\n'
-  d += 'Obrigado pela preferência!\n\n\n'
-  d += '\x1D\x56\x00' // cut
-  return d
 }
 
 async function printRawSystem(data) {

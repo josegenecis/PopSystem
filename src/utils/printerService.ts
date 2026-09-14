@@ -1562,9 +1562,20 @@ async function openDrawerElectron() {
   return { success: true };
 }
 
-function buildPopConnectReceiptPayload(order: any) {
+function buildPopConnectReceiptPayload(order: any, config: NormalizedPrintConfig) {
+  const items = Array.isArray(order.items) ? order.items : [];
+  const itemSubtotal = items.reduce((sum: number, item: any) => {
+    const quantity = Number(item.quantity || 1);
+    return sum + Number(item.subtotal ?? item.total ?? (Number(item.price || item.unit_price || 0) * quantity));
+  }, 0);
   return {
     store: order.store || null,
+    receipt: {
+      paper_width: config.paper_width,
+      font_size: config.font_size,
+      header: config.print_header,
+      footer: config.print_footer,
+    },
     order_number: order.order_number,
     customer_name: order.customer_name || 'Balcão',
     customer_phone: order.customer_phone || '',
@@ -1573,7 +1584,7 @@ function buildPopConnectReceiptPayload(order: any) {
     delivery_zone_name: order.delivery_zone_name || '',
     order_type: order.order_type || '',
     date: order.created_at,
-    items: (Array.isArray(order.items) ? order.items : []).map((it: any) => ({
+    items: items.map((it: any) => ({
       product_name: it.product_name || it.name,
       name: it.product_name || it.name,
       quantity: Number(it.quantity || 1),
@@ -1588,7 +1599,7 @@ function buildPopConnectReceiptPayload(order: any) {
       ],
     })),
     total: Number(order.total || 0),
-    subtotal: Number(order.total || 0) - Number(order.delivery_fee || 0),
+    subtotal: Number(order.subtotal ?? itemSubtotal ?? 0),
     discount: Number(order.discount || 0),
     delivery_fee: Number(order.delivery_fee || 0),
     payment_method: formatPaymentMethodLabel(order.payment_method, order),
@@ -1604,7 +1615,7 @@ async function printPopConnect(order: any, config: NormalizedPrintConfig) {
   if (discoveredUrl && !urls.includes(discoveredUrl)) urls.push(discoveredUrl);
   if (urls.length === 0) return { available: false, printed: false, printerConnected: false };
 
-  const payload = buildPopConnectReceiptPayload(order);
+  const payload = buildPopConnectReceiptPayload(order, config);
   const copies = Math.max(1, Number(config.copies || 1) || 1);
 
   for (const websocketUrl of urls) {

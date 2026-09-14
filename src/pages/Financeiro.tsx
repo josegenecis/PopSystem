@@ -501,7 +501,7 @@ const Financeiro = () => {
 
       await PrinterService.printOrder(fullOrder, {
         openCashDrawer: false,
-        rasterizeSystemReceipt: true,
+        throwOnError: true,
       });
       toast({
         title: 'Reimpressão enviada',

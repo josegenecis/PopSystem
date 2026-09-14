@@ -32,6 +32,7 @@ type PrintOrderOptions = {
   onlyIfAuto?: boolean;
   openCashDrawer?: boolean;
   rasterizeSystemReceipt?: boolean;
+  throwOnError?: boolean;
 };
 
 type NormalizedPrintConfig = {
@@ -1459,24 +1460,19 @@ async function printElectron(order: any, config: any, options: PrintOrderOptions
   if (target.type === 'system') {
     const html = buildOrderHtml(order, config, order.store);
     for (let i = 0; i < copies; i++) {
-      let resp = api?.printSystemRaster
-        ? await api.printSystemRaster(target.printerName, html)
-        : await api.printSystem(target.printerName, html, true);
-      if (!resp?.success && api?.printSystemRaster) {
-        console.warn('Impressão térmica RAW indisponível; usando impressão do sistema:', resp?.error || resp);
-        resp = await api.printSystem(target.printerName, html, true);
-      }
+      // Uma fila do Windows pode aceitar bytes ESC/POS RAW e responder sucesso
+      // mesmo quando o driver/impressora não entende esse formato. O trabalho
+      // então desaparece sem imprimir. No aplicativo desktop, onde temos acesso
+      // ao driver instalado, o caminho confiável é a impressão silenciosa do
+      // Chromium; ele preserva o HTML completo e funciona tanto em térmicas
+      // quanto em impressoras convencionais.
+      const resp = await api.printSystem(target.printerName, html, true);
       if (!resp?.success) return { success: false, error: resp?.error || 'Falha ao imprimir' };
     }
 
     if (config.print_kitchen_ticket) {
       const kitchenHtml = buildKitchenTicketHtml(order, config);
-      let kitchenResp = api?.printSystemRaster
-        ? await api.printSystemRaster(target.printerName, kitchenHtml)
-        : await api.printSystem(target.printerName, kitchenHtml, true);
-      if (!kitchenResp?.success && api?.printSystemRaster) {
-        kitchenResp = await api.printSystem(target.printerName, kitchenHtml, true);
-      }
+      const kitchenResp = await api.printSystem(target.printerName, kitchenHtml, true);
       if (!kitchenResp?.success) return { success: false, error: kitchenResp?.error || 'Falha ao imprimir comanda da cozinha' };
     }
 
@@ -1863,8 +1859,10 @@ export const PrinterService = {
     if (isElectron) {
       const resp = await printElectron(enrichedOrder, config, options);
       if (!resp.success) {
-        toast.error(resp.error || 'Falha ao imprimir');
-        return;
+        const message = resp.error || 'Falha ao imprimir';
+        toast.error(message);
+        if (options.throwOnError) throw new Error(message);
+        return { success: false, error: message };
       }
       if (options.openCashDrawer && api?.openCashDrawer) {
         const drawerResult = await openDrawerElectron();
@@ -1872,27 +1870,27 @@ export const PrinterService = {
           console.warn('Cupom impresso, mas a gaveta não respondeu:', drawerResult?.error || drawerResult);
         }
       }
-      return;
+      return { success: true };
     }
 
     // 2. O Pop Connect usa a impressora salva no aplicativo e imprime sem
     // abrir o diálogo nativo do navegador.
     const popConnectResult = await printPopConnect(enrichedOrder, config);
-    if (popConnectResult.printed) return;
+    if (popConnectResult.printed) return { success: true };
     if (popConnectResult.available) {
-      toast.error(
-        popConnectResult.printerConnected
-          ? 'O Pop Connect não conseguiu imprimir. Confira se a impressora está ligada e disponível.'
-          : 'Selecione e salve uma impressora no Pop Connect antes de imprimir.'
-      );
-      return;
+      const message = popConnectResult.printerConnected
+        ? 'O Pop Connect não conseguiu imprimir. Confira se a impressora está ligada e disponível.'
+        : 'Selecione e salve uma impressora no Pop Connect antes de imprimir.';
+      toast.error(message);
+      if (options.throwOnError) throw new Error(message);
+      return { success: false, error: message };
     }
 
     // 3. Tentar impressão via USB (Silenciosa)
     if (usbDevice && usbDevice.opened) {
       try {
         await this.printUsb(enrichedOrder, config);
-        return; // Sucesso, não abre janela
+        return { success: true }; // Sucesso, não abre janela
       } catch (e) {
         console.error('Falha na impressão USB, tentando fallback HTML:', e);
         // Fallback para HTML se USB falhar
@@ -1901,6 +1899,7 @@ export const PrinterService = {
 
     // 4. Fallback: Janela de Impressão HTML (Navegador)
     this.printHtml(enrichedOrder, config);
+    return { success: true };
   },
 
   async openCashDrawer() {

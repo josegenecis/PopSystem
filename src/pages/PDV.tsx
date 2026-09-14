@@ -11,11 +11,12 @@ import OperatorSwitcher from '@/components/OperatorSwitcher';
 import { useToast } from '@/hooks/use-toast';
 import { normalizeImageUrlForDisplay } from '@/utils/normalizeImageUrl';
 import { formatBRL } from '@/lib/currency';
+import { normalizeSuggestedProductSearch } from '@/lib/whatsappCentral';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import ProductVariationModal from '@/components/pdv/ProductVariationModal';
 import PixCheckoutModal from '@/components/payment/PixCheckoutModal';
-import CheckoutModal, { CheckoutPaymentMethod } from '@/components/checkout/CheckoutModal';
+import CheckoutModal, { CheckoutPaymentMethod, type FiscalValidationState } from '@/components/checkout/CheckoutModal';
 import ReceivableContactSelect, { type ReceivableContact } from '@/components/receivables/ReceivableContactSelect';
 import ElectronicCommandDialog, { type ElectronicCommandLookup } from '@/components/pdv/ElectronicCommandDialog';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
@@ -307,8 +308,11 @@ const PDV = () => {
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
+  const [whatsappConversationId, setWhatsappConversationId] = useState<string | null>(null);
   const [customerDocument, setCustomerDocument] = useState('');
   const [selectedFiscalRecipient, setSelectedFiscalRecipient] = useState<FiscalCustomer | null>(null);
+  const [selectedFiscalModel, setSelectedFiscalModel] = useState<'55' | '65'>('65');
+  const [fiscalValidation, setFiscalValidation] = useState<FiscalValidationState>({ status: 'idle' });
   const [fiscalRecipientOpen, setFiscalRecipientOpen] = useState(false);
   const [deliveryCustomerFound, setDeliveryCustomerFound] = useState('');
   const [orderType, setOrderType] = useState<'delivery' | 'pickup' | 'dine_in' | 'counter'>('counter');
@@ -514,6 +518,34 @@ const PDV = () => {
       clearPdvDraft();
     }
   }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    try {
+      const raw = sessionStorage.getItem('popsystem_whatsapp_order_handoff');
+      if (!raw) return;
+      sessionStorage.removeItem('popsystem_whatsapp_order_handoff');
+      const handoff = JSON.parse(raw);
+      if (!handoff?.createdAt || Date.now() - Number(handoff.createdAt) > 10 * 60_000) return;
+      if (typeof handoff.customerName === 'string') setCustomerName(handoff.customerName);
+      if (typeof handoff.customerPhone === 'string') setCustomerPhone(handoff.customerPhone);
+      if (typeof handoff.customerAddress === 'string') setCustomerAddress(handoff.customerAddress);
+      if (typeof handoff.conversationId === 'string') setWhatsappConversationId(handoff.conversationId);
+      if (Array.isArray(handoff.suggestedItems) && handoff.suggestedItems.length > 0) {
+        setSearchTerm(normalizeSuggestedProductSearch(handoff.suggestedItems[0]));
+      }
+      setOrderType(handoff.customerAddress ? 'delivery' : 'pickup');
+      setActiveTab('products');
+      toast({
+        title: 'Cliente carregado do WhatsApp',
+        description: Array.isArray(handoff.suggestedItems) && handoff.suggestedItems.length > 0
+          ? `Sugestão identificada: ${handoff.suggestedItems.join(', ')}. Confirme produtos, variações e preços atuais.`
+          : 'Adicione os produtos usando o mesmo fluxo normal do PDV.',
+      });
+    } catch {
+      sessionStorage.removeItem('popsystem_whatsapp_order_handoff');
+    }
+  }, [toast, user?.id]);
 
   useEffect(() => {
     if (!user?.id || draftRestoredUserIdRef.current !== user.id) return;
@@ -981,7 +1013,7 @@ const PDV = () => {
           userId: user.id,
           lines: [
             `Data/Hora: ${new Date().toLocaleString('pt-BR')}`,
-            `Valor inicial: R$ ${amount.toFixed(2)}`,
+            `Valor inicial: ${formatBRL(amount)}`,
             operatorSession?.name ? `Operador: ${operatorSession.name}` : ''
           ].filter(Boolean) as string[]
         });
@@ -1101,7 +1133,7 @@ const PDV = () => {
         userId: user.id,
         lines: [
           `Data/Hora: ${new Date().toLocaleString('pt-BR')}`,
-          `Valor: R$ ${amount.toFixed(2)}`,
+          `Valor: ${formatBRL(amount)}`,
           cashMoveDesc ? `Descrição: ${cashMoveDesc}` : '',
           session?.name ? `Operador: ${session.name}` : ''
         ].filter(Boolean) as string[]
@@ -1806,8 +1838,10 @@ const PDV = () => {
     setCustomerName('');
     setCustomerPhone('');
     setCustomerAddress('');
+    setWhatsappConversationId(null);
     setCustomerDocument('');
     setSelectedFiscalRecipient(null);
+    setSelectedFiscalModel('65');
     setFiscalRecipientOpen(false);
     setSelectedDeliveryZone('');
     setSelectedTable('');
@@ -2256,7 +2290,7 @@ const PDV = () => {
   const emitNfceForOrder = async (order: any) => {
     if (!order?.id) throw new Error('Pedido inválido para emissão fiscal.');
     const recipient = order?.variations?.fiscal_recipient || null;
-    const modelCode: '55' | '65' = recipient ? '55' : '65';
+    const modelCode: '55' | '65' = order?.variations?.fiscal_model === '55' ? '55' : '65';
 
     const { data, status } = await invokeEdgeFunction<any>('nfce-operations', {
       operation: 'emitir',
@@ -2298,8 +2332,179 @@ const PDV = () => {
     return data;
   };
 
+  const buildFiscalValidationItems = () => cart.map((item) => {
+    const { options, variationLines } = unpackSelectedVariations(item.selectedVariations);
+    return {
+      product_id: item.id,
+      product_name: item.name,
+      price: item.price,
+      base_price: item.base_price ?? item.price,
+      effective_price: item.effective_price ?? item.price,
+      quantity: item.quantity,
+      subtotal: item.price * item.quantity,
+      sale_unit: item.weight_based ? 'kg' : 'un',
+      fiscal_ncm: item.fiscal_ncm || null,
+      fiscal_cfop: item.fiscal_cfop || null,
+      fiscal_csosn: item.fiscal_csosn || null,
+      fiscal_cst_pis: item.fiscal_cst_pis || null,
+      fiscal_cst_cofins: item.fiscal_cst_cofins || null,
+      fiscal_origem: item.fiscal_origem || null,
+      fiscal_cest: item.fiscal_cest || null,
+      fiscal_beneficio: item.fiscal_beneficio || null,
+      options,
+      variations: variationLines,
+      notes: item.notes || '',
+    };
+  });
+
+  const buildFiscalConsumerData = (recipient: any, orderData?: any) => recipient
+      ? {
+          nome: recipient.name || orderData?.customer_name || null,
+          cpf_cnpj: String(recipient.cpf_cnpj || orderData?.customer_document || '').replace(/\D/g, '') || null,
+          email: recipient.email || null,
+          state_registration: recipient.state_registration || null,
+          state_registration_indicator: recipient.state_registration_indicator || 9,
+          address: recipient.address || null,
+          address_number: recipient.address_number || null,
+          address_complement: recipient.address_complement || null,
+          neighborhood: recipient.neighborhood || null,
+          city: recipient.city || null,
+          state: recipient.state || null,
+          postal_code: recipient.postal_code || null,
+          city_code: recipient.city_code || null,
+          country_code: recipient.country_code || '1058',
+          country_name: recipient.country_name || 'BRASIL',
+          final_consumer: recipient.final_consumer !== false && recipient.final_consumer_default !== false,
+        }
+      : null;
+
+  const formatFiscalValidationError = (rawMessage: string, _modelCode: '55' | '65') => rawMessage;
+
+  const requestFiscalPrevalidation = async ({
+    modelCode,
+    recipient,
+    items,
+    deliveryFee,
+    discount,
+    orderData,
+  }: {
+    modelCode: '55' | '65';
+    recipient: any;
+    items: any[];
+    deliveryFee: number;
+    discount: number;
+    orderData?: any;
+  }) => {
+    const consumerData = buildFiscalConsumerData(recipient, orderData);
+
+    const { data, status } = await invokeEdgeFunction<any>('nfce-operations', {
+      operation: 'validar_pre_emissao',
+      model_code: modelCode,
+      consumer_data: consumerData,
+      items,
+      delivery_fee: deliveryFee || 0,
+      discount: discount || 0,
+    }, {
+      timeoutMs: 30000,
+      authToken: session?.access_token || null,
+    });
+
+    if (status < 200 || status >= 300 || !data?.success) {
+      const rawMessage = data?.error || data?.message || `Não foi possível validar o documento fiscal modelo ${modelCode}.`;
+      throw new Error(formatFiscalValidationError(rawMessage, modelCode));
+    }
+
+    return data;
+  };
+
+  const validateFiscalSaleBeforeCreate = async (orderData: any) => {
+    const recipient = orderData?.variations?.fiscal_recipient || null;
+    const modelCode: '55' | '65' = orderData?.variations?.fiscal_model === '55' ? '55' : '65';
+
+    try {
+      await requestFiscalPrevalidation({
+        modelCode,
+        recipient,
+        items: orderData.items,
+        deliveryFee: orderData.delivery_fee || 0,
+        discount: orderData.discount || 0,
+        orderData,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`${message}\n\nA venda não foi registrada.`);
+    }
+  };
+
+  useEffect(() => {
+    if (!checkoutOpen || selectedFiscalModel !== '55') {
+      setFiscalValidation({ status: 'idle' });
+      return;
+    }
+
+    if (!selectedFiscalRecipient) {
+      setFiscalValidation({
+        status: 'invalid',
+        message: 'Selecione o destinatário para que o sistema valide a tributação da NF-e.',
+      });
+      return;
+    }
+
+    if (cart.length === 0) {
+      setFiscalValidation({ status: 'idle' });
+      return;
+    }
+
+    let cancelled = false;
+    setFiscalValidation({ status: 'checking' });
+
+    const timer = window.setTimeout(async () => {
+      try {
+        await requestFiscalPrevalidation({
+          modelCode: '55',
+          recipient: selectedFiscalRecipient,
+          items: buildFiscalValidationItems(),
+          deliveryFee: getDeliveryFee(),
+          discount: parseBRL(discountAmount),
+        });
+        if (!cancelled) {
+          setFiscalValidation({
+            status: 'valid',
+            message: 'Destinatário e tributação dos produtos validados para NF-e modelo 55.',
+          });
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setFiscalValidation({
+            status: 'invalid',
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    checkoutOpen,
+    selectedFiscalModel,
+    selectedFiscalRecipient,
+    cart,
+    discountAmount,
+    orderType,
+    selectedDeliveryZone,
+    deliveryZones,
+  ]);
+
   const printOrderAfterSale = async (order: any, fiscalActive?: boolean) => {
-    const modelCode: '55' | '65' = order?.variations?.fiscal_recipient ? '55' : '65';
+    // O modelo escolhido no fechamento acompanha a venda. A presenca de um
+    // destinatario nao pode decidir o modelo: consumidor identificado tambem
+    // e permitido na NFC-e, enquanto a NF-e precisa ser uma escolha explicita.
+    const modelCode: '55' | '65' = order?.variations?.fiscal_model === '55'
+      ? '55'
+      : '65';
     const shouldEmitFiscal = typeof fiscalActive === 'boolean' ? fiscalActive : await isFiscalEmissionActive(modelCode);
 
     if (!shouldEmitFiscal) {
@@ -2596,12 +2801,15 @@ const PDV = () => {
         acceptance_status: isCounterPdvSale ? 'accepted' : (paymentMethod === 'pix' ? 'awaiting_pix_payment' : 'accepted'),
         order_number: orderNumber,
         user_id: user?.id,
+        source: whatsappConversationId ? 'WHATSAPP' : 'PDV',
+        conversation_id: whatsappConversationId,
         estimated_time: '30-45 min',
         waiter_id: operatorSession?.id || null,
         cash_register_session_id: cashSession?.id || null,
         variations: {
           operator: operatorSession ? { id: operatorSession.id, name: operatorSession.name } : null,
-          source: 'PDV',
+          source: whatsappConversationId ? 'WHATSAPP' : 'PDV',
+          conversation_id: whatsappConversationId,
           financial_adjustments: {
             subtotal: getTotalValue(),
             discount: parseBRL(discountAmount),
@@ -2628,6 +2836,7 @@ const PDV = () => {
                 notes: receivableNotes.trim() || null,
               }
             : null,
+          fiscal_model: selectedFiscalModel,
           fiscal_recipient: selectedFiscalRecipient ? {
             customer_id: selectedFiscalRecipient.id,
             name: selectedFiscalRecipient.name,
@@ -2719,9 +2928,17 @@ const PDV = () => {
 
       // Consulta o valor fiscal atual em toda venda, mas inicia em paralelo com
       // a gravação para não adicionar uma espera sequencial ao checkout.
-      const fiscalActivePromise = isFiscalEmissionActive(selectedFiscalRecipient ? '55' : '65');
-      if (selectedFiscalRecipient && !(await fiscalActivePromise)) {
+      if (selectedFiscalModel === '55' && !selectedFiscalRecipient) {
+        throw new Error('Selecione o destinatário para emitir NF-e modelo 55.');
+      }
+      const fiscalActivePromise = isFiscalEmissionActive(selectedFiscalModel);
+      const fiscalActiveForSale = await fiscalActivePromise;
+      if (selectedFiscalModel === '55' && !fiscalActiveForSale) {
         throw new Error('A NF-e modelo 55 está desativada. Ative o modelo 55 em Configurações fiscais antes de concluir esta venda.');
+      }
+
+      if (fiscalActiveForSale) {
+        await validateFiscalSaleBeforeCreate(orderData);
       }
 
       const { data, error } = await supabase
@@ -2754,7 +2971,6 @@ const PDV = () => {
         }
       }
 
-      const fiscalActiveForSale = await fiscalActivePromise;
       runNonBlockingSaleTasks({
         created,
         orderNumber,
@@ -3838,8 +4054,19 @@ const PDV = () => {
           name: selectedFiscalRecipient.name,
           document: formatFiscalDocument(selectedFiscalRecipient.cpf_cnpj),
         } : null}
+        fiscalModel={selectedFiscalModel}
+        fiscalValidation={fiscalValidation}
+        onFiscalModelChange={(model) => {
+          setSelectedFiscalModel(model);
+          setFiscalValidation({ status: model === '55' ? 'checking' : 'idle' });
+          if (model === '55' && !selectedFiscalRecipient) setFiscalRecipientOpen(true);
+          if (model === '65') setSelectedFiscalRecipient(null);
+        }}
         onFiscalRecipientClick={() => setFiscalRecipientOpen(true)}
-        onFiscalRecipientClear={() => setSelectedFiscalRecipient(null)}
+        onFiscalRecipientClear={() => {
+          setSelectedFiscalRecipient(null);
+          setFiscalValidation({ status: 'invalid', message: 'Selecione o destinatário para validar a NF-e.' });
+        }}
         inlineContent={paymentMethod === 'pagar_depois' ? (
           <div className="space-y-3">
             <ReceivableContactSelect
@@ -3972,6 +4199,7 @@ const PDV = () => {
           <FiscalRecipientsManager
             onRecipientSelected={(customer) => {
               setSelectedFiscalRecipient(customer);
+              setSelectedFiscalModel('55');
               setFiscalRecipientOpen(false);
               toast({
                 title: 'Cliente informado para a NF-e',
@@ -4061,8 +4289,11 @@ const PDV = () => {
                     customer_name: customerName,
                   } as any);
 
-                const fiscalActiveForSale = await isFiscalEmissionActive(selectedFiscalRecipient ? '55' : '65');
-                if (selectedFiscalRecipient && !fiscalActiveForSale) {
+                if (selectedFiscalModel === '55' && !selectedFiscalRecipient) {
+                  throw new Error('Selecione o destinatário para emitir NF-e modelo 55.');
+                }
+                const fiscalActiveForSale = await isFiscalEmissionActive(selectedFiscalModel);
+                if (selectedFiscalModel === '55' && !fiscalActiveForSale) {
                   throw new Error('A NF-e modelo 55 está desativada. Ative o modelo 55 em Configurações fiscais.');
                 }
                 let printResult: { fiscal: boolean; nfce: any | null } = { fiscal: fiscalActiveForSale, nfce: null };

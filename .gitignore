@@ -79,3 +79,5 @@ Thumbs.db
 
 .vercel
 .trae
+.env*.local
+/output/

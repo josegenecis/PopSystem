@@ -55,6 +55,7 @@ export default async function handler(req: Request): Promise<Response> {
         .select('*')
         .eq('user_id', userId)
         .eq('show_in_delivery', true)
+        .order('display_order', { ascending: true, nullsFirst: false })
         .order('name', { ascending: true }),
       supabase
         .from('delivery_zones')

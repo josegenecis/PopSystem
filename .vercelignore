@@ -1,8 +1,10 @@
 node_modules/
 **/node_modules/**
 dist-electron/
+dist-bridge/
 electron/
 apps/
 native-bridge/
+output/
 .git/
 .DS_Store

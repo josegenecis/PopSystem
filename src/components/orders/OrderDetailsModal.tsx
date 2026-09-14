@@ -35,6 +35,7 @@ import {
   getOrderMapsLink,
 } from '@/lib/orderDetails';
 import { emitNfceForOrder, isFiscalEmissionActiveForUser } from '@/utils/nfceClient';
+import { invokeEdgeFunction } from '@/utils/invokeEdgeFunction';
 
 interface OrderItem {
   product_name: string;
@@ -49,6 +50,15 @@ interface OrderItem {
   variations?: any[];
 
   notes?: string;
+}
+
+interface IfoodPaymentMethodSummary {
+  method?: string;
+  brand?: string;
+  wallet?: string;
+  type?: string;
+  change_for?: number | string;
+  value?: number | string;
 }
 
 interface Order {
@@ -104,11 +114,17 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({
   const [adminPinOpen, setAdminPinOpen] = useState(false);
   const [fiscalActive, setFiscalActive] = useState(false);
   const [nfceLoading, setNfceLoading] = useState(false);
+  const [respondingDispute, setRespondingDispute] = useState(false);
+  const [answeredDisputeId, setAnsweredDisputeId] = useState('');
 
   // Log detalhado quando o modal é renderizado
   useEffect(() => {
     if (isOpen && !order) return;
   }, [isOpen, order]);
+
+  useEffect(() => {
+    setAnsweredDisputeId('');
+  }, [order?.id]);
 
   useEffect(() => {
     let active = true;
@@ -213,7 +229,11 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({
     const ifoodData = order?.integration_payload?.ifood || {};
     const paymentBrand = String(ifoodData?.paymentSummary?.brand || '').trim();
     const paymentMethodDetail = String(ifoodData?.paymentSummary?.method || '').trim();
+    const paymentMethods = Array.isArray(ifoodData?.paymentSummary?.methods) ? ifoodData.paymentSummary.methods : [];
     const benefitsSummary = Array.isArray(ifoodData?.benefitsSummary) ? ifoodData.benefitsSummary : [];
+    const negotiation = ifoodData?.negotiation && typeof ifoodData.negotiation === 'object' ? ifoodData.negotiation : null;
+    const disputeId = String(negotiation?.disputeId || negotiation?.id || '').trim();
+    const disputeOpen = Boolean(disputeId && negotiation?.status === 'OPEN' && answeredDisputeId !== disputeId);
     const customerDocument = String(order?.customer_document || '').trim();
     const pickupCode = String(order?.pickup_code || ifoodData?.pickupCode || '').trim();
     const scheduledAt = String(order?.scheduled_at || ifoodData?.deliveryDateTimeStart || '').trim();
@@ -244,6 +264,93 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({
       }
     };
 
+    const chooseReason = (values: unknown, fallback: string) => {
+      const reasons = Array.isArray(values) ? values.map((value) => String(value || '').trim()).filter(Boolean) : [];
+      if (reasons.length <= 1) return reasons[0] || fallback;
+      const selected = window.prompt(
+        `Informe o motivo da negociação iFood:\n${reasons.join('\n')}`,
+        reasons[0],
+      );
+      return String(selected || '').trim();
+    };
+
+    const handleDisputeResponse = async (response: 'accept' | 'reject' | 'alternative') => {
+      if (!disputeId || respondingDispute) return;
+
+      let responseBody: Record<string, unknown> | undefined;
+      if (response === 'accept') {
+        const acceptReasons = negotiation?.acceptCancellationReasons;
+        const reason = chooseReason(acceptReasons, '');
+        responseBody = reason ? { reason } : undefined;
+      } else if (response === 'reject') {
+        const reason = chooseReason(negotiation?.rejectCancellationReasons, 'UNKNOWN_ISSUE');
+        if (!reason) return;
+        responseBody = { reason };
+      } else {
+        const alternatives = Array.isArray(negotiation?.alternatives) ? negotiation.alternatives : [];
+        const alternative = alternatives[0];
+        if (!alternative) {
+          toast({ title: 'Contraproposta indisponível', description: 'O iFood não ofereceu alternativa para esta negociação.', variant: 'destructive' });
+          return;
+        }
+
+        const alternativeType = String(alternative?.type || '').toUpperCase();
+        if (alternativeType === 'REFUND' || alternativeType === 'BENEFIT') {
+          const maxCents = toNumber(alternative?.metadata?.maxAmount?.value);
+          const maxReais = maxCents / 100;
+          const rawValue = window.prompt(
+            `Valor da contraproposta em reais${maxReais > 0 ? ` (máximo ${formatCurrency(maxReais)})` : ''}:`,
+            maxReais > 0 ? String(maxReais.toFixed(2)).replace('.', ',') : '',
+          );
+          if (!rawValue) return;
+          const valueInCents = Math.round(toNumber(rawValue) * 100);
+          if (valueInCents <= 0 || (maxCents > 0 && valueInCents > maxCents)) {
+            toast({ title: 'Valor inválido', description: 'Informe um valor permitido pelo iFood.', variant: 'destructive' });
+            return;
+          }
+          responseBody = {
+            type: alternativeType,
+            metadata: { amount: { currency: 'BRL', value: String(valueInCents) } },
+          };
+        } else if (alternativeType === 'ADDITIONAL_TIME') {
+          const allowed = Array.isArray(alternative?.metadata?.allowedsAdditionalTimeInMinutes)
+            ? alternative.metadata.allowedsAdditionalTimeInMinutes.map((value: unknown) => Number(value)).filter(Number.isFinite)
+            : [];
+          const minutes = Number(window.prompt(`Minutos adicionais permitidos: ${allowed.join(', ')}`, String(allowed[0] || 10)));
+          if (!Number.isFinite(minutes) || (allowed.length > 0 && !allowed.includes(minutes))) {
+            toast({ title: 'Tempo inválido', description: 'Escolha um dos tempos permitidos pelo iFood.', variant: 'destructive' });
+            return;
+          }
+          const reason = chooseReason(alternative?.metadata?.allowedsAdditionalTimeReasons, 'HIGH_STORE_DEMAND');
+          if (!reason) return;
+          responseBody = { type: alternativeType, metadata: { additionalTimeInMinutes: minutes, reason } };
+        } else {
+          toast({ title: 'Alternativa não suportada', description: `Tipo recebido: ${alternativeType || 'não informado'}.`, variant: 'destructive' });
+          return;
+        }
+      }
+
+      setRespondingDispute(true);
+      try {
+        const { data, status } = await invokeEdgeFunction('ifood-manager', {
+          action: 'respond_dispute',
+          disputeId,
+          response,
+          responseBody,
+        });
+        if (status >= 400 || !data?.ok) {
+          throw new Error(String(data?.message || data?.error || 'Não foi possível responder à negociação'));
+        }
+        setAnsweredDisputeId(disputeId);
+        toast({ title: 'Negociação respondida', description: 'A resposta foi enviada ao iFood. O resultado será atualizado pelos eventos.' });
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        toast({ title: 'Falha ao responder ao iFood', description: message, variant: 'destructive' });
+      } finally {
+        setRespondingDispute(false);
+      }
+    };
+
     const handleStatusUpdate = (newStatus: string) => {
       if (!onStatusChange) return;
       if (newStatus === 'cancelled') {
@@ -257,6 +364,10 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({
       }
       onStatusChange(order.id, newStatus);
     };
+
+    const isIfoodMerchantDelivery = String(order?.source || '').toLowerCase() === 'ifood'
+      && String(order?.order_type || '').toLowerCase() === 'delivery'
+      && String(ifoodData?.deliveredBy || '').toUpperCase() === 'MERCHANT';
 
     const handleEmitNfce = async () => {
       if (!order) return;
@@ -527,45 +638,6 @@ export const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({
                           </div>
                         )}
 
-                        {false && item?.options && Array.isArray(item.options) && item.options.length > 0 && (
-                          <div className="text-xs">
-                            <span className="font-medium text-gray-700">Opções:</span>
-                            <div className="mt-1 space-y-1">
-                              {item.options.map((option, oIndex) => {
-                                // Se for string simples
-                                if (typeof option === 'string') {
-                                  return (
-                                    <div key={oIndex} className="text-gray-600">
-                                      <span>{option}</span>
-                                    </div>
-                                  );
-                                }
-                                
-                                // Se for objeto com propriedades
-                                if (typeof option === 'object' && option !== null) {
-                                  // Tentar diferentes formatos de dados
-                                  const displayName = option?.name || option?.option_name || option?.title || 'Variação';
-                                  const displayValue = option?.value || option?.selected_option || option?.choice || '';
-                                  const displayPrice = toNumber(option?.price ?? option?.additional_price);
-                                  
-                                  return (
-                                    <div key={oIndex} className="text-gray-600 flex justify-between">
-                                      <span>{displayName}{displayValue ? `: ${displayValue}` : ''}</span>
-                                      {displayPrice > 0 && <span>+{formatCurrency(displayPrice)}</span>}
-                                    </div>
-                                  );
-                                }
-                                
-                                return (
-                                  <div key={oIndex} className="text-gray-600">
-                                    <span>{String(option)}</span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )}
-                        
                         {itemNotes && (
                           <div className="text-xs">
                             <span className="font-medium text-gray-700">Observações:</span>

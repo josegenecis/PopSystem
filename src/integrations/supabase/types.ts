@@ -1998,6 +1998,10 @@ export type Database = {
           customer_phone: string
           id: string
           last_read_at: string | null
+          last_message_at: string | null
+          last_message_preview: string | null
+          last_message_sender: string | null
+          operational_status: string
           first_response_at: string | null
           queue_status: string
           resolved_at: string | null
@@ -2018,6 +2022,10 @@ export type Database = {
           customer_phone: string
           id?: string
           last_read_at?: string | null
+          last_message_at?: string | null
+          last_message_preview?: string | null
+          last_message_sender?: string | null
+          operational_status?: string
           first_response_at?: string | null
           queue_status?: string
           resolved_at?: string | null
@@ -2038,6 +2046,10 @@ export type Database = {
           customer_phone?: string
           id?: string
           last_read_at?: string | null
+          last_message_at?: string | null
+          last_message_preview?: string | null
+          last_message_sender?: string | null
+          operational_status?: string
           first_response_at?: string | null
           queue_status?: string
           resolved_at?: string | null
@@ -2053,28 +2065,55 @@ export type Database = {
           content: string
           conversation_id: string
           delivered: boolean | null
+          delivery_error: string | null
+          delivery_status: string
           id: string
+          media_duration_seconds: number | null
+          media_mime_type: string | null
+          media_name: string | null
+          media_path: string | null
+          media_size: number | null
           message_type: string
+          provider_message_id: string | null
           sender: string
           sent_at: string
+          transcription: string | null
         }
         Insert: {
           content: string
           conversation_id: string
           delivered?: boolean | null
+          delivery_error?: string | null
+          delivery_status?: string
           id?: string
+          media_duration_seconds?: number | null
+          media_mime_type?: string | null
+          media_name?: string | null
+          media_path?: string | null
+          media_size?: number | null
           message_type?: string
+          provider_message_id?: string | null
           sender: string
           sent_at?: string
+          transcription?: string | null
         }
         Update: {
           content?: string
           conversation_id?: string
           delivered?: boolean | null
+          delivery_error?: string | null
+          delivery_status?: string
           id?: string
+          media_duration_seconds?: number | null
+          media_mime_type?: string | null
+          media_name?: string | null
+          media_path?: string | null
+          media_size?: number | null
           message_type?: string
+          provider_message_id?: string | null
           sender?: string
           sent_at?: string
+          transcription?: string | null
         }
         Relationships: [
           {

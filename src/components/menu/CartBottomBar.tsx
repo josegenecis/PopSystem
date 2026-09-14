@@ -3,6 +3,7 @@ import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ShoppingCart } from 'lucide-react';
+import { formatBRL } from '@/lib/currency';
 
 interface CartBottomBarProps {
   itemCount: number;
@@ -39,7 +40,7 @@ const CartBottomBar: React.FC<CartBottomBarProps> = ({
             </div>
             <span>Ver Carrinho</span>
           </div>
-          <span className="font-bold">R$ {total.toFixed(2)}</span>
+          <span className="font-bold">{formatBRL(total)}</span>
         </Button>
       </div>
     </div>

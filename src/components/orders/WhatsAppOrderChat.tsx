@@ -1,14 +1,21 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
-import { CheckCheck, Loader2, Send, UserRound } from 'lucide-react';
+import { Check, CheckCheck, Clock3, Download, ExternalLink, FileText, Loader2, PauseCircle, PlayCircle, Send, UserRound } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { buildBrazilPhoneCandidates, phonesAreEquivalent } from '@/utils/phoneCandidates';
 import { getLocalOperatorSession } from '@/services/operatorAuth';
+import { signWhatsAppMedia } from '@/services/whatsappMedia';
 
 type ChatOrder = { order_number?: string; customer_name?: string; customer_phone?: string };
-type ChatMessage = { id: string; content: string; sender: string; sent_at: string; delivered?: boolean | null; conversation_id?: string };
+type ChatMessage = { id: string; content: string; sender: string; sent_at: string; delivered?: boolean | null; delivery_status?: string; conversation_id?: string; message_type?: string; media_path?: string | null; media_name?: string | null; media_size?: number | null; media_url?: string };
+
+async function hydrateChatMedia(message: ChatMessage) {
+  if (!message.media_path) return message;
+  return { ...message, media_url: await signWhatsAppMedia(message.media_path) };
+}
 
 function WhatsAppLogo({ className = 'h-5 w-5' }: { className?: string }) {
   return (
@@ -26,11 +33,13 @@ export default function WhatsAppOrderChat({ order, open, onOpenChange, onRead }:
 }) {
   const { user } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
+  const [botPaused, setBotPaused] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const onReadRef = useRef(onRead);
 
@@ -48,16 +57,29 @@ export default function WhatsAppOrderChat({ order, open, onOpenChange, onRead }:
       setMessages([]);
       try {
         const candidates = buildBrazilPhoneCandidates(order.customer_phone);
+        const storedCandidates = Array.from(new Set(candidates.flatMap((phone) => [phone, `+${phone}`])));
         const { data: allConversations, error } = await (supabase as any)
           .from('whatsapp_conversations')
-          .select('id,customer_phone,updated_at')
+          .select('id,customer_phone,updated_at,bot_paused,status,owner,human_required')
           .eq('user_id', user.id)
+          .in('customer_phone', storedCandidates)
           .order('updated_at', { ascending: false })
-          .limit(2000);
+          .limit(20);
         if (error) throw error;
         let conversations = (allConversations || []).filter((conversation: any) =>
           phonesAreEquivalent(conversation.customer_phone, order.customer_phone)
         );
+        if (conversations.length === 0) {
+          const phoneSuffix = candidates[0]?.slice(-10);
+          const fallback = phoneSuffix ? await (supabase as any)
+            .from('whatsapp_conversations')
+            .select('id,customer_phone,updated_at,bot_paused,status,owner,human_required')
+            .eq('user_id', user.id)
+            .like('customer_phone', `%${phoneSuffix}`)
+            .order('updated_at', { ascending: false })
+            .limit(20) : { data: [] };
+          conversations = (fallback.data || []).filter((conversation: any) => phonesAreEquivalent(conversation.customer_phone, order.customer_phone));
+        }
         if (conversations.length === 0) {
           const created = await (supabase as any).from('whatsapp_conversations').insert({
             user_id: user.id,
@@ -72,15 +94,17 @@ export default function WhatsAppOrderChat({ order, open, onOpenChange, onRead }:
         if (!active || conversationIds.length === 0) return;
         const result = await (supabase as any)
           .from('whatsapp_messages')
-          .select('id,conversation_id,content,sender,sent_at,delivered,message_type')
+          .select('id,conversation_id,content,sender,sent_at,delivered,delivery_status,message_type,media_path,media_name,media_size')
           .in('conversation_id', conversationIds)
           .neq('message_type', 'order_draft')
           .order('sent_at', { ascending: true })
           .limit(200);
         if (result.error) throw result.error;
-        const history = result.data || [];
+        const history = await Promise.all((result.data || []).map(hydrateChatMedia));
         const primaryId = history.at(-1)?.conversation_id || conversationIds[0];
         setConversationId(primaryId);
+        const primaryConversation = conversations.find((conversation: any) => conversation.id === primaryId) || conversations[0];
+        setBotPaused(Boolean(primaryConversation?.bot_paused || primaryConversation?.owner === 'HUMAN' || primaryConversation?.human_required || String(primaryConversation?.status || '').startsWith('bot_paused')));
         if (active) setMessages(history);
         await (supabase as any).from('whatsapp_conversations').update({
           unread_count: 0,
@@ -90,12 +114,14 @@ export default function WhatsAppOrderChat({ order, open, onOpenChange, onRead }:
 
         channel = supabase.channel(`order-chat-${primaryId}`)
           .on('postgres_changes', {
-            event: 'INSERT', schema: 'public', table: 'whatsapp_messages',
+            event: '*', schema: 'public', table: 'whatsapp_messages',
           }, (payload) => {
             const message = payload.new as ChatMessage & { message_type?: string };
             if (!message.conversation_id || !conversationIds.includes(message.conversation_id)) return;
             if (message.message_type === 'order_draft') return;
-            setMessages((current) => current.some((item) => item.id === message.id) ? current : [...current, message]);
+            void hydrateChatMedia(message).then((hydrated) => setMessages((current) => current.some((item) => item.id === hydrated.id)
+              ? current.map((item) => item.id === hydrated.id ? { ...item, ...hydrated } : item)
+              : [...current, hydrated]));
             if (message.sender === 'customer') {
               void (supabase as any).from('whatsapp_conversations').update({ unread_count: 0, last_read_at: new Date().toISOString() }).in('id', conversationIds).eq('user_id', user.id);
               onReadRef.current?.();
@@ -114,6 +140,40 @@ export default function WhatsAppOrderChat({ order, open, onOpenChange, onRead }:
       setConversationId(null);
     };
   }, [open, order?.customer_phone, order?.customer_name, user?.id]);
+
+  const toggleBot = async () => {
+    if (!conversationId || !user?.id) return;
+    const now = new Date();
+    const resumeAt = new Date(now.getTime() + 60 * 60_000);
+    const paused = !botPaused;
+    const payload = paused ? {
+      status: `bot_paused_until:${resumeAt.toISOString()}`,
+      bot_paused: true,
+      bot_paused_at: now.toISOString(),
+      bot_paused_by: user.id,
+      owner: 'HUMAN',
+      human_required: true,
+      current_state: 'HUMAN_ATTENDING',
+      ai_resume_at: resumeAt.toISOString(),
+      updated_at: now.toISOString(),
+    } : {
+      status: 'active',
+      bot_paused: false,
+      bot_paused_at: null,
+      bot_paused_by: null,
+      owner: 'AI',
+      human_required: false,
+      current_state: 'IDLE',
+      ai_resume_at: null,
+      updated_at: now.toISOString(),
+    };
+    const { error } = await (supabase as any).from('whatsapp_conversations').update(payload).eq('id', conversationId).eq('user_id', user.id);
+    if (error) {
+      toast({ title: 'Não foi possível alterar o robô', description: error.message, variant: 'destructive' });
+      return;
+    }
+    setBotPaused(paused);
+  };
 
   const sendMessage = async (event: FormEvent) => {
     event.preventDefault();
@@ -147,7 +207,9 @@ export default function WhatsAppOrderChat({ order, open, onOpenChange, onRead }:
         sender: 'agent',
         message_type: 'text',
         delivered: true,
-      }).select('id,content,sender,sent_at,delivered').single();
+        delivery_status: 'sent',
+        provider_message_id: (data as any)?.providerMessageId || null,
+      }).select('id,content,sender,sent_at,delivered,delivery_status').single();
       if (inserted.error) throw inserted.error;
       setMessages((current) => current.some((item) => item.id === inserted.data.id) ? current : [...current, inserted.data]);
       setDraft('');
@@ -171,6 +233,8 @@ export default function WhatsAppOrderChat({ order, open, onOpenChange, onRead }:
               {order?.customer_phone || 'Sem telefone'} · Pedido {order?.order_number || ''}
             </SheetDescription>
           </div>
+          {conversationId ? <button type="button" title={botPaused ? 'Voltar para IA' : 'Pausar robô por 60 minutos'} aria-label={botPaused ? 'Voltar para IA' : 'Pausar robô'} onClick={() => void toggleBot()} className="grid h-9 w-9 place-items-center rounded-full bg-white/10 hover:bg-white/20">{botPaused ? <PlayCircle className="h-5 w-5" /> : <PauseCircle className="h-5 w-5" />}</button> : null}
+          {conversationId ? <button type="button" title="Abrir na Central" aria-label="Abrir na Central do WhatsApp" onClick={() => { onOpenChange(false); navigate(`/whatsapp-bot?conversation=${conversationId}`); }} className="grid h-9 w-9 place-items-center rounded-full bg-white/10 hover:bg-white/20"><ExternalLink className="h-5 w-5" /></button> : null}
           <WhatsAppLogo className="h-7 w-7 text-[#25d366]" />
         </header>
 
@@ -192,10 +256,13 @@ export default function WhatsAppOrderChat({ order, open, onOpenChange, onRead }:
                 return (
                   <div key={message.id} className={`flex ${outgoing ? 'justify-end' : 'justify-start'}`}>
                     <div className={`max-w-[86%] rounded-lg px-2.5 py-1.5 text-[13px] text-[#111b21] shadow-sm ${outgoing ? 'rounded-tr-sm bg-[#d9fdd3]' : 'rounded-tl-sm bg-white'}`}>
+                      {message.media_url && ['image', 'sticker'].includes(String(message.message_type)) ? <a href={message.media_url} target="_blank" rel="noreferrer"><img src={message.media_url} alt={message.media_name || 'Imagem'} className="mb-1 max-h-64 rounded-md object-contain" loading="lazy" /></a> : null}
+                      {message.media_url && message.message_type === 'audio' ? <audio src={message.media_url} controls preload="metadata" className="mb-1 h-10 w-[260px] max-w-full" /> : null}
+                      {message.media_url && ['document', 'video'].includes(String(message.message_type)) ? <a href={message.media_url} target="_blank" rel="noreferrer" className="mb-1 flex items-center gap-2 rounded bg-black/5 p-2"><FileText className="h-5 w-5" /><span className="min-w-0 flex-1 truncate">{message.media_name || 'Abrir arquivo'}</span><Download className="h-4 w-4" /></a> : null}
                       <div className="whitespace-pre-wrap break-words">{message.content}</div>
                       <div className="mt-0.5 flex items-center justify-end gap-1 text-[10px] text-[#667781]">
                         {new Date(message.sent_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                        {outgoing ? <CheckCheck className="h-3.5 w-3.5 text-[#8696a0]" /> : null}
+                        {outgoing ? message.delivery_status === 'read' ? <CheckCheck className="h-3.5 w-3.5 text-[#53bdeb]" /> : message.delivery_status === 'delivered' ? <CheckCheck className="h-3.5 w-3.5 text-[#8696a0]" /> : message.delivery_status === 'sending' ? <Clock3 className="h-3 w-3" /> : <Check className="h-3.5 w-3.5 text-[#8696a0]" /> : null}
                       </div>
                     </div>
                   </div>

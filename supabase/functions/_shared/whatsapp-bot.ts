@@ -722,7 +722,38 @@ async function loadMenuForOrdering(supabase: any, restaurantId: string) {
     .order('category', { ascending: true })
     .limit(300);
 
-  const productRows = Array.isArray(products) ? products : [];
+  let productRows = Array.isArray(products) ? products : [];
+  // Pricing is fail-open: if the resolver is not available, WhatsApp keeps the
+  // permanent product price and ordering remains operational.
+  try {
+    const productIds = productRows.map((product: any) => String(product.id)).filter(Boolean);
+    if (productIds.length) {
+      const { data: resolvedPrices, error: pricingError } = await supabase.rpc('resolve_product_prices', {
+        p_user_id: restaurantId,
+        p_channel: 'whatsapp',
+        p_product_ids: productIds,
+        p_at: new Date().toISOString()
+      });
+      if (!pricingError && Array.isArray(resolvedPrices)) {
+        const byProduct = new Map(resolvedPrices.map((row: any) => [String(row.product_id), row]));
+        productRows = productRows.map((product: any) => {
+          const price = byProduct.get(String(product.id)) as any;
+          if (!price) return product;
+          return {
+            ...product,
+            base_price: Number(price.base_price ?? product.price ?? 0),
+            price: Number(price.effective_price ?? product.price ?? 0),
+            effective_price: Number(price.effective_price ?? product.price ?? 0),
+            price_table_id: price.price_table_id || null,
+            price_rule_id: price.price_rule_id || null,
+            price_table_name: price.price_table_name || null
+          };
+        });
+      }
+    }
+  } catch {
+    // Never block WhatsApp ordering because a promotional rule could not load.
+  }
   const ids = productRows.map((product: any) => String(product.id)).filter(Boolean);
   if (ids.length === 0) return { products: [], variationsByProduct: new Map() };
 
@@ -1559,9 +1590,26 @@ export async function pauseRestaurantBotForConversation(params: {
   return { ok: true, conversationId };
 }
 
+// Estes passos são telemetria de sucesso intermediária e acontecem várias
+// vezes para a mesma mensagem. Erros, envios, transferências para humano e
+// ações comerciais continuam auditados; eliminamos apenas o ruído que vinha
+// gerando milhares de inserts por dia.
+const NOISY_WHATSAPP_SUCCESS_STEPS = new Set([
+  'whatsapp_webhook_received',
+  'whatsapp_webhook_processed',
+  'whatsapp_bot_received',
+  'whatsapp_bot_openai_ok',
+  'whatsapp_bot_reply_built',
+  'whatsapp_bot_duplicate_silent',
+  'whatsapp_bot_low_signal_silent',
+]);
+
 export async function logWhatsAppBotStep(supabase: any, restaurantId: string, actionType: string, description: string, metadata: Record<string, unknown> = {}) {
   const userId = String(restaurantId || '').trim();
   if (!supabase || !userId) return;
+
+  if (NOISY_WHATSAPP_SUCCESS_STEPS.has(actionType)) return;
+
   await supabase.from('agent_activity_logs').insert({
     user_id: userId,
     action_type: actionType,
@@ -1901,6 +1949,117 @@ async function transcribeIncomingAudio(media: any) {
   return String(data?.text || '').trim();
 }
 
+/**
+ * Persists the customer message before any AI, menu or order work starts.
+ * This is deliberately small so Realtime can deliver the message to an
+ * operator even when the bot is disabled, paused or still processing.
+ */
+export async function persistRestaurantInboundMessage(params: {
+  supabase: any;
+  restaurantId: string;
+  customerPhone: string;
+  text: string;
+  media?: any;
+  providerMessageId?: string | null;
+  messageType?: string | null;
+  quotedProviderMessageId?: string | null;
+}) {
+  const restaurantId = String(params.restaurantId || '').trim();
+  const customerPhone = normalizePhone(params.customerPhone);
+  const text = String(params.text || '').trim();
+  if (!restaurantId || !customerPhone || !text) return null;
+
+  const phoneCandidates = buildPhoneCandidates(customerPhone);
+  let conversation = await loadExistingWhatsAppConversation(params.supabase, restaurantId, customerPhone);
+
+  if (!conversation?.id) {
+    const { data: customer } = await params.supabase
+      .from('customers')
+      .select('name')
+      .eq('user_id', restaurantId)
+      .in('phone', phoneCandidates)
+      .limit(1)
+      .maybeSingle();
+    const { data, error } = await params.supabase
+      .from('whatsapp_conversations')
+      .insert({
+        user_id: restaurantId,
+        customer_phone: customerPhone,
+        customer_name: String(customer?.name || 'Cliente WhatsApp'),
+        status: 'open'
+      })
+      .select('*')
+      .single();
+    if (error) throw error;
+    conversation = data;
+  }
+
+  const media = params.media && typeof params.media === 'object' ? params.media : null;
+  const requestedType = String(params.messageType || media?.type || 'text');
+  const mediaType = ['image', 'audio', 'video', 'document', 'sticker', 'location', 'contact'].includes(requestedType) ? requestedType : 'text';
+  const mimeType = String(media?.mimeType || '').split(';')[0].trim() || null;
+  let mediaPath: string | null = null;
+  let mediaSize: number | null = null;
+  if (media && mimeType) {
+    try {
+      let bytes: Uint8Array | null = null;
+      const base64 = String(media?.base64 || '').replace(/^data:[^,]+,/, '').trim();
+      if (base64) {
+        bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+      } else if (/^https?:\/\//i.test(String(media?.url || ''))) {
+        const response = await fetch(String(media.url));
+        if (response.ok) bytes = new Uint8Array(await response.arrayBuffer());
+      }
+      if (bytes?.length) {
+        const extension = String(media?.fileName || '').split('.').pop()?.replace(/[^a-z0-9]/gi, '').toLowerCase() ||
+          (mediaType === 'image' ? 'jpg' : mediaType === 'audio' ? 'ogg' : mediaType === 'video' ? 'mp4' : 'bin');
+        mediaPath = `${restaurantId}/${conversation.id}/${crypto.randomUUID()}.${extension}`;
+        const upload = await params.supabase.storage.from('whatsapp-media').upload(mediaPath, bytes, { contentType: mimeType, upsert: false });
+        if (upload.error) mediaPath = null;
+        else mediaSize = bytes.length;
+      }
+    } catch {
+      mediaPath = null;
+    }
+  }
+
+  let quotedMessageId: string | null = null;
+  if (params.quotedProviderMessageId) {
+    const { data: quotedMessage } = await params.supabase.from('whatsapp_messages')
+      .select('id')
+      .eq('conversation_id', conversation.id)
+      .or(`provider_message_id.eq.${params.quotedProviderMessageId},external_message_id.eq.${params.quotedProviderMessageId}`)
+      .limit(1)
+      .maybeSingle();
+    quotedMessageId = quotedMessage?.id || null;
+  }
+
+  const { data: message, error: messageError } = await params.supabase.from('whatsapp_messages').insert({
+      conversation_id: conversation.id,
+      content: text,
+      sender: 'customer',
+      message_type: mediaType,
+      delivered: true,
+      media_path: mediaPath,
+      media_mime_type: mimeType,
+      media_name: String(media?.fileName || '') || null,
+      media_size: mediaSize,
+      media_duration_seconds: Number(media?.seconds || 0) || null,
+      provider_message_id: String(params.providerMessageId || '') || null,
+      external_message_id: String(params.providerMessageId || '') || null,
+      quoted_message_id: quotedMessageId,
+      delivery_status: 'received'
+    })
+    .select('id')
+    .single();
+  if (messageError) {
+    if (mediaPath) await params.supabase.storage.from('whatsapp-media').remove([mediaPath]).catch(() => null);
+    throw messageError;
+  }
+
+  return { conversationId: String(conversation.id), conversation, messageId: String(message?.id || '') };
+}
+
 export async function processRestaurantBotMessage(params: {
   supabase: any;
   restaurantId: string;
@@ -1908,6 +2067,11 @@ export async function processRestaurantBotMessage(params: {
   customerPhone: string;
   text: string;
   media?: any;
+  persistedInbound?: {
+    conversationId: string;
+    conversation?: any;
+    messageId?: string;
+  } | null;
 }) {
   const supabase = params.supabase;
   const restaurantId = String(params.restaurantId || '').trim();
@@ -1916,7 +2080,15 @@ export async function processRestaurantBotMessage(params: {
   let text = String(params.text || '').trim();
   if (media?.type === 'audio') {
     const transcription = await transcribeIncomingAudio(media).catch(() => '');
-    if (transcription) text = transcription;
+    if (transcription) {
+      text = transcription;
+      if (params.persistedInbound?.messageId) {
+        await supabase
+          .from('whatsapp_messages')
+          .update({ transcription, message_type: 'audio' })
+          .eq('id', params.persistedInbound.messageId);
+      }
+    }
   }
   const instanceName = String(params.instanceName || '').trim();
 
@@ -1953,9 +2125,10 @@ export async function processRestaurantBotMessage(params: {
     });
   }
 
-  const existingConversation = await loadExistingWhatsAppConversation(supabase, restaurantId, customerPhone);
+  const existingConversation = params.persistedInbound?.conversation ||
+    await loadExistingWhatsAppConversation(supabase, restaurantId, customerPhone);
 
-  let conversationId = String(existingConversation?.id || '');
+  let conversationId = String(params.persistedInbound?.conversationId || existingConversation?.id || '');
   if (!conversationId) {
     const { data: createdConversation, error } = await supabase
       .from('whatsapp_conversations')
@@ -1971,36 +2144,38 @@ export async function processRestaurantBotMessage(params: {
     conversationId = String(createdConversation?.id || '');
   }
 
-  const recentDuplicateCutoff = new Date(Date.now() - 30 * 1000).toISOString();
-  const { data: recentDuplicateMessage } = await supabase
-    .from('whatsapp_messages')
-    .select('id, sent_at')
-    .eq('conversation_id', conversationId)
-    .eq('sender', 'customer')
-    .eq('content', text)
-    .gte('sent_at', recentDuplicateCutoff)
-    .order('sent_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  if (!params.persistedInbound?.conversationId) {
+    const recentDuplicateCutoff = new Date(Date.now() - 30 * 1000).toISOString();
+    const { data: recentDuplicateMessage } = await supabase
+      .from('whatsapp_messages')
+      .select('id, sent_at')
+      .eq('conversation_id', conversationId)
+      .eq('sender', 'customer')
+      .eq('content', text)
+      .gte('sent_at', recentDuplicateCutoff)
+      .order('sent_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-  if (recentDuplicateMessage?.id) {
-    await logWhatsAppBotStep(supabase, restaurantId, 'whatsapp_bot_duplicate_silent', 'Mensagem duplicada recebida por outro webhook; resposta suprimida', {
-      instanceName,
-      customerPhone,
-      conversationId,
-      duplicateMessageId: recentDuplicateMessage.id,
-      textPreview: text.slice(0, 120)
+    if (recentDuplicateMessage?.id) {
+      await logWhatsAppBotStep(supabase, restaurantId, 'whatsapp_bot_duplicate_silent', 'Mensagem duplicada recebida por outro webhook; resposta suprimida', {
+        instanceName,
+        customerPhone,
+        conversationId,
+        duplicateMessageId: recentDuplicateMessage.id,
+        textPreview: text.slice(0, 120)
+      });
+      return { ok: true, skipped: true, reason: 'duplicate_recent_message', conversationId };
+    }
+
+    await supabase.from('whatsapp_messages').insert({
+      conversation_id: conversationId,
+      content: text,
+      sender: 'customer',
+      message_type: 'text',
+      delivered: true
     });
-    return { ok: true, skipped: true, reason: 'duplicate_recent_message', conversationId };
   }
-
-  await supabase.from('whatsapp_messages').insert({
-    conversation_id: conversationId,
-    content: text,
-    sender: 'customer',
-    message_type: 'text',
-    delivered: true
-  });
 
   if (isMarketingOptOut(text)) {
     await supabase

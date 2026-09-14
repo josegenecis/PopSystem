@@ -11,6 +11,7 @@ import {
   Lock,
   Unlock,
   ChevronDown,
+  ArchiveRestore,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
@@ -98,10 +99,19 @@ const FixedHeader = () => {
     };
 
     void loadWhatsAppStatus();
-    const timer = window.setInterval(loadWhatsAppStatus, 30000);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void loadWhatsAppStatus();
+    };
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void loadWhatsAppStatus();
+    }, 2 * 60_000);
+    window.addEventListener('focus', refreshWhenVisible);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
     return () => {
       active = false;
       window.clearInterval(timer);
+      window.removeEventListener('focus', refreshWhenVisible);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
     };
   }, [user?.id]);
 
@@ -120,6 +130,15 @@ const FixedHeader = () => {
     { label: 'Mesas', icon: Table2, path: '/mesas', feature: 'tables' as FeatureKey, area: 'tables' as OperatorArea },
     { label: 'WhatsApp', icon: MessageCircle, path: '/whatsapp-bot', feature: 'whatsapp' as FeatureKey, area: 'whatsapp' as OperatorArea },
   ];
+
+  const openCashDrawer = async () => {
+    const result = await PrinterService.openCashDrawer();
+    if (result?.success) {
+      toast.success('Gaveta aberta');
+      return;
+    }
+    toast.error(result?.error || 'Não foi possível abrir a gaveta');
+  };
 
   return (
     <header className="fixed left-0 right-0 top-0 z-50 border-b border-[#E7ECE8] bg-white shadow-[0_12px_30px_-24px_rgba(0,50,35,0.16)]">
@@ -168,6 +187,10 @@ const FixedHeader = () => {
               <DropdownMenuItem onClick={() => goToFeature(cashActionPath('out'), 'finance')}>
                 <ArrowDown className="mr-2 h-4 w-4" />
                 Sangria
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => void openCashDrawer()}>
+                <ArchiveRestore className="mr-2 h-4 w-4" />
+                Abrir gaveta
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => goToFeature('/caixa', 'finance')}>

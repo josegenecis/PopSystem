@@ -1,5 +1,6 @@
 import { supabase } from '@/integrations/supabase/client';
 import { invokeEdgeFunction } from '@/utils/invokeEdgeFunction';
+import { formatBRL } from '@/lib/currency';
 
 export interface AgentCommandResult {
   success: boolean;
@@ -264,11 +265,11 @@ async function executeRegisterExpense(amount: number, category: string, descript
     };
 
     await supabase.from('expenses').insert(expense);
-    await logAgentActivity(userId, 'expense_register', `IA: Despesa registrada: R$ ${amount}`);
+    await logAgentActivity(userId, 'expense_register', `IA: Despesa registrada: ${formatBRL(amount)}`);
 
     return {
       success: true,
-      message: aiReply || `✅ Despesa registrada: R$ ${amount.toFixed(2)} em ${category}`,
+      message: aiReply || `✅ Despesa registrada: ${formatBRL(amount)} em ${category}`,
       metadata: { action: 'expense_register' }
     };
   } catch (e: any) {
@@ -452,7 +453,7 @@ async function handleExpenseRegistration(command: string, userId: string): Promi
     .replace(/lançar|registrar|adicionar/gi, '')
     .replace(/despesa\s+de\s+r?\$?\s?\d+(?:\.\d{1,2})?/gi, '')
     .replace(/para\s+\w+/gi, '')
-    .trim() || `Despesa de R$ ${amount.toFixed(2)}`;
+    .trim() || `Despesa de ${formatBRL(amount)}`;
 
   try {
     const expense: Omit<Expense, 'id' | 'created_at'> = {
@@ -472,11 +473,11 @@ async function handleExpenseRegistration(command: string, userId: string): Promi
     if (error) throw error;
 
     // Log the action
-    await logAgentActivity(userId, 'expense_register', `Despesa registrada: R$ ${amount.toFixed(2)} para ${validatedCategory}`);
+    await logAgentActivity(userId, 'expense_register', `Despesa registrada: ${formatBRL(amount)} para ${validatedCategory}`);
 
     return {
       success: true,
-      message: `✅ Despesa registrada com sucesso: R$ ${amount.toFixed(2)} para ${validatedCategory}`,
+      message: `✅ Despesa registrada com sucesso: ${formatBRL(amount)} para ${validatedCategory}`,
       metadata: {
         action: 'expense_register',
         expense: data
@@ -528,7 +529,7 @@ async function handleIngredientQuery(command: string, userId: string): Promise<A
     }
 
     const ingredientList = ingredients.map(ing => 
-      `• ${ing.name} (${ing.category}) - R$ ${ing.price.toFixed(2)}/${ing.unit}`
+      `• ${ing.name} (${ing.category}) - ${formatBRL(ing.price)}/${ing.unit}`
     ).join('\n');
 
     return {

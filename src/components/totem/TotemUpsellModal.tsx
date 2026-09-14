@@ -2,6 +2,7 @@ import { Plus, Sparkles } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { normalizeImageUrlForDisplay } from '@/utils/normalizeImageUrl';
+import { formatBRL } from '@/lib/currency';
 
 export type TotemUpsellRecommendation = {
   ruleId: string;
@@ -49,7 +50,7 @@ export default function TotemUpsellModal({
                 <div className="p-3">
                   <div className="line-clamp-2 min-h-10 text-sm font-black text-[#073a2d]">{product.name}</div>
                   <div className="mt-2 flex items-end justify-between gap-2">
-                    <div>{product.original_price && product.original_price > product.price ? <div className="text-xs font-semibold text-stone-400 line-through">R$ {Number(product.original_price).toFixed(2)}</div> : null}<div className="font-black text-orange-600">R$ {Number(product.price).toFixed(2)}</div></div>
+                    <div>{product.original_price && product.original_price > product.price ? <div className="text-xs font-semibold text-stone-400 line-through">{formatBRL(product.original_price)}</div> : null}<div className="font-black text-orange-600">{formatBRL(product.price)}</div></div>
                     <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-orange-500 text-white"><Plus className="h-5 w-5" /></span>
                   </div>
                 </div>

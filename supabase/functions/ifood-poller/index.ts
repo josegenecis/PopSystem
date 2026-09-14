@@ -11,7 +11,8 @@ import {
   upsertIfoodSettings,
 } from '../_shared/ifood.ts'
 
-const POLLING_INTERVAL_MS = 25_000
+const POLLING_INTERVAL_MS = 30_000
+const IDLE_HEARTBEAT_INTERVAL_MS = 5 * 60_000
 
 const eventTime = (event: any) => {
   const parsed = new Date(event?.createdAt || 0).getTime()
@@ -53,7 +54,7 @@ Deno.serve(async (req: Request) => {
       const claimedAt = new Date().toISOString()
       let claimQuery = supabase
         .from('ifood_settings')
-        .update({ last_poll: claimedAt, updated_at: claimedAt })
+        .update({ last_poll: claimedAt })
         .eq('id', settings.id)
       claimQuery = settings.last_poll
         ? claimQuery.eq('last_poll', settings.last_poll)
@@ -97,15 +98,27 @@ Deno.serve(async (req: Request) => {
 
         if (events.length > 0) await acknowledgeIfoodEvents(supabase, settings, events)
 
-        await upsertIfoodSettings(supabase, settings.user_id, {
-          merchant_id: settings.merchant_id,
-          last_sync_at: new Date().toISOString(),
-          last_sync_status: 'ok',
-          last_sync_message: events.length
-            ? `${events.length} evento(s) recebido(s) pelo polling automático`
-            : 'Polling automático ativo; nenhum evento novo',
-          status: 'online',
-        })
+        const previousSyncAt = new Date(settings.last_sync_at || 0).getTime()
+        const idleHeartbeatDue = !Number.isFinite(previousSyncAt) ||
+          Date.now() - previousSyncAt >= IDLE_HEARTBEAT_INTERVAL_MS
+        const shouldPersistSync = events.length > 0 ||
+          settings.last_sync_status !== 'ok' ||
+          idleHeartbeatDue
+
+        // O polling precisa continuar frequente para descobrir pedidos novos,
+        // mas uma resposta vazia não precisa regravar toda a configuração a
+        // cada 30 segundos. Mantemos um heartbeat espaçado para observabilidade.
+        if (shouldPersistSync) {
+          await upsertIfoodSettings(supabase, settings.user_id, {
+            merchant_id: settings.merchant_id,
+            last_sync_at: new Date().toISOString(),
+            last_sync_status: 'ok',
+            last_sync_message: events.length
+              ? `${events.length} evento(s) recebido(s) pelo polling automático`
+              : 'Polling automático ativo; nenhum evento novo',
+            status: 'online',
+          })
+        }
       } catch (pollError: any) {
         summary.errors += 1
         await upsertIfoodSettings(supabase, settings.user_id, {

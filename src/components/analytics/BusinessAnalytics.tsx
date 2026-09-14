@@ -398,7 +398,7 @@ const BusinessAnalytics: React.FC = () => {
                   <LineChart data={analytics.dailyRevenue}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="date" />
-                    <YAxis tickFormatter={(value) => `R$ ${value}`} />
+                    <YAxis tickFormatter={(value) => formatCurrency(Number(value))} />
                     <Tooltip formatter={(value) => formatCurrency(Number(value))} />
                     <Line type="monotone" dataKey="revenue" stroke="#FF8042" strokeWidth={2} />
                   </LineChart>

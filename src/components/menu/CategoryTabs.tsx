@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 interface Category {
   id: string;
   name: string;
+  image_url?: string | null;
 }
 
 interface CategoryTabsProps {
@@ -26,19 +27,22 @@ const CategoryTabs: React.FC<CategoryTabsProps> = ({
   };
 
   return (
-    <div className="scrollbar-hide flex overflow-x-auto py-3 px-4 space-x-6 bg-white">
+    <div className="scrollbar-hide flex gap-2 overflow-x-auto px-0.5 py-2.5 sm:gap-5 sm:py-3">
       {categories.map((category) => (
         <button
           key={category.id}
           onClick={() => scrollToCategory(category.id)}
           className={cn(
-            "flex-shrink-0 px-0 py-2 text-sm font-semibold whitespace-nowrap border-b-2",
+            "group flex w-[48px] flex-shrink-0 flex-col items-center gap-1.5 text-center text-[9px] font-bold sm:w-[82px] sm:gap-2 sm:text-xs",
             activeCategory === category.id
-              ? "text-black border-black"
-              : "text-black border-transparent"
+              ? "text-[var(--menu-secondary,#063D2E)]"
+              : "text-slate-600"
           )}
         >
-          {category.name}
+          <span className={cn('flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border-2 bg-white p-0.5 shadow-sm transition-all sm:h-[72px] sm:w-[72px] sm:p-1', activeCategory === category.id ? 'scale-105 border-[var(--menu-primary,#85C441)] shadow-md' : 'border-white group-hover:border-[var(--menu-primary,#85C441)]/40')}>
+            {category.image_url ? <img src={category.image_url} alt="" className="h-full w-full rounded-full object-cover" loading="lazy" /> : <span className="flex h-full w-full items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--menu-primary,#85C441)_14%,white)] text-lg font-black">{category.name.slice(0, 2).toUpperCase()}</span>}
+          </span>
+          <span className="line-clamp-2 min-h-[22px] leading-tight sm:min-h-0">{category.name}</span>
         </button>
       ))}
     </div>

@@ -15,6 +15,7 @@ import { useCustomerLookup } from '@/hooks/useCustomerLookup';
 import { supabase } from '@/integrations/supabase/client';
 import PixCheckoutModal from '@/components/payment/PixCheckoutModal';
 import { invokeEdgeFunction } from '@/utils/invokeEdgeFunction';
+import { formatBRL } from '@/lib/currency';
 // Removido hook de mobile fora do componente para evitar uso inválido
 
 interface CartItem {
@@ -350,7 +351,7 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
       if (!customerData.phone.trim()) errors.push('Telefone é obrigatório');
       if (!customerData.address.trim()) errors.push('Endereço é obrigatório');
       if (!hasDelivery) errors.push('Selecione uma área de entrega');
-      if (total < minimumOrder) errors.push(`Pedido mínimo: R$ ${minimumOrder.toFixed(2)}`);
+      if (total < minimumOrder) errors.push(`Pedido mínimo: ${formatBRL(minimumOrder)}`);
       if (!paymentMethod) errors.push('Selecione forma de pagamento');
       if (paymentMethod === 'dinheiro' && changeAmount && parseFloat(changeAmount) < totalWithDelivery) {
         errors.push('Valor para troco deve ser maior que o total');
@@ -494,29 +495,29 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
                         </p>
                       )}
                     </div>
-                    <span className="font-medium">R$ {item.subtotal.toFixed(2)}</span>
+                    <span className="font-medium">{formatBRL(item.subtotal)}</span>
                   </div>
                 ))}
                 
                 <Separator />
                 <div className="flex justify-between">
                   <span>Subtotal</span>
-                  <span>R$ {total.toFixed(2)}</span>
+                  <span>{formatBRL(total)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>Taxa de Entrega</span>
-                  <span>R$ {deliveryFee.toFixed(2)}</span>
+                  <span>{formatBRL(deliveryFee)}</span>
                 </div>
                 {extraFee > 0 && (
                   <div className="flex justify-between">
                     <span>Taxa do Pagamento</span>
-                    <span>R$ {extraFee.toFixed(2)}</span>
+                    <span>{formatBRL(extraFee)}</span>
                   </div>
                 )}
                 <Separator />
                 <div className="flex justify-between font-bold text-lg">
                   <span>Total</span>
-                  <span>R$ {totalWithDeliveryAndFee.toFixed(2)}</span>
+                  <span>{formatBRL(totalWithDeliveryAndFee)}</span>
                 </div>
               </div>
             </CardContent>
@@ -592,7 +593,7 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     <div className="p-3 border rounded-lg bg-gray-50">
                       <div className="text-sm font-medium">Frete calculado automaticamente</div>
                       <div className="text-sm text-muted-foreground">
-                        R$ {Number(quoteZone?.delivery_fee || 0).toFixed(2)}
+                        {formatBRL(quoteZone?.delivery_fee || 0)}
                         {typeof deliveryQuote?.distanceKm === 'number' ? ` • ${Number(deliveryQuote.distanceKm).toFixed(2)} km` : ''}
                       </div>
                       {deliveryZones.length > 0 ? (
@@ -626,7 +627,7 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
                         <SelectContent>
                           {deliveryZones.map((zone) => (
                             <SelectItem key={zone.id} value={zone.id}>
-                              {zone.name} - R$ {zone.delivery_fee.toFixed(2)}
+                              {zone.name} - {formatBRL(zone.delivery_fee)}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -659,7 +660,7 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   )}
                   {selectedZoneData && total < minimumOrder && (
                     <p className="text-sm text-red-500">
-                      Pedido mínimo para esta área: R$ {minimumOrder.toFixed(2)}
+                      Pedido mínimo para esta área: {formatBRL(minimumOrder)}
                     </p>
                   )}
               </div>
@@ -749,7 +750,7 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     id="change"
                     type="number"
                     step="0.01"
-                    placeholder={`Mínimo: R$ ${totalWithDeliveryAndFee.toFixed(2)}`}
+                    placeholder={`Mínimo: ${formatBRL(totalWithDeliveryAndFee)}`}
                     value={changeAmount}
                     onChange={(e) => setChangeAmount(e.target.value)}
                   />

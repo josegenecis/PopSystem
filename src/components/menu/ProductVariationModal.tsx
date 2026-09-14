@@ -8,6 +8,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Minus, Plus } from 'lucide-react';
+import { formatBRL } from '@/lib/currency';
 
 interface Product {
   id: string;
@@ -185,7 +186,7 @@ const ProductVariationModal: React.FC<ProductVariationModalProps> = ({
                 <p className="text-sm text-muted-foreground">{product.description}</p>
               )}
               <p className="text-lg font-bold text-primary">
-                R$ {product.price.toFixed(2)}
+                {formatBRL(product.price)}
               </p>
             </div>
           </div>
@@ -224,7 +225,7 @@ const ProductVariationModal: React.FC<ProductVariationModalProps> = ({
                         </div>
                         {option.price > 0 && (
                           <span className="text-sm text-muted-foreground">
-                            +R$ {option.price.toFixed(2)}
+                            +{formatBRL(option.price)}
                           </span>
                         )}
                       </div>
@@ -256,7 +257,7 @@ const ProductVariationModal: React.FC<ProductVariationModalProps> = ({
                           </div>
                           {option.price > 0 && (
                             <span className="text-sm text-muted-foreground">
-                              +R$ {option.price.toFixed(2)}
+                              +{formatBRL(option.price)}
                             </span>
                           )}
                         </div>
@@ -305,7 +306,7 @@ const ProductVariationModal: React.FC<ProductVariationModalProps> = ({
               <div className="text-right">
                 <p className="text-sm text-muted-foreground">Total</p>
                 <p className="text-xl font-bold text-primary">
-                  R$ {calculateTotalPrice().toFixed(2)}
+                  {formatBRL(calculateTotalPrice())}
                 </p>
               </div>
             </div>

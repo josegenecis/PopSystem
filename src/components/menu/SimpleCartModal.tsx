@@ -194,6 +194,8 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
   const [deliveryQuote, setDeliveryQuote] = React.useState<any | null>(null);
   const detectTimerRef = useRef<number | null>(null);
   const zoneWasAutoRef = useRef(false);
+  const checkoutTrackedRef = useRef(false);
+  const paymentTrackedRef = useRef(false);
   const [paymentMethod, setPaymentMethod] = React.useState('');
   const [changeAmount, setChangeAmount] = React.useState('');
   const [notes, setNotes] = React.useState('');
@@ -458,7 +460,11 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
   }, [isOpen, userId]);
 
   useEffect(() => {
-    if (isOpen) setStep('bag');
+    if (isOpen) {
+      setStep('bag');
+      checkoutTrackedRef.current = false;
+      paymentTrackedRef.current = false;
+    }
   }, [isOpen]);
 
   useEffect(() => {
@@ -572,6 +578,26 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
   // Calcular Total Final com Desconto
   const preTotal = total + deliveryFee + computedExtraFee;
   const finalTotal = Math.max(0, preTotal - discount);
+
+  const getMarketingContents = () => cart.map((item) => createMarketingContent(
+    item.product.id,
+    item.quantity,
+    Number(item.totalPrice || 0) / Math.max(1, Number(item.quantity) || 1),
+  ));
+
+  const handleContinueToCheckout = () => {
+    setStep('checkout');
+    if (checkoutTrackedRef.current) return;
+    checkoutTrackedRef.current = true;
+    trackMarketingEvent('InitiateCheckout', {
+      content_type: 'product',
+      content_ids: cart.map((item) => String(item.product.id)),
+      contents: getMarketingContents(),
+      num_items: cart.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0),
+      value: finalTotal,
+      currency: 'BRL',
+    }, { scope: userId });
+  };
 
   useEffect(() => {
     const digits = String(customerPhone || '').replace(/\D/g, '');
@@ -1056,6 +1082,18 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
       });
       return;
     }
+    if (!paymentTrackedRef.current) {
+      paymentTrackedRef.current = true;
+      trackMarketingEvent('AddPaymentInfo', {
+        content_type: 'product',
+        content_ids: cart.map((item) => String(item.product.id)),
+        contents: getMarketingContents(),
+        num_items: cart.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0),
+        value: finalTotal,
+        currency: 'BRL',
+        payment_method: paymentMethod,
+      }, { scope: userId });
+    }
     setIsLoading(true);
 
     try {
@@ -1510,7 +1548,7 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
                     <SelectContent>
                       {deliveryZones.map((zone: any) => (
                         <SelectItem key={zone.id} value={String(zone.id)}>
-                          {zone.name} - R$ {Number(zone.delivery_fee || 0).toFixed(2)}
+                          {zone.name} - {formatBRL(zone.delivery_fee)}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -1579,14 +1617,14 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
                 <div className="text-sm font-semibold mb-1" style={{ color: menuSecondaryColor }}>Frete da entrega</div>
                 {deliveryQuote?.ok ? (
                   <div className="text-sm mt-1">
-                    <span className="font-bold text-lg" style={{ color: menuPriceColor }}>{deliveryFee === 0 ? 'Grátis' : `R$ ${deliveryFee.toFixed(2)}`}</span>
+                    <span className="font-bold text-lg" style={{ color: menuPriceColor }}>{deliveryFee === 0 ? 'Grátis' : formatBRL(deliveryFee)}</span>
                     {typeof deliveryQuote?.distanceKm === 'number' ? <span className="text-gray-500"> • {Number(deliveryQuote.distanceKm).toFixed(2)} km</span> : ''}
                     {deliveryQuote?.zone?.name ? <span className="text-gray-500"> • {deliveryQuote.zone.name}</span> : ''}
                   </div>
                 ) : storePricingMode === 'free' ? (
                   <div className="text-lg font-bold mt-1" style={{ color: menuPriceColor }}>Grátis</div>
                 ) : storePricingMode === 'fixed' ? (
-                  <div className="text-lg font-bold mt-1" style={{ color: menuPriceColor }}>Fixo: R$ {deliveryFee.toFixed(2)}</div>
+                  <div className="text-lg font-bold mt-1" style={{ color: menuPriceColor }}>Fixo: {formatBRL(deliveryFee)}</div>
                 ) : (
                   <div className="text-sm mt-2 flex items-center gap-1 font-medium p-2 rounded-lg" style={{ color: menuPrimaryColor, backgroundColor: menuBackgroundColor }}>
                     {isDetectingZone ? 'Calculando valor...' : 'Preencha o endereço completo para calcular o frete'}
@@ -1602,9 +1640,9 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
               <div className="p-4 rounded-2xl border" style={{ backgroundColor: menuBackgroundColor, borderColor: menuAccentBorder }}>
                 <div className="text-sm font-semibold mb-1" style={{ color: menuSecondaryColor }}>Frete do bairro</div>
                 <div className="text-lg font-bold" style={{ color: menuPriceColor }}>
-                  {selectedZone.name} • R$ {Number(selectedZone.delivery_fee || 0).toFixed(2)}
+                  {selectedZone.name} • {formatBRL(selectedZone.delivery_fee)}
                   {Number(selectedZone.minimum_order || 0) > 0 ? (
-                    <span className="text-gray-500 text-sm font-normal"> • mínimo R$ {Number(selectedZone.minimum_order || 0).toFixed(2)}</span>
+                    <span className="text-gray-500 text-sm font-normal"> • mínimo {formatBRL(selectedZone.minimum_order)}</span>
                   ) : null}
                 </div>
               </div>
@@ -1729,12 +1767,12 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
                   </div>
                   {changeAmount && parseFloat(changeAmount) < finalTotal && (
                     <p className="text-xs text-red-600 mt-1">
-                      O valor deve ser maior ou igual ao total do pedido (R$ {finalTotal.toFixed(2)})
+                      O valor deve ser maior ou igual ao total do pedido ({formatBRL(finalTotal)})
                     </p>
                   )}
                   {changeAmount && parseFloat(changeAmount) >= finalTotal && (
                     <p className="text-xs text-green-600 mt-1">
-                      Troco: R$ {(parseFloat(changeAmount) - finalTotal).toFixed(2)}
+                      Troco: {formatBRL(parseFloat(changeAmount) - finalTotal)}
                     </p>
                   )}
                 </div>
@@ -1850,7 +1888,7 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
           {step === 'bag' && (
             <div className="border-t border-gray-100 p-4 bg-white">
               <Button
-                onClick={() => setStep('checkout')}
+                onClick={handleContinueToCheckout}
                 disabled={!isStoreOpen}
                 className="w-full rounded-xl font-bold h-12 text-white transition-transform hover:scale-[1.02]"
                 style={{ backgroundColor: 'var(--menu-primary, #85C441)' }}
@@ -1896,9 +1934,9 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
                       ) : null}
                       <div className="flex items-center justify-between mt-2">
                         <div className="flex flex-col">
-                          <div className="font-extrabold" style={{ color: menuPriceColor }}>R$ {discountedPrice.toFixed(2)}</div>
+                          <div className="font-extrabold" style={{ color: menuPriceColor }}>{formatBRL(discountedPrice)}</div>
                           {hasDiscount ? (
-                            <div className="text-[11px] text-muted-foreground line-through">R$ {originalPrice.toFixed(2)}</div>
+                            <div className="text-[11px] text-muted-foreground line-through">{formatBRL(originalPrice)}</div>
                           ) : null}
                         </div>
                         <Button onClick={() => chooseUpsellOffer(offer)} disabled={upsellBusy}>

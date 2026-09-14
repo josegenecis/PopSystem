@@ -1,4 +1,5 @@
 import { Capacitor } from '@capacitor/core';
+import { formatBRL } from '@/lib/currency';
 
 export interface PrinterDevice {
   id: string;
@@ -211,7 +212,7 @@ export class PrinterService {
       orderData.items.forEach((item) => {
         escposData += `${item.quantity}x ${item.product_name}\n`;
         escposData += '\x1B\x61\x02'; // Right align
-        escposData += `R$ ${item.subtotal.toFixed(2)}\n`;
+        escposData += `${formatBRL(item.subtotal)}\n`;
         escposData += '\x1B\x61\x00'; // Left align
 
         if (item.notes) {
@@ -222,7 +223,7 @@ export class PrinterService {
       escposData += '--------------------------------\n';
       escposData += '\x1B\x61\x02'; // Right align
       escposData += '\x1B\x45\x01'; // Bold on
-      escposData += `TOTAL: R$ ${orderData.total.toFixed(2)}\n`;
+      escposData += `TOTAL: ${formatBRL(orderData.total)}\n`;
       escposData += '\x1B\x45\x00'; // Bold off
       escposData += '\x1B\x61\x01'; // Center align
       escposData += '--------------------------------\n';

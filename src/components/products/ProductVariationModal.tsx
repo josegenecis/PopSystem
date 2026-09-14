@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Textarea } from '@/components/ui/textarea';
+import { formatBRL } from '@/lib/currency';
 
 interface ProductVariation {
   id: string;
@@ -167,7 +168,7 @@ const ProductVariationModal: React.FC<ProductVariationModalProps> = ({
                         {option.name}
                         {option.price > 0 && (
                           <span className="text-green-600 ml-2">
-                            +R$ {option.price.toFixed(2)}
+                            +{formatBRL(option.price)}
                           </span>
                         )}
                       </Label>
@@ -197,7 +198,7 @@ const ProductVariationModal: React.FC<ProductVariationModalProps> = ({
                         {option.name}
                         {option.price > 0 && (
                           <span className="text-green-600 ml-2">
-                            +R$ {option.price.toFixed(2)}
+                            +{formatBRL(option.price)}
                           </span>
                         )}
                       </Label>
@@ -220,7 +221,7 @@ const ProductVariationModal: React.FC<ProductVariationModalProps> = ({
 
           <div className="flex justify-between items-center pt-4 border-t">
             <div className="text-lg font-bold">
-              Total: R$ {calculateTotal().toFixed(2)}
+              Total: {formatBRL(calculateTotal())}
             </div>
             <div className="flex gap-2">
               <Button variant="outline" onClick={onClose}>

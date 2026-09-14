@@ -384,12 +384,20 @@ const callIfoodForStatus = async (supabase: any, order: any, newStatus: string, 
   }
 
   if (newStatus === 'in_delivery') {
-    return await requestIfoodOrderAction(supabase, settings, ifoodOrderId, 'dispatch')
+    if (deliveredBy !== 'MERCHANT') {
+      return { ok: true, skipped: true, reason: 'ifood_delivery' }
+    }
+    return await requestIfoodOrderAction(
+      supabase,
+      settings,
+      ifoodOrderId,
+      'dispatch',
+      { deliveredBy: 'MERCHANT' },
+    )
   }
 
   if (newStatus === 'cancelled') {
     const cancellationCode = String(payload?.ifoodCancellationCode || '').trim()
-    const cancellationReason = String(payload?.ifoodCancellationReason || '').trim()
     if (!cancellationCode) {
       throw new Error('ifood_cancel_reason_required')
     }
@@ -399,10 +407,7 @@ const callIfoodForStatus = async (supabase: any, order: any, newStatus: string, 
       settings,
       ifoodOrderId,
       'requestCancellation',
-      {
-        reason: cancellationReason || 'Cancelamento solicitado no PopSystem',
-        cancellationCode,
-      },
+      { reason: cancellationCode },
     )
   }
 

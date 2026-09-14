@@ -28,6 +28,7 @@ interface PromotionalBannerProps {
   onSelectProductId?: (productId: string) => void;
   onQuickAddProduct?: (productId: string) => Promise<void> | void;
   linkedProducts?: Record<string, StoryLinkedProduct>;
+  fallbackImage?: string;
 }
 
 const PromotionalBanner: React.FC<PromotionalBannerProps> = ({ 
@@ -37,7 +38,8 @@ const PromotionalBanner: React.FC<PromotionalBannerProps> = ({
   variant = 'wide',
   onSelectProductId,
   onQuickAddProduct,
-  linkedProducts
+  linkedProducts,
+  fallbackImage
 }) => {
   const [banners, setBanners] = useState<Banner[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -202,6 +204,14 @@ const PromotionalBanner: React.FC<PromotionalBannerProps> = ({
   }
   
   if (clickables.length === 0) {
+    if (variant === 'wide' && fallbackImage) {
+      return (
+        <div className="relative h-[180px] w-full overflow-hidden rounded-[22px] border border-white/80 bg-slate-100 shadow-[0_20px_48px_-28px_rgba(15,23,42,0.55)] sm:h-[270px] sm:rounded-[28px] lg:h-[330px]">
+          <img src={fallbackImage} alt="Oferta em destaque" className="h-full w-full object-cover" loading="eager" />
+          <div className="absolute inset-0 bg-gradient-to-r from-black/20 via-transparent to-transparent" />
+        </div>
+      );
+    }
     return null;
   }
   
@@ -275,7 +285,7 @@ const PromotionalBanner: React.FC<PromotionalBannerProps> = ({
 
   return (
     <>
-      <div className="relative w-full h-24 overflow-hidden rounded-[24px] border border-white/80 shadow-[0_16px_36px_-22px_rgba(15,23,42,0.45)] sm:h-28">
+      <div className="relative h-[180px] w-full overflow-hidden rounded-[22px] border border-white/80 bg-slate-100 shadow-[0_20px_48px_-28px_rgba(15,23,42,0.55)] sm:h-[270px] sm:rounded-[28px] lg:h-[330px]">
         <div
           className="flex h-full w-full transition-transform duration-700 ease-in-out"
           style={{ transform: `translateX(-${(currentIndex % clickables.length) * 100}%)` }}

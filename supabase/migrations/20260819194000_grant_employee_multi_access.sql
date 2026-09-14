@@ -11,7 +11,12 @@ begin
   from auth.users users
   where lower(trim(users.email)) = v_email;
 
-  if v_user_count <> 1 then
+  if v_user_count = 0 then
+    raise notice 'Employee account % is not present in this environment; skipping access grant.', v_email;
+    return;
+  end if;
+
+  if v_user_count > 1 then
     raise exception 'Expected exactly one account for %, found %.', v_email, v_user_count;
   end if;
 
@@ -24,7 +29,8 @@ begin
   for update;
 
   if v_subscription_id is null then
-    raise exception 'Subscription not found for employee account %.', v_email;
+    raise notice 'Subscription not found for employee account %; skipping access grant.', v_email;
+    return;
   end if;
 
   update public.subscriptions

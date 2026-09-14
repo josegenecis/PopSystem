@@ -12,6 +12,7 @@ import { useToast } from '@/hooks/use-toast';
 import { format, parseISO, differenceInDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { supabase } from '@/integrations/supabase/client';
+import { formatBRL } from '@/lib/currency';
 import {
   BILLING_PERIODS,
   PLAN_CATALOG,
@@ -172,7 +173,7 @@ const Subscription = () => {
     return Math.max(0, differenceInDays(endDate, new Date()));
   };
 
-  const formatCurrency = (value: number) => `R$ ${Number(value || 0).toFixed(2).replace('.', ',')}`;
+  const formatCurrency = (value: number) => formatBRL(value);
 
   const openCheckout = (planId: number, storeCount = 1, billingPeriod: BillingPeriod = 'monthly') => {
     const plan = getPlanCatalogItem(planId);

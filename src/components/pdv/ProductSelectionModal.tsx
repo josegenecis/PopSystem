@@ -12,6 +12,7 @@ import type { PizzaCategoryConfig } from '@/lib/pizza-pricing';
 import { prefetchSimpleVariations, type Variation } from '@/hooks/useSimpleVariations';
 import { enrichCategoryWithMetadata } from '@/lib/category-metadata';
 import { normalizeImageUrlForDisplay } from '@/utils/normalizeImageUrl';
+import { formatBRL } from '@/lib/currency';
 
 interface Product {
   id: string;
@@ -323,7 +324,7 @@ const ProductSelectionModal: React.FC<ProductSelectionModalProps> = ({
                       </Badge>
                     ) : null}
                     <div className="shrink-0 rounded-full bg-[#F0F7E8] px-2 py-1 text-xs font-bold text-[#0B5137] sm:px-3 sm:text-sm">
-                      R$ {Number(product.price || 0).toFixed(2)}
+                      {formatBRL(product.price)}
                     </div>
                   </button>
                 );
@@ -357,7 +358,7 @@ const ProductSelectionModal: React.FC<ProductSelectionModalProps> = ({
                       )}
                       <div className="flex items-center justify-between">
                         <Badge variant="secondary" className="text-xs">
-                          R$ {product.price.toFixed(2)}
+                          {formatBRL(product.price)}
                         </Badge>
                         {isLowStock && (
                           <Badge variant="destructive" className="text-xs">

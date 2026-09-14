@@ -1,0 +1,40 @@
+name: homologation
+
+on:
+  push:
+    branches:
+      - homologacao
+
+jobs:
+  validate-and-preview:
+    runs-on: ubuntu-latest
+    environment: homologacao
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: npm
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test:fiscal
+      - name: Check Vercel secrets
+        id: vercel-secrets
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.VERCEL_TOKEN }}" ] && [ -n "${{ secrets.VERCEL_ORG_ID }}" ] && [ -n "${{ secrets.VERCEL_PROJECT_ID }}" ]; then
+            echo "can_deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "can_deploy=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Deploy Vercel Preview
+        if: steps.vercel-secrets.outputs.can_deploy == 'true'
+        uses: amondnet/vercel-action@v25
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}
+          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          working-directory: .

@@ -1022,7 +1022,7 @@ const Financeiro = () => {
         await PrinterService.printCashReport({
           title: 'Abertura de Caixa',
           userId: user.id,
-          lines: [`Data/Hora: ${new Date().toLocaleString('pt-BR')}`, `Valor inicial: R$ ${Number(amount).toFixed(2)}`]
+          lines: [`Data/Hora: ${new Date().toLocaleString('pt-BR')}`, `Valor inicial: ${formatBRL(amount)}`]
         });
       } else if (cashOperation === 'close') {
         if (!currentSession) return;
@@ -1092,7 +1092,7 @@ const Financeiro = () => {
           userId: user.id,
           lines: [
             `Data/Hora: ${new Date().toLocaleString('pt-BR')}`,
-            `Valor: R$ ${Number(amount).toFixed(2)}`,
+            `Valor: ${formatBRL(amount)}`,
             cashDescription ? `Descrição: ${cashDescription}` : ''
           ].filter(Boolean) as string[]
         });

@@ -28,6 +28,7 @@ const ResetPassword = lazy(() => import('@/pages/ResetPassword'));
 const LandingPage = lazy(() => import('@/pages/LandingPage'));
 const LegalPage = lazy(() => import('@/pages/LegalPage'));
 const Dashboard = lazy(() => import('@/pages/Dashboard'));
+const Customers = lazy(() => import('@/pages/Customers'));
 const Products = lazy(() => import('@/pages/Products'));
 const Pricing = lazy(() => import('@/pages/Pricing'));
 const Orders = lazy(() => import('@/pages/Orders'));
@@ -48,6 +49,7 @@ const Ingredientes = lazy(() => import('@/pages/Ingredientes'));
 const InteligenciaCMV = lazy(() => import('@/pages/InteligenciaCMV'));
 const Fiscal = lazy(() => import('@/pages/Fiscal'));
 const Financeiro = lazy(() => import('@/pages/Financeiro'));
+const AccountantPortal = lazy(() => import('@/pages/AccountantPortal'));
 const Despesas = lazy(() => import('@/pages/Despesas'));
 const ContasReceber = lazy(() => import('@/pages/ContasReceber'));
 const SecurityDashboard = lazy(() => import('@/pages/SecurityDashboard'));
@@ -104,6 +106,16 @@ function AppLoadingFallback() {
       </div>
     </div>
   );
+}
+
+function PwaEntry() {
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) return <AppLoadingFallback />;
+
+  return user
+    ? <Navigate to="/operator-login" replace />
+    : <Navigate to="/login" state={{ from: { pathname: '/operator-login' } }} replace />;
 }
 
 const Router = (() => {
@@ -166,6 +178,7 @@ function AppContent() {
       
       {/* Rotas que precisam de autenticação */}
       <Route path="/" element={isDesktopRuntime ? <Navigate to="/operator-login" replace /> : <Index />} />
+      <Route path="/pwa" element={<PwaEntry />} />
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Navigate to="/login?tab=register" replace />} />
       <Route path="/reset-password" element={<ResetPassword />} />
@@ -182,6 +195,7 @@ function AppContent() {
       <Route element={<RouteGuard><OperatorGate><Outlet /></OperatorGate></RouteGuard>}>
         <Route element={<DashboardLayout><Outlet /></DashboardLayout>}>
           <Route path="/dashboard" element={<OperatorRoute area="dashboard"><FeatureRoute feature="dashboard"><Dashboard /></FeatureRoute></OperatorRoute>} />
+          <Route path="/clientes" element={<OperatorRoute area="customers"><Customers /></OperatorRoute>} />
           <Route path="/produtos" element={<OperatorRoute area="products"><FeatureRoute feature="products"><Products /></FeatureRoute></OperatorRoute>} />
           <Route path="/precos" element={<OperatorRoute area="products"><FeatureRoute feature="products"><Pricing /></FeatureRoute></OperatorRoute>} />
           <Route path="/estoque" element={<OperatorRoute area="stock"><FeatureRoute feature="stock"><Ingredientes /></FeatureRoute></OperatorRoute>} />
@@ -210,6 +224,7 @@ function AppContent() {
           <Route path="/caixa" element={<OperatorRoute area="cash"><FeatureRoute feature="finance"><Financeiro /></FeatureRoute></OperatorRoute>} />
           <Route path="/financeiro" element={<OperatorRoute area="finance"><FeatureRoute feature="finance"><Financeiro /></FeatureRoute></OperatorRoute>} />
           <Route path="/financeiro/receber" element={<OperatorRoute area="finance"><FeatureRoute feature="finance"><ContasReceber /></FeatureRoute></OperatorRoute>} />
+          <Route path="/contador" element={<OperatorRoute area="finance"><FeatureRoute feature="finance"><AccountantPortal /></FeatureRoute></OperatorRoute>} />
           <Route path="/financeiro/despesas" element={<Navigate to="/despesas" replace />} />
           <Route path="/despesas" element={<OperatorRoute area="expenses"><FeatureRoute feature="finance"><Despesas /></FeatureRoute></OperatorRoute>} />
           <Route path="/pagamentos" element={<OperatorRoute area="pix"><FeatureRoute feature="pix"><div className="space-y-4"><h1 className="text-2xl font-bold tracking-tight">Formas de Pagamento</h1><PaymentMethodsSettings /></div></FeatureRoute></OperatorRoute>} />
@@ -294,9 +309,6 @@ function HardwareAutoConnect() {
 
 function CashDrawerShortcut() {
   useEffect(() => {
-    const api = (window as any)?.electronAPI;
-    if (!api?.isElectron) return;
-
     const handleKeyDown = async (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const isTyping = ['INPUT', 'TEXTAREA', 'SELECT'].includes(String(target?.tagName || '')) || Boolean(target?.isContentEditable);

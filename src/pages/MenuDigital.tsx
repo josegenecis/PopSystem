@@ -17,7 +17,7 @@ import { SimpleVariationModal } from '@/components/menu/SimpleVariationModal';
 import { SimpleCartModal } from '@/components/menu/SimpleCartModal';
 import CartBottomBar from '@/components/menu/CartBottomBar';
 import { Input } from '@/components/ui/input';
-import { Search } from 'lucide-react';
+import { MapPin, Search, ShoppingBag, SlidersHorizontal } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import HighlightsSection from '@/components/menu/HighlightsSection';
@@ -29,6 +29,7 @@ import { Badge } from '@/components/ui/badge';
 import { getStoreOpenInfo } from '@/lib/storeHours';
 import { normalizeImageUrlForDisplay } from '@/utils/normalizeImageUrl';
 import { notifyOrderCreatedById } from '@/utils/orderNotifications';
+import { createMarketingContent, trackMarketingEvent } from '@/lib/marketingTracking';
 // import ClubDiscountBanner from '@/components/menu/ClubDiscountBanner';
 
 interface Product {
@@ -53,6 +54,7 @@ interface Category {
   name: string;
   description?: string;
   display_order: number;
+  totem_image_url?: string;
   is_pizza?: boolean;
   pizza_half_price_mode?: 'highest' | 'split_halves';
 }
@@ -84,6 +86,7 @@ const MenuDigital = () => {
   const [activeCategory, setActiveCategory] = useState<string>('');
   const [openingProductId, setOpeningProductId] = useState<string | null>(null);
   const warnedStockRef = useRef<Set<string>>(new Set());
+  const lastTrackedSearchRef = useRef('');
   const navigate = useNavigate();
 
   // Buscar dados do menu
@@ -144,8 +147,6 @@ const MenuDigital = () => {
     root.style.setProperty('--menu-tag', tag);
     root.style.setProperty('--menu-bg', background);
   }, [profile]);
-
-  const bannerFit = ((profile as any)?.theme_config?.bannerFit === 'contain') ? 'contain' : 'cover';
 
   useEffect(() => {
     if (!googleKey) return;
@@ -288,11 +289,58 @@ const MenuDigital = () => {
     }
   }, [categories, activeCategory]);
 
+  useEffect(() => {
+    const search = searchQuery.trim();
+    if (!finalUserId || search.length < 2) return;
+
+    const timer = window.setTimeout(() => {
+      if (lastTrackedSearchRef.current === search) return;
+      lastTrackedSearchRef.current = search;
+      trackMarketingEvent('Search', {
+        search_string: search,
+        content_category: 'cardapio',
+      }, { scope: finalUserId });
+    }, 700);
+
+    return () => window.clearTimeout(timer);
+  }, [finalUserId, searchQuery]);
+
+  const getProductCategoryName = (product: Product) =>
+    categories.find((category) => String(category.id) === String(product.category_id))?.name || 'Cardápio';
+
+  const trackProductView = (product: Product) => {
+    const price = Number(product.price || 0);
+    trackMarketingEvent('ViewContent', {
+      content_ids: [String(product.id)],
+      content_name: product.name,
+      content_category: getProductCategoryName(product),
+      content_type: 'product',
+      contents: [createMarketingContent(product.id, 1, price)],
+      value: price,
+      currency: 'BRL',
+    }, { scope: finalUserId });
+  };
+
+  const trackProductAdded = (product: Product, quantity = 1, variationPrice = 0) => {
+    const unitPrice = Number(product.price || 0) + Number(variationPrice || 0);
+    trackMarketingEvent('AddToCart', {
+      content_ids: [String(product.id)],
+      content_name: product.name,
+      content_category: getProductCategoryName(product),
+      content_type: 'product',
+      contents: [createMarketingContent(product.id, quantity, unitPrice)],
+      value: unitPrice * Math.max(1, Number(quantity) || 1),
+      currency: 'BRL',
+    }, { scope: finalUserId });
+  };
+
   const handleProductClick = async (product: Product) => {
     if (!finalUserId) {
       console.error('❌ MenuDigital - userId não encontrado');
       return;
     }
+
+    trackProductView(product);
 
     const cachedVariationsReady = isSimpleVariationReady(product.id);
     const cachedVariations = cachedVariationsReady ? getCachedSimpleVariations(product.id) : [];
@@ -331,6 +379,7 @@ const MenuDigital = () => {
 
       if (variationPresence === 'none') {
         addToCart(product, 1, [], '', 0);
+        trackProductAdded(product);
         toast({
           title: 'Adicionado ao carrinho',
           description: `${product.name} foi adicionado com sucesso.`,
@@ -362,6 +411,7 @@ const MenuDigital = () => {
         }
 
         addToCart(product, 1, [], '', 0);
+        trackProductAdded(product);
         toast({
           title: 'Adicionado ao carrinho',
           description: `${product.name} foi adicionado com sucesso.`,
@@ -377,6 +427,7 @@ const MenuDigital = () => {
       }
 
       addToCart(product, 1, [], '', 0);
+      trackProductAdded(product);
       toast({
         title: 'Adicionado ao carrinho',
         description: `${product.name} foi adicionado com sucesso.`,
@@ -411,6 +462,7 @@ const MenuDigital = () => {
       }
     }
     addToCart(product, quantity, variations, notes, variationPrice, optionDetails);
+    trackProductAdded(product, quantity, variationPrice);
     setShowVariationModal(false);
     setSelectedProduct(null);
   };
@@ -456,6 +508,7 @@ const MenuDigital = () => {
 
     if (getSimpleVariationPresence(product.id) === 'none') {
       addToCart(product, 1, [], '', 0);
+      trackProductAdded(product);
       toast({
         title: 'Adicionado ao carrinho',
         description: `${product.name} foi adicionado com sucesso.`,
@@ -476,6 +529,7 @@ const MenuDigital = () => {
     }
 
     addToCart(product, 1, [], '', 0);
+    trackProductAdded(product);
     toast({
       title: 'Adicionado ao carrinho',
       description: `${product.name} foi adicionado com sucesso.`,
@@ -628,6 +682,32 @@ const MenuDigital = () => {
       }
 
       if (data?.id) {
+        type PurchasedItem = {
+          product_id?: string | number | null;
+          quantity?: string | number | null;
+          price?: string | number | null;
+          total?: string | number | null;
+        };
+        const purchasedItems = ((Array.isArray(orderData.items) ? orderData.items : []) as PurchasedItem[])
+          .filter((item) => item.product_id !== null && item.product_id !== undefined && String(item.product_id).trim() !== '');
+        const purchaseValue = Number(orderData.total ?? orderData.total_amount ?? 0);
+        trackMarketingEvent('Purchase', {
+          order_id: String(data.id),
+          content_type: 'product',
+          content_ids: purchasedItems.map((item) => String(item.product_id)),
+          contents: purchasedItems.map((item) => createMarketingContent(
+            item.product_id,
+            item.quantity,
+            Number(item.price ?? (Number(item.total || 0) / Math.max(1, Number(item.quantity) || 1))),
+          )),
+          num_items: purchasedItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0),
+          value: purchaseValue,
+          currency: 'BRL',
+        }, {
+          scope: finalUserId,
+          eventId: `popsystem-purchase-${data.id}`,
+        });
+
         void (async () => {
           try {
             await notifyOrderCreatedById(data.id);
@@ -722,6 +802,15 @@ const MenuDigital = () => {
           }]
         : []);
 
+  const visualCategories = categories.map((category) => ({
+    ...category,
+    image_url: normalizeImageUrlForDisplay(category.totem_image_url || '') ||
+      normalizeImageUrlForDisplay(products.find((product) => product.category_id === category.id)?.image_url || '') || null
+  }));
+  const featuredProducts = highlights.length > 0
+    ? highlights
+    : [...products].filter((product) => Number(product.order_count || 0) > 0 && Boolean(normalizeImageUrlForDisplay(product.image_url || ''))).sort((a, b) => Number(b.order_count || 0) - Number(a.order_count || 0)).slice(0, 8);
+
   if (menuLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -769,43 +858,18 @@ const MenuDigital = () => {
   }
 
   return (
-    <div className="min-h-screen pb-24" style={{ backgroundColor: 'var(--menu-bg, #F7EEDF)' }}>
+    <div className="min-h-screen pb-28" style={{ backgroundColor: 'color-mix(in srgb, var(--menu-bg, #F7EEDF) 78%, white)' }}>
       <MarketingPixels userId={finalUserId} />
-      <div className="relative">
-        <div className="relative h-40 sm:h-48 w-full overflow-hidden" style={{ backgroundColor: 'var(--menu-secondary, #063D2E)' }}>
-          {(profile as any)?.banner_url ? (
-            <img
-              src={String((profile as any).banner_url)}
-              alt={profile.restaurant_name || 'Banner'}
-              className={`absolute inset-0 w-full h-full ${bannerFit === 'contain' ? 'object-contain' : 'object-cover'}`}
-              loading="eager"
-              fetchPriority="high"
-              decoding="async"
-            />
-          ) : (profile as any)?.logo_url ? (
-            <img
-              src={String((profile as any).logo_url)}
-              alt={profile.restaurant_name || 'Logo'}
-              className="absolute inset-0 w-full h-full object-cover opacity-20 blur-2xl scale-110"
-              loading="eager"
-              fetchPriority="high"
-              decoding="async"
-            />
-          ) : null}
-          <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-black/0 to-white/0" />
-        </div>
-
-        <div className="max-w-4xl mx-auto px-4 -mt-14 sm:-mt-16 relative z-10">
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 sm:p-5">
-            <div className="flex items-start gap-3">
-              <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full border-4 border-white shadow-sm overflow-hidden bg-gray-100 flex items-center justify-center flex-shrink-0 -mt-9 sm:-mt-10">
+      <div className="mx-auto max-w-6xl px-3 pb-3 pt-3 sm:px-6 sm:pb-4 sm:pt-8">
+          <header className="rounded-[22px] border border-white/80 bg-white/90 p-3 shadow-[0_18px_50px_-35px_rgba(15,23,42,.45)] backdrop-blur sm:rounded-[28px] sm:p-5">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 flex-none items-center justify-center overflow-hidden rounded-xl bg-[#f5f2eb] shadow-sm sm:h-16 sm:w-16 sm:rounded-2xl">
                 {(profile as any)?.logo_url ? (
                   <img
                     src={String((profile as any).logo_url)}
                     alt={profile.restaurant_name || 'Logo'}
-                    className="w-full h-full object-cover"
+                    className="h-full w-full object-cover"
                     loading="eager"
-                    fetchPriority="high"
                     decoding="async"
                   />
                 ) : (
@@ -814,56 +878,49 @@ const MenuDigital = () => {
                   </div>
                 )}
               </div>
-              <div className="flex-1 min-w-0">
-                <h1 className="text-lg sm:text-xl font-bold leading-tight" style={{ color: 'var(--menu-secondary, #063D2E)' }}>
+              <div className="min-w-0 flex-1">
+                <p className="text-[8px] font-bold uppercase tracking-[.16em] text-slate-400 sm:text-[10px]">Bem-vindo ao cardápio</p>
+                <h1 className="line-clamp-2 text-sm font-black leading-tight sm:text-2xl" style={{ color: 'var(--menu-secondary, #063D2E)' }}>
                   {profile?.restaurant_name || 'Cardápio'}
                 </h1>
-                <div className="mt-1 flex items-center gap-2">
+                <div className="mt-1 flex flex-wrap items-center gap-2">
                   <Badge className={storeOpenInfo.isOpen ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100' : 'bg-red-100 text-red-700 hover:bg-red-100'}>
                     {storeOpenInfo.label}
                   </Badge>
-                  <span className="text-xs font-medium text-gray-500">{storeOpenInfo.detail}</span>
+                  <span className="text-[9px] font-medium text-gray-500 sm:text-xs">{storeOpenInfo.detail}</span>
                 </div>
-                {((profile as any)?.address || (profile as any)?.phone) && (
-                  <div className="text-xs mt-1" style={{ color: 'var(--menu-secondary, #063D2E)', opacity: 0.8 }}>
-                    {(profile as any)?.address ? String((profile as any).address) : ''}
-                    {(profile as any)?.address && (profile as any)?.phone ? ' • ' : ''}
-                    {(profile as any)?.phone ? String((profile as any).phone) : ''}
-                  </div>
-                )}
-                {(profile as any)?.description && (
-                  <div className="text-xs mt-2 line-clamp-2" style={{ color: 'var(--menu-secondary, #063D2E)', opacity: 0.7 }}>
-                    {String((profile as any).description)}
-                  </div>
-                )}
               </div>
+              <button type="button" onClick={() => setShowCartModal(true)} className="relative flex h-10 w-10 flex-none items-center justify-center rounded-xl bg-[#f8f6f1] shadow-sm sm:h-12 sm:w-12 sm:rounded-2xl" aria-label="Abrir sacola">
+                <ShoppingBag className="h-5 w-5" style={{ color: 'var(--menu-secondary, #063D2E)' }} />
+                {getCartItemCount() > 0 && <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-black text-white" style={{ backgroundColor: 'var(--menu-accent, #EF6C20)' }}>{getCartItemCount()}</span>}
+              </button>
             </div>
-
-            <div className="mt-4">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+            {(profile as any)?.address && <p className="mt-2 flex items-center gap-1 truncate text-[9px] text-slate-500 sm:mt-3 sm:gap-1.5 sm:text-xs"><MapPin className="h-3 w-3 flex-none sm:h-3.5 sm:w-3.5" />{String((profile as any).address)}</p>}
+            <div className="mt-3 flex gap-2 sm:mt-4">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                 <Input
                   placeholder={`Buscar em ${profile?.restaurant_name || 'Cardápio'}...`}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 pr-4 h-11 w-full rounded-full bg-white text-sm transition-all focus:ring-2"
+                  className="h-10 w-full rounded-xl border-0 bg-[#f7f5f0] pl-9 pr-3 text-[11px] shadow-inner transition-all focus:ring-2 sm:h-12 sm:rounded-2xl sm:pl-10 sm:pr-4 sm:text-sm"
                   style={{
                     borderColor: 'color-mix(in srgb, var(--menu-primary, #85C441) 40%, #d1d5db)',
                     boxShadow: '0 1px 0 rgba(0,0,0,0.02)'
                   }}
                 />
               </div>
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#f7f5f0] text-slate-600 sm:h-12 sm:w-12 sm:rounded-2xl"><SlidersHorizontal className="h-4 w-4 sm:h-5 sm:w-5" /></div>
             </div>
-          </div>
-
-        </div>
+          </header>
       </div>
 
-      <div className="max-w-4xl mx-auto px-4">
-        <div className="mt-4">
+      <div className="mx-auto max-w-6xl px-3 sm:px-6">
+        <div>
           <MarketingBanners
             restaurantId={finalUserId}
             linkedProducts={linkedProducts}
+            fallbackImage={normalizeImageUrlForDisplay(String((profile as any)?.banner_url || '')) || undefined}
             onQuickAddProduct={handleQuickAddFromBanner}
             onSelectProductId={(productId) => {
               const p = (products as any[]).find((x: any) => String(x?.id) === String(productId));
@@ -872,29 +929,29 @@ const MenuDigital = () => {
           />
         </div>
 
-        <div className="bg-transparent sticky top-0 z-40 mt-3 pb-2">
+        <div className="sticky top-0 z-40 mt-2 rounded-3xl bg-[color-mix(in_srgb,var(--menu-bg,#F7EEDF)_78%,white)]/95 backdrop-blur sm:mt-3 sm:py-1">
           {categories.length > 0 && (
             <CategoryTabs
-              categories={categories}
+              categories={visualCategories}
               activeCategory={activeCategory}
               onCategoryChange={setActiveCategory}
             />
           )}
         </div>
 
-        <div className="h-3" />
+        <div className="h-3 sm:h-5" />
         {/* Seção de Destaques */}
-        {highlights.length > 0 && (
+        {featuredProducts.length > 0 && (
           <HighlightsSection
-            products={highlights}
+            products={featuredProducts}
             onProductClick={handleProductClick}
           />
         )}
 
-        <div className="h-3" />
+        <div className="h-1 sm:h-3" />
 
         {/* Produtos por Categoria */}
-        <div className="space-y-8">
+        <div className="space-y-6 sm:space-y-8">
           {productsByCategory.map((category) => (
             <section
               key={category.id}
@@ -904,17 +961,18 @@ const MenuDigital = () => {
               }}
               className="scroll-mt-32"
             >
-              <h2 className="text-lg font-bold mb-3" style={{ color: 'var(--menu-secondary, #063D2E)' }}>
+              <h2 className="mb-1 text-lg font-black sm:text-2xl" style={{ color: 'var(--menu-secondary, #063D2E)' }}>
                 {category.name}
               </h2>
-              <div className="space-y-3">
+              {category.description && <p className="mb-4 text-sm text-slate-500">{category.description}</p>}
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-5 lg:grid-cols-4">
                 {category.products.map((product) => (
                   <ProductCard
                     key={product.id}
                     product={product}
                     onProductClick={handleProductClick}
                     isAdding={openingProductId === product.id}
-                    layout="list"
+                    layout="grid"
                   />
                 ))}
               </div>

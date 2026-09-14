@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import './index.css'
+import { recoverFromStaleChunk } from './utils/chunkRecovery'
 
 if (import.meta.env.PROD) {
   const noop = () => {};
@@ -78,10 +79,26 @@ const mainDomains = new Set([
 const hostname = window.location.hostname;
 const isMainDomain = mainDomains.has(hostname) || hostname.endsWith('.vercel.app');
 const isDesktopRuntime = Boolean(window.electronAPI?.isElectron);
+
+// Instalações antigas podem ter salvo "/" como URL inicial. Dentro do PWA,
+// essa entrada deve abrir o fluxo operacional sem alterar a landing no navegador.
+const isStandalonePwa = !isDesktopRuntime && (
+  window.matchMedia('(display-mode: standalone)').matches
+  || Boolean((navigator as Navigator & { standalone?: boolean }).standalone)
+);
+if (isMainDomain && isStandalonePwa && window.location.pathname === '/') {
+  window.history.replaceState(window.history.state, '', '/pwa?source=installed');
+}
+
 const isMarketingEntry = !isDesktopRuntime && isMainDomain && marketingPaths.has(window.location.pathname);
 
 const root = createRoot(document.getElementById('root')!);
 
-void (isMarketingEntry ? import('./LandingApp.tsx') : import('./App.tsx')).then(({ default: RootApp }) => {
-  root.render(<RootApp />);
-});
+void (isMarketingEntry ? import('./LandingApp.tsx') : import('./App.tsx'))
+  .then(({ default: RootApp }) => {
+    root.render(<RootApp />);
+  })
+  .catch(async (error) => {
+    if (await recoverFromStaleChunk(error)) return;
+    throw error;
+  });

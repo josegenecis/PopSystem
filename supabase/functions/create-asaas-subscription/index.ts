@@ -276,12 +276,26 @@ serve(async (req) => {
       .maybeSingle();
 
     const fallback = fallbackPlans[planId] || fallbackPlans[2];
+    const databasePrice = money(planRow?.price ?? fallback.price);
+    const databaseIncludedStores = Number(planRow?.included_stores ?? fallback.includedStores);
+    const databaseExtraStorePrice = money(planRow?.extra_store_price ?? fallback.extraStorePrice);
+
+    if (
+      databasePrice !== fallback.price
+      || databaseIncludedStores !== fallback.includedStores
+      || databaseExtraStorePrice !== fallback.extraStorePrice
+    ) {
+      throw new Error(
+        "A tabela de preços do checkout está desatualizada. Nenhuma cobrança foi criada. Atualize a página e tente novamente.",
+      );
+    }
+
     const plan: PlanConfig = {
       id: Number(planRow?.id || fallback.id),
       name: String(planRow?.name || fallback.name),
-      price: money(planRow?.price ?? fallback.price),
-      includedStores: Number(planRow?.included_stores || fallback.includedStores),
-      extraStorePrice: money(planRow?.extra_store_price ?? fallback.extraStorePrice),
+      price: fallback.price,
+      includedStores: fallback.includedStores,
+      extraStorePrice: fallback.extraStorePrice,
     };
 
     const additionalStoreCount = Math.max(0, storeCount - plan.includedStores);
@@ -683,6 +697,11 @@ serve(async (req) => {
         : await supabaseAdmin.from("subscriptions").insert(subscriptionPayload);
 
     if (subscriptionError) {
+      await asaasFetch(`/subscriptions/${encodeURIComponent(asaasSubscription.id)}`, {
+        method: "DELETE",
+      }).catch((cleanupError) => {
+        console.error("Não foi possível cancelar a cobrança órfã no Asaas:", cleanupError);
+      });
       throw new Error(`Cobrança criada no Asaas, mas falhou ao salvar no PopSystem: ${subscriptionError.message}`);
     }
 

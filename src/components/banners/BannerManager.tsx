@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { compressImageFileToMaxBytes } from '@/utils/imageCompression';
 import { prepareBannerVideoFile } from '@/utils/videoCompression';
 import AdjustableImageDialog from '@/components/media/AdjustableImageDialog';
+import { formatBRL } from '@/lib/currency';
 
 interface Banner {
   id: string;
@@ -563,7 +564,7 @@ const BannerManager = () => {
                           <SelectItem value="__none__">Nenhum</SelectItem>
                           {products.map((p) => (
                             <SelectItem key={p.id} value={p.id}>
-                              {p.name} • R$ {Number(p.price || 0).toFixed(2)}
+                              {p.name} • {formatBRL(p.price)}
                             </SelectItem>
                           ))}
                         </SelectContent>

@@ -8,6 +8,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { formatBRL } from '@/lib/currency';
 
 interface LoyaltyCustomer {
   id: string;
@@ -122,7 +123,7 @@ const LoyaltyCard: React.FC<LoyaltyCardProps> = ({ customer, onRewardRedeem }) =
               <div className="text-sm text-blue-100">Visitas</div>
             </div>
             <div>
-              <div className="text-2xl font-bold">R$ {customer.total_spent?.toFixed(2) || '0.00'}</div>
+              <div className="text-2xl font-bold">{formatBRL(customer.total_spent)}</div>
               <div className="text-sm text-blue-100">Total Gasto</div>
             </div>
           </div>

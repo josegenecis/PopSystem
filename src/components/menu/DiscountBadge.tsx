@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatBRL } from '@/lib/currency';
 
 interface DiscountBadgeProps {
   originalPrice: number;
@@ -14,10 +15,10 @@ const DiscountBadge: React.FC<DiscountBadgeProps> = ({
   return (
     <div className="flex items-center gap-2 flex-wrap">
       <span className="font-bold text-black text-lg">
-        R$ {discountedPrice.toFixed(2)}
+        {formatBRL(discountedPrice)}
       </span>
       <span className="text-gray-400 line-through text-sm">
-        R$ {originalPrice.toFixed(2)}
+        {formatBRL(originalPrice)}
       </span>
       <span className="bg-orange-600 text-white px-2 py-1 rounded-full text-xs font-medium">
         -{discountPercentage}%

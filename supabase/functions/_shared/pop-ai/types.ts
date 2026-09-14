@@ -62,6 +62,13 @@ export interface PopAiIncomingMessage {
   text: string;
   media?: any;
   providerMessageId?: string | null;
+  messageType?: string | null;
+  quotedProviderMessageId?: string | null;
+  persistedInbound?: {
+    conversationId: string;
+    conversation?: any;
+    messageId?: string;
+  } | null;
 }
 
 export interface PopAiEngineResult {

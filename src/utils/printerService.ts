@@ -1593,9 +1593,14 @@ async function openDrawerPopConnect() {
 
 async function openDrawerConnected() {
   const api = typeof window !== 'undefined' ? (window as any)?.electronAPI : null;
+  // O Pop Connect é a fonte compartilhada de configuração entre PWA e
+  // desktop. Tente-o primeiro para que a gaveta escolhida nele também funcione
+  // dentro do aplicativo instalado.
+  const bridgeResult = await openDrawerPopConnect();
+  if (bridgeResult.success) return bridgeResult;
   if (api?.openCashDrawer) return openDrawerElectron();
   if (usbDevice?.opened) return openDrawerWebUsb();
-  return openDrawerPopConnect();
+  return bridgeResult;
 }
 
 function buildPopConnectReceiptPayload(order: any, config: NormalizedPrintConfig) {
@@ -1606,9 +1611,9 @@ function buildPopConnectReceiptPayload(order: any, config: NormalizedPrintConfig
   }, 0);
   return {
     store: order.store || null,
-    // O Pop Connect renderiza este HTML e envia o bitmap em RAW para manter
-    // exatamente o mesmo layout térmico usado pelo aplicativo desktop.
-    rendered_html: buildOrderHtml(order, config, order.store),
+    // O cupom ESC/POS textual é entendido inclusive por térmicas que aceitam o
+    // trabalho raster na fila do Windows, mas descartam a imagem sem imprimir.
+    // O payload abaixo já carrega todo o conteúdo do layout operacional.
     receipt: {
       paper_width: config.paper_width,
       font_size: config.font_size,
@@ -1856,6 +1861,21 @@ export const PrinterService = {
       return;
     }
 
+    // Pop Connect é o caminho principal em PWA e desktop. Assim os dois usam
+    // exatamente a mesma impressora configurada no aplicativo auxiliar.
+    const popConnectResult = await printPopConnect(enrichedOrder, config);
+    if (popConnectResult.printed) {
+      if (options.openCashDrawer) {
+        const drawerResult = await openDrawerPopConnect();
+        if (!drawerResult.success) {
+          console.warn('Cupom impresso, mas a gaveta não respondeu:', drawerResult.error || drawerResult);
+        }
+      }
+      return { success: true };
+    }
+
+    // Se o Pop Connect não estiver disponível, o desktop ainda mantém seu
+    // caminho nativo como contingência.
     if (isElectron) {
       const resp = await printElectron(enrichedOrder, config, options);
       if (!resp.success) {
@@ -1873,10 +1893,8 @@ export const PrinterService = {
       return { success: true };
     }
 
-    // 2. O Pop Connect usa a impressora salva no aplicativo e imprime sem
-    // abrir o diálogo nativo do navegador.
-    const popConnectResult = await printPopConnect(enrichedOrder, config);
-    if (popConnectResult.printed) return { success: true };
+    // No navegador, uma falha confirmada pelo Pop Connect deve ser mostrada em
+    // vez de abrir o diálogo nativo e exigir intervenção do operador.
     if (popConnectResult.available) {
       const message = popConnectResult.printerConnected
         ? 'O Pop Connect não conseguiu imprimir. Confira se a impressora está ligada e disponível.'

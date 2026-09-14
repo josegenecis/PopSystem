@@ -1495,16 +1495,26 @@ const PDV = () => {
     const api = (window as any)?.electronAPI;
     const scalePort = localStorage.getItem('hw.scale.port') || '';
     try {
-      let reading: { weight: number; unit?: string };
-      if (api?.readWeight && scalePort) {
-        const resp = await api.readWeight(scalePort, 1800);
-        if (!resp?.success) throw new Error(resp?.error || resp?.message || 'Balança não identificada');
-        reading = { weight: Number(resp.weight || 0), unit: resp.unit };
-      } else if (pwaScaleService.isConnected()) {
-        reading = await pwaScaleService.getReading(1800);
-      } else {
+      let reading: { weight: number; unit?: string } | null = null;
+
+      // O Pop Connect mantém a leitura contínua e entrega o último peso sem o
+      // atraso de abrir novamente a porta serial. Ele também compartilha a
+      // mesma balança entre PWA e desktop.
+      try {
         reading = await readWeightFromPopConnect();
+      } catch {
+        // Contingência para instalações desktop que ainda usam a conexão
+        // serial interna ou navegadores com Web Serial já autorizado.
       }
+
+      if (!reading && api?.readWeight && scalePort) {
+        const resp = await api.readWeight(scalePort, 1800);
+        if (resp?.success) reading = { weight: Number(resp.weight || 0), unit: resp.unit };
+      }
+      if (!reading && pwaScaleService.isConnected()) {
+        reading = await pwaScaleService.getReading(1800);
+      }
+      if (!reading) throw new Error('Balança não identificada');
       const weightKg = normalizeScaleWeightToKg(reading.weight, reading.unit);
       if (!weightKg) throw new Error('Peso zerado');
       addWeightedProductToCart(product, weightKg);

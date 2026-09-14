@@ -57,8 +57,11 @@ const nativeBridgePath = (...segments) => app.isPackaged
   : path.join(__dirname, '..', 'native-bridge', ...segments)
 
 const stopBridge = () => {
-  try { bridgeProc?.kill() } catch {}
+  const child = bridgeProc
+  if (!child) return null
   bridgeProc = null
+  try { child.kill() } catch {}
+  return child
 }
 
 const startBridge = (token) => {
@@ -78,12 +81,31 @@ const startBridge = (token) => {
   }
 
   const serverPath = nativeBridgePath('server.js')
-  bridgeProc = spawn(process.execPath, [serverPath], { env, stdio: 'ignore' })
-  bridgeProc.on('error', (error) => {
+  const child = spawn(process.execPath, [serverPath], { env, stdio: 'ignore' })
+  bridgeProc = child
+  child.on('error', (error) => {
     logStartupError('native bridge process', error)
-    bridgeProc = null
+    if (bridgeProc === child) bridgeProc = null
   })
-  bridgeProc.on('exit', () => { bridgeProc = null })
+  child.on('exit', () => {
+    if (bridgeProc === child) bridgeProc = null
+  })
+}
+
+const restartBridge = async (token) => {
+  const previous = stopBridge()
+  if (previous && previous.exitCode == null) {
+    await new Promise((resolve) => {
+      const timeout = setTimeout(resolve, 1200)
+      previous.once('exit', () => {
+        clearTimeout(timeout)
+        resolve()
+      })
+    })
+  }
+  startBridge(token)
+  // O processo nativo precisa abrir a porta 8766 antes do primeiro comando.
+  await new Promise((resolve) => setTimeout(resolve, 450))
 }
 
 const fetchJson = async (url, options) => {
@@ -289,7 +311,7 @@ ipcMain.handle('bridge:pollPairing', async () => {
 
 ipcMain.handle('bridge:start', async () => {
   const cfg = readConfig()
-  startBridge(cfg.token || '')
+  await restartBridge(cfg.token || '')
   return { ok: true }
 })
 
@@ -335,15 +357,19 @@ ipcMain.handle('bridge:getPrinterSelection', async () => {
 ipcMain.handle('bridge:setPrinterSelection', async (_ev, payload) => {
   const cfg = readConfig()
   const printerName = payload?.printerName ? String(payload.printerName) : ''
+  const selectionChanged = printerName !== String(cfg?.printerName || '')
   writeConfig({ ...cfg, printerName })
-  startBridge(cfg?.token || '')
+  if (selectionChanged || !bridgeProc) {
+    await restartBridge(cfg?.token || '')
+  }
   return { ok: true }
 })
 
 ipcMain.handle('bridge:testPrinter', async () => {
   const cfg = readConfig()
   if (!cfg?.printerName) return { ok: false, error: 'printer_not_selected' }
-  await bridgeCommand('connect_printer', { transport: 'system', address: cfg.printerName }, 'printer_connected')
+  const connected = await bridgeCommand('connect_printer', { transport: 'system', address: cfg.printerName }, 'printer_connected')
+  if (!connected?.ok) return connected
   return await bridgeCommand('test_print', {}, 'printed_test', 10000)
 })
 
@@ -375,7 +401,7 @@ ipcMain.handle('bridge:setScaleSelection', async (_event, payload) => {
     baudRate: Number(payload?.baudRate || defaultBaudRate),
   }
   writeConfig({ ...cfg, scale })
-  if (bridgeProc) startBridge(cfg.token || '')
+  if (bridgeProc) await restartBridge(cfg.token || '')
   return { ok: true, scale }
 })
 

@@ -1,4 +1,9 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node'
+type ApiResponse = {
+  status: (statusCode: number) => ApiResponse
+  json: (body: unknown) => unknown
+  setHeader: (name: string, value: string) => unknown
+  redirect: (statusCode: number, location: string) => unknown
+}
 
 type GitHubAsset = {
   name?: string
@@ -14,7 +19,7 @@ type GitHubRelease = {
 
 const RELEASES_URL = 'https://api.github.com/repos/josegenecis/PopSystem/releases?per_page=100'
 
-export default async function handler(_req: VercelRequest, res: VercelResponse) {
+export default async function handler(_req: unknown, res: ApiResponse) {
   try {
     const response = await fetch(RELEASES_URL, {
       headers: {

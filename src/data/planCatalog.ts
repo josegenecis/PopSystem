@@ -68,11 +68,11 @@ const ESSENCIAL_FEATURE_GROUPS: PlanFeatureGroup[] = [
   },
   {
     title: 'Gestão da operação',
-    features: ['Fechamento de caixa', 'Financeiro básico e despesas', 'Relatórios principais', 'Usuários, equipe e permissões', 'Motoboys e entregas'],
+    features: ['Fechamento de caixa', 'Financeiro básico e despesas', 'Delivery com áreas e taxas', 'Relatórios principais', 'Usuários, equipe e permissões', 'Motoboys e entregas'],
   },
   {
     title: 'Estoque, impressão e acesso',
-    features: ['Controle de estoque essencial', 'App desktop', 'Impressoras e balanças', 'Uma loja incluída', 'Suporte PopSystem'],
+    features: ['Controle de estoque essencial', 'App desktop', 'Impressoras e balanças', 'Configurações gerais da loja', 'Uma loja incluída', 'Suporte PopSystem'],
   },
 ];
 
@@ -83,27 +83,48 @@ const PRO_FEATURE_GROUPS: PlanFeatureGroup[] = [
   },
   {
     title: 'Atendimento e produção',
-    features: ['Mesas, comandas e app garçom', 'KDS e tela de cozinha', 'Recursos avançados de produção'],
+    features: [
+      'Mesas, comandas, app garçom e gestão de motoboys',
+      'KDS, iFood, app desktop, PopConnect, impressão e hardware',
+      'Recursos avançados de produção',
+    ],
   },
   {
-    title: 'Estoque e rentabilidade',
-    features: ['Estoque por produto e insumo', 'Ficha técnica e baixa automática', 'CMV e relatórios gerenciais'],
+    title: 'Estoque, financeiro e rentabilidade',
+    features: [
+      'Estoque por produto e insumo, ficha técnica e baixa automática',
+      'Contas a pagar, contas a receber, caixa e despesas',
+      'CMV, curva ABC e relatórios gerenciais',
+    ],
   },
   {
-    title: 'Relacionamento e crescimento',
-    features: ['Campanhas e envio em massa', 'Destaques, venda adicional e pixels', 'IA para cardápio e produtividade'],
+    title: 'Equipe e produtividade',
+    features: [
+      'Central da Equipe, perfis, permissões e controle de ponto',
+      'Jornadas e acompanhamento da equipe',
+      'Assistente inteligente para tarefas e análises',
+    ],
+  },
+  {
+    title: 'Marketing e relacionamento',
+    features: [
+      'Tráfego pago automatizado para Facebook e Instagram',
+      'WhatsApp, campanhas, cupons, fidelidade e upsell',
+      'Banners, produtos em destaque e pixels de marketing',
+      'IA para cardápio e produtividade',
+    ],
+  },
+  {
+    title: 'Fiscal, contabilidade e segurança',
+    features: [
+      'Emissão de NFC-e e NF-e com IBS/CBS',
+      'XML automático e Central do Contador',
+      'Auditoria, segurança e monitoramento da operação',
+    ],
   },
   {
     title: 'Pagamentos e integrações',
     features: ['PIX, Mercado Pago e formas de pagamento', 'Integrações operacionais disponíveis no sistema'],
-  },
-  {
-    title: 'Recursos em homologação',
-    status: 'homologation',
-    features: [
-      'Emissão fiscal completa de NFC-e e NF-e para todos os regimes tributários',
-      'Consulta financeira exata e validação completa de ativos da Meta',
-    ],
   },
 ];
 
@@ -123,11 +144,6 @@ const MULTI_FEATURE_GROUPS: PlanFeatureGroup[] = [
   {
     title: 'Contratação',
     features: ['Uma loja incluída no valor base', 'R$ 189/mês por loja adicional', 'Estrutura preparada para expansão da rede'],
-  },
-  {
-    title: 'Recursos em homologação',
-    status: 'homologation',
-    features: ['Recursos fiscais e financeiros da Meta descritos no plano Pro permanecem em homologação'],
   },
 ];
 
@@ -160,7 +176,9 @@ export const PLAN_CATALOG: PlanCatalogItem[] = [
       'Banners, Cupons e Fidelidade',
       'Motoboys e Entregas',
       'App Desktop',
-      'Impressoras e Balanças'
+      'Impressoras e Balanças',
+      'Delivery',
+      'PIX'
     ]
   },
   {
@@ -188,8 +206,11 @@ export const PLAN_CATALOG: PlanCatalogItem[] = [
       'Estoque',
       'Financeiro',
       'Fiscal',
+      'Central do Contador',
+      'Central da Equipe',
       'Marketing',
       'WhatsApp',
+      'iFood',
       'App Desktop'
     ]
   },

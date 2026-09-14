@@ -105,12 +105,16 @@ export function buildEscposReceipt(data = {}) {
   const items = Array.isArray(data.items) ? data.items : []
   const output = []
   const configuredFontSize = normalizeLine(data?.receipt?.font_size || data?.font_size).toLowerCase()
-  const bodySize = configuredFontSize === 'small' ? SIZE_NORMAL : SIZE_TALL
+  // O corpo precisa permanecer em tamanho normal. Algumas termicas genericas
+  // interpretam SIZE_TALL (0x10) como largura dupla e passam a comportar so
+  // metade das colunas: separadores viram duas linhas e palavras quebram no
+  // meio. O tamanho ampliado fica restrito aos destaques, que ja calculam a
+  // largura reduzida antes de imprimir.
+  const bodySize = configuredFontSize === 'large' ? SIZE_TALL : SIZE_NORMAL
 
   output.push(`${ESC}\x40`)
-  // Algumas termicas reiniciam usando a fonte B, que e menor. Selecionar a
-  // fonte A e altura dupla recupera a leitura visual do antigo cupom HTML sem
-  // voltar ao bitmap, que era descartado por parte das filas do Windows.
+  // Algumas termicas reiniciam usando a fonte B, que e menor. A fonte A e o
+  // padrao comercial e mantem 32/48 colunas reais em papel de 58/80 mm.
   output.push(FONT_A)
   output.push(bodySize)
   output.push(`${ESC}\x61\x01`)
@@ -132,16 +136,21 @@ export function buildEscposReceipt(data = {}) {
     appendWrapped(output, `SENHA: ${String(data.order_number).slice(-4)}`, width / 2)
     output.push(`${ESC}\x45\x00${bodySize}`)
   }
-  if (data.order_number) appendWrapped(output, `Pedido #${data.order_number}`, width)
+  if (data.order_number) {
+    const displayOrderNumber = normalizeLine(data.order_number).replace(/^PED[-_\s]*/i, '')
+    appendWrapped(output, `Pedido #${displayOrderNumber || data.order_number}`, width)
+  }
   output.push(`${separator}\n`)
 
   output.push(`${ESC}\x61\x00${ESC}\x45\x01CLIENTE:\n${ESC}\x45\x00`)
   appendWrapped(output, data.customer_name || 'Balcao', width)
   if (data.customer_phone) appendWrapped(output, `Tel: ${data.customer_phone}`, width)
-  if (data.customer_address_display || data.customer_address) {
-    appendWrapped(output, `End: ${data.customer_address_display || data.customer_address}`, width)
+  const customerAddress = normalizeLine(data.customer_address_display || data.customer_address)
+  if (customerAddress) appendWrapped(output, `End: ${customerAddress}`, width)
+  const deliveryZone = normalizeLine(data.delivery_zone_name)
+  if (deliveryZone && !customerAddress.toLowerCase().includes(deliveryZone.toLowerCase())) {
+    appendWrapped(output, `Regiao: ${deliveryZone}`, width)
   }
-  if (data.delivery_zone_name) appendWrapped(output, `Regiao: ${data.delivery_zone_name}`, width)
   const type = orderTypeLabel(data.order_type)
   if (type) appendWrapped(output, `Tipo: ${type}`, width)
   output.push(`${separator}\n`)

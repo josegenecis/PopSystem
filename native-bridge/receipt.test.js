@@ -51,7 +51,7 @@ test('uses the restaurant identity and prints the complete operational order', (
   assert.match(receipt, /Sistema PopSystem/)
 })
 
-test('uses the larger legacy-style hierarchy for the operational receipt', () => {
+test('uses a commercial hierarchy without widening the receipt body', () => {
   const receipt = buildEscposReceipt({
     store: { restaurant_name: 'The place Acai' },
     receipt: { paper_width: '80mm', font_size: 'normal' },
@@ -65,7 +65,8 @@ test('uses the larger legacy-style hierarchy for the operational receipt', () =>
   })
 
   assert.ok(receipt.includes(`${String.fromCharCode(0x1b)}M${String.fromCharCode(0)}`), 'selects ESC/POS font A')
-  assert.ok(receipt.includes(`${String.fromCharCode(0x1d)}!${String.fromCharCode(0x10)}`), 'uses taller body text')
+  assert.ok(receipt.includes(`${String.fromCharCode(0x1d)}!${String.fromCharCode(0)}`), 'keeps the body at the printer native width')
+  assert.ok(!receipt.includes(`${String.fromCharCode(0x1d)}!${String.fromCharCode(0x10)}`), 'does not widen the body on incompatible printers')
   assert.ok(receipt.includes(`${String.fromCharCode(0x1d)}!${String.fromCharCode(0x11)}`), 'uses double-size highlights')
   const text = readable(receipt)
   assert.match(text, /SENHA: 4739/)
@@ -74,6 +75,29 @@ test('uses the larger legacy-style hierarchy for the operational receipt', () =>
   assert.match(text, /R\$ 49,99 x 0.364/)
   assert.match(text, /Subtotal:\s+R\$ 18,20/)
   assert.match(text, /TOTAL:\s+R\$ 18,20/)
+})
+
+test('removes the duplicated PED prefix from the printed order number', () => {
+  const receipt = readable(buildEscposReceipt({
+    order_number: 'PED959877',
+    items: [],
+    total: 0,
+  }))
+
+  assert.match(receipt, /Pedido #959877/)
+  assert.doesNotMatch(receipt, /Pedido #PED959877/)
+})
+
+test('does not repeat the delivery region when it is already in the address', () => {
+  const receipt = readable(buildEscposReceipt({
+    customer_address_display: 'Rua do Ariaco - Bairro: CHACARA I',
+    delivery_zone_name: 'CHACARA I',
+    items: [],
+    total: 0,
+  }))
+
+  assert.match(receipt, /End: Rua do Ariaco - Bairro: CHACARA I/)
+  assert.doesNotMatch(receipt, /Regiao: CHACARA I/)
 })
 
 test('uses PopSystem instead of the removed legacy brand when identity is missing', () => {

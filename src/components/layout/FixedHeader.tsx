@@ -199,6 +199,9 @@ const FixedHeader = () => {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>}
+          <div className="lg:hidden">
+            <OperatorSwitcher compact />
+          </div>
           <div className="hidden lg:block">
             <OperatorSwitcher />
           </div>

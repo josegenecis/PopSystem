@@ -1,5 +1,5 @@
 
-import React, { lazy, Suspense, useEffect } from 'react';
+import React, { lazy, Suspense, useEffect, useState } from 'react';
 import { BrowserRouter, HashRouter, Routes, Route, Outlet, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { HelmetProvider } from 'react-helmet-async';
@@ -93,7 +93,7 @@ import './styles/responsive.css';
 import 'leaflet/dist/leaflet.css';
 import { supabase } from '@/integrations/supabase/client';
 import { getCashSessionDeadline, isCashSessionOverdue } from '@/utils/cashSession';
-import { getLocalOperatorSession } from '@/services/operatorAuth';
+import { clearLocalOperatorSession, getLocalOperatorSession } from '@/services/operatorAuth';
 
 const queryClient = new QueryClient();
 const isDesktopRuntime = Boolean(window.electronAPI?.isElectron);
@@ -111,8 +111,24 @@ function AppLoadingFallback() {
 
 function PwaEntry() {
   const { user, isLoading } = useAuth();
+  const userId = user?.id;
+  const [operatorSelectionReady, setOperatorSelectionReady] = useState(false);
 
-  if (isLoading) return <AppLoadingFallback />;
+  useEffect(() => {
+    if (isLoading) return;
+
+    if (userId) {
+      // O atalho instalado sempre representa o início de um novo turno de uso.
+      // Não reutilize silenciosamente o último operador, pois isso impede que a
+      // equipe escolha quem está assumindo o caixa neste momento.
+      clearLocalOperatorSession();
+      window.dispatchEvent(new Event('operator-session-changed'));
+    }
+
+    setOperatorSelectionReady(true);
+  }, [isLoading, userId]);
+
+  if (isLoading || !operatorSelectionReady) return <AppLoadingFallback />;
 
   return user
     ? <Navigate to="/operator-login" replace />

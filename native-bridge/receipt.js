@@ -1,7 +1,21 @@
 const ESC = '\x1B'
 const GS = '\x1D'
 
-const normalizeLine = (value) => String(value ?? '').replace(/\s+/g, ' ').trim()
+// Impressoras ESC/POS variam muito na tabela de caracteres configurada. Enviar
+// UTF-8 diretamente faz textos como "Açaí" virarem "A├ºaí" em vários modelos.
+// ASCII é a representação estável em Epson, Elgin, Bematech e genéricas.
+export const normalizePrinterText = (value) => String(value ?? '')
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .replace(/[–—]/g, '-')
+  .replace(/[‘’]/g, "'")
+  .replace(/[“”]/g, '"')
+  .replace(/…/g, '...')
+  .replace(/º/g, 'o')
+  .replace(/ª/g, 'a')
+  .replace(/[^\x20-\x7E\r\n\t]/g, '')
+
+const normalizeLine = (value) => normalizePrinterText(value).replace(/\s+/g, ' ').trim()
 
 const money = (value) => Number(value || 0).toFixed(2).replace('.', ',')
 

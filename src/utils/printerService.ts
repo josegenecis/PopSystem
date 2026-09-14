@@ -1603,6 +1603,19 @@ async function openDrawerConnected() {
   return bridgeResult;
 }
 
+function normalizeEscPosText(value: unknown) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[–—]/g, '-')
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/…/g, '...')
+    .replace(/º/g, 'o')
+    .replace(/ª/g, 'a')
+    .replace(/[^\x20-\x7E\r\n\t]/g, '');
+}
+
 function buildPopConnectReceiptPayload(order: any, config: NormalizedPrintConfig) {
   const items = Array.isArray(order.items) ? order.items : [];
   const itemSubtotal = items.reduce((sum: number, item: any) => {
@@ -1610,43 +1623,51 @@ function buildPopConnectReceiptPayload(order: any, config: NormalizedPrintConfig
     return sum + Number(item.subtotal ?? item.total ?? (Number(item.price || item.unit_price || 0) * quantity));
   }, 0);
   return {
-    store: order.store || null,
+    store: order.store ? {
+      ...order.store,
+      restaurant_name: normalizeEscPosText(order.store.restaurant_name),
+      name: normalizeEscPosText(order.store.name),
+      description: normalizeEscPosText(order.store.description),
+      address: normalizeEscPosText(order.store.address),
+      phone: normalizeEscPosText(order.store.phone),
+      cnpj: normalizeEscPosText(order.store.cnpj),
+    } : null,
     // O cupom ESC/POS textual é entendido inclusive por térmicas que aceitam o
     // trabalho raster na fila do Windows, mas descartam a imagem sem imprimir.
     // O payload abaixo já carrega todo o conteúdo do layout operacional.
     receipt: {
       paper_width: config.paper_width,
       font_size: config.font_size,
-      header: config.print_header,
-      footer: config.print_footer,
+      header: normalizeEscPosText(config.print_header),
+      footer: normalizeEscPosText(config.print_footer),
     },
-    order_number: order.order_number,
-    customer_name: order.customer_name || 'Balcão',
-    customer_phone: order.customer_phone || '',
-    customer_address: order.customer_address || '',
-    customer_address_display: resolveCustomerAddressLine(order),
-    delivery_zone_name: order.delivery_zone_name || '',
-    order_type: order.order_type || '',
+    order_number: normalizeEscPosText(order.order_number),
+    customer_name: normalizeEscPosText(order.customer_name || 'Balcao'),
+    customer_phone: normalizeEscPosText(order.customer_phone || ''),
+    customer_address: normalizeEscPosText(order.customer_address || ''),
+    customer_address_display: normalizeEscPosText(resolveCustomerAddressLine(order)),
+    delivery_zone_name: normalizeEscPosText(order.delivery_zone_name || ''),
+    order_type: normalizeEscPosText(order.order_type || ''),
     date: order.created_at,
     items: items.map((it: any) => ({
-      product_name: it.product_name || it.name,
-      name: it.product_name || it.name,
+      product_name: normalizeEscPosText(it.product_name || it.name),
+      name: normalizeEscPosText(it.product_name || it.name),
       quantity: Number(it.quantity || 1),
       price: Number(it.price || it.unit_price || 0),
       subtotal: Number(it.subtotal || it.total || (Number(it.price || 0) * Number(it.quantity || 1)) || 0),
-      notes: it.notes || it.observations || '',
+      notes: normalizeEscPosText(it.notes || it.observations || ''),
       variations: [
         ...(Array.isArray(it.receiptDescriptionLines) && it.receiptDescriptionLines.length > 0
           ? [`Ingredientes: ${it.receiptDescriptionLines.join(', ')}`]
           : []),
         ...(Array.isArray(it.variations) ? it.variations : []),
-      ],
+      ].map(normalizeEscPosText),
     })),
     total: Number(order.total || 0),
     subtotal: Number(order.subtotal ?? itemSubtotal ?? 0),
     discount: Number(order.discount || 0),
     delivery_fee: Number(order.delivery_fee || 0),
-    payment_method: formatPaymentMethodLabel(order.payment_method, order),
+    payment_method: normalizeEscPosText(formatPaymentMethodLabel(order.payment_method, order)),
     nfce: normalizeNfcePrintData(order),
   };
 }

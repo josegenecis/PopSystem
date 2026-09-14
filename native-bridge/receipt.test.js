@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildEscposReceipt } from './receipt.js'
+import { buildEscposReceipt, normalizePrinterText } from './receipt.js'
 
 const readable = (value) => value.replace(/[\x00-\x1f]/g, '')
 
@@ -35,7 +35,7 @@ test('uses the restaurant identity and prints the complete operational order', (
   assert.match(receipt, /Sorveteria da Diana/)
   assert.doesNotMatch(receipt, /BORA CUME/i)
   assert.match(receipt, /Tipo: Entrega/)
-  assert.match(receipt, /Endereço: Rua do Cliente, 20/)
+  assert.match(receipt, /Endereco: Rua do Cliente, 20/)
   assert.match(receipt, /Sabores: Chocolate, Morango/)
   assert.match(receipt, /Adicionais: Granulado/)
   assert.match(receipt, /Obs: Sem colher/)
@@ -49,4 +49,27 @@ test('uses PopSystem instead of the removed legacy brand when identity is missin
   const receipt = readable(buildEscposReceipt({ items: [], total: 0 }))
   assert.match(receipt, /POPSYSTEM/)
   assert.doesNotMatch(receipt, /BORA CUME/i)
+})
+
+test('normalizes Portuguese accents for printers with incompatible code pages', () => {
+  assert.equal(
+    normalizePrinterText('Açaí da Júlia — Água sem gás, balcão e preferência'),
+    'Acai da Julia - Agua sem gas, balcao e preferencia',
+  )
+
+  const receipt = buildEscposReceipt({
+    store: { restaurant_name: 'Açaí da Jú Aquiraz' },
+    customer_name: 'João Gonçalves',
+    order_type: 'counter',
+    items: [{ name: 'Água sem gás 500 ml', quantity: 1, subtotal: 2.5 }],
+    total: 2.5,
+    receipt: { footer: 'Obrigado pela preferência!' },
+  })
+
+  assert.match(readable(receipt), /Acai da Ju Aquiraz/)
+  assert.match(readable(receipt), /Joao Goncalves/)
+  assert.match(readable(receipt), /Tipo: Balcao/)
+  assert.match(readable(receipt), /Agua sem gas 500 ml/)
+  assert.match(readable(receipt), /Obrigado pela preferencia!/)
+  assert.equal([...receipt].some((character) => character.charCodeAt(0) > 127), false)
 })

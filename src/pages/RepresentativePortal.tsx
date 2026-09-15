@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ArrowRight,
+  BadgeCheck,
   Building2,
   CheckCircle2,
   ClipboardPlus,
+  Headphones,
   LogOut,
   MapPin,
   RefreshCw,
   Route,
   Search,
+  ShieldCheck,
   Sparkles,
   Users,
 } from 'lucide-react';
@@ -51,6 +55,9 @@ const stageLabels: Record<string, string> = {
 };
 const interestLabels: Record<string, string> = { cold: 'Baixo', warm: 'Médio', hot: 'Alto' };
 const dateTime = (value: string) => new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value));
+const brandAsset = (folder: string, fileName: string) => `${import.meta.env.BASE_URL}${folder}/${encodeURIComponent(fileName)}`;
+const brandLogo = brandAsset('LOGOMARCA', 'Logo pop.png');
+const brandMascot = brandAsset('CRIATIVOS', 'mascote-login-transparente.png');
 
 export default function RepresentativePortal() {
   const [loginEmail, setLoginEmail] = useState('');
@@ -175,41 +182,104 @@ export default function RepresentativePortal() {
   }, [visits]);
 
   if (loading && !authenticated) {
-    return <main className="grid min-h-screen place-items-center bg-slate-950 text-white"><RefreshCw className="h-8 w-8 animate-spin text-orange-400" aria-label="Carregando" /></main>;
+    return (
+      <main className="grid min-h-screen place-items-center bg-[#033b2c] text-white">
+        <div className="flex flex-col items-center gap-5">
+          <div className="rounded-2xl bg-white px-5 py-3 shadow-xl"><img src={brandLogo} alt="PopSystem" className="h-9 w-auto" /></div>
+          <RefreshCw className="h-7 w-7 animate-spin text-[#ff6a00]" aria-label="Carregando" />
+        </div>
+      </main>
+    );
   }
 
   if (!authenticated) {
     return (
-      <main className="relative grid min-h-screen place-items-center overflow-hidden bg-[#071b16] px-4 py-10">
-        <div className="absolute -left-20 top-10 h-72 w-72 rounded-full bg-violet-600/20 blur-3xl" />
-        <div className="absolute -right-20 bottom-0 h-80 w-80 rounded-full bg-orange-500/20 blur-3xl" />
-        <Card className="relative w-full max-w-md border-white/10 bg-white shadow-2xl">
-          <CardHeader className="space-y-4 p-7">
-            <div className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-orange-500 to-violet-600 text-white"><Route className="h-6 w-6" /></div>
-            <div><p className="text-sm font-bold uppercase tracking-[0.2em] text-orange-600">PopSystem em campo</p><CardTitle className="mt-2 text-3xl text-slate-950">Portal do representante</CardTitle><p className="mt-2 text-sm text-slate-500">Registre visitas e acompanhe somente os contatos da sua carteira.</p></div>
-          </CardHeader>
-          <CardContent className="p-7 pt-0">
-            <form className="space-y-4" onSubmit={handleLogin}>
-              <div className="space-y-2"><Label htmlFor="representative-email">E-mail</Label><Input id="representative-email" type="email" autoComplete="email" required value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} /></div>
-              <div className="space-y-2"><Label htmlFor="representative-password">Senha</Label><Input id="representative-password" type="password" autoComplete="current-password" required value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} /></div>
-              <Button className="h-12 w-full bg-gradient-to-r from-orange-500 to-orange-600 font-bold hover:from-orange-600 hover:to-orange-700" disabled={loading}>{loading ? 'Entrando…' : 'Acessar minha carteira'}</Button>
-            </form>
-          </CardContent>
-        </Card>
+      <main className="relative min-h-screen overflow-hidden bg-[#eef3ed] px-3 py-3 sm:px-5 sm:py-5 lg:px-8 lg:py-6">
+        <div className="pointer-events-none absolute -left-32 top-1/4 h-80 w-80 rounded-full bg-[#8dcc3f]/20 blur-3xl" />
+        <div className="pointer-events-none absolute -right-20 bottom-0 h-96 w-96 rounded-full bg-[#ff6a00]/10 blur-3xl" />
+
+        <div className="relative mx-auto grid min-h-[calc(100vh-1.5rem)] w-full max-w-[1240px] overflow-hidden rounded-[28px] border border-white bg-white shadow-[0_35px_100px_-48px_rgba(0,55,38,0.5)] sm:min-h-[calc(100vh-2.5rem)] lg:grid-cols-[1.08fr_0.92fr]">
+          <section className="relative isolate hidden min-h-[700px] overflow-hidden bg-[#033b2c] px-12 py-11 text-white lg:flex lg:flex-col xl:px-16">
+            <div className="pointer-events-none absolute inset-0 -z-20 bg-[radial-gradient(circle_at_85%_10%,rgba(74,196,82,0.22),transparent_30%),linear-gradient(145deg,#043e2e_0%,#013126_60%,#00271e_100%)]" />
+            <div className="pointer-events-none absolute -bottom-28 -left-24 -z-10 h-72 w-[130%] -rotate-6 rounded-[50%] border-t-[12px] border-[#ff6a00] bg-[#07533c]" />
+
+            <div className="w-fit rounded-2xl bg-white px-5 py-3 shadow-xl shadow-black/10">
+              <img src={brandLogo} alt="PopSystem" className="h-9 w-auto xl:h-10" />
+            </div>
+
+            <div className="relative z-20 mt-12 max-w-[500px]">
+              <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-4 py-2 text-xs font-bold uppercase tracking-[0.16em] text-[#b9ed72]">
+                <BadgeCheck className="h-4 w-4" /> Time comercial PopSystem
+              </span>
+              <h1 className="mt-6 text-[42px] font-black leading-[1.05] tracking-[-0.04em] xl:text-[50px]">
+                Sua presença em campo.<br /><span className="text-[#ff7a16]">Nosso crescimento.</span>
+              </h1>
+              <p className="mt-5 max-w-[440px] text-[15px] leading-7 text-emerald-50/80">
+                Registre cada visita, organize seus contatos e acompanhe sua carteira em um só lugar.
+              </p>
+            </div>
+
+            <div className="relative z-20 mt-8 grid max-w-[360px] gap-3">
+              <div className="flex items-center gap-3 text-sm font-semibold text-white/90"><span className="grid h-9 w-9 place-items-center rounded-xl bg-white/10 text-[#a6df5c]"><Route className="h-4 w-4" /></span>Visitas organizadas por território</div>
+              <div className="flex items-center gap-3 text-sm font-semibold text-white/90"><span className="grid h-9 w-9 place-items-center rounded-xl bg-white/10 text-[#a6df5c]"><ShieldCheck className="h-4 w-4" /></span>Carteira individual e protegida</div>
+              <div className="flex items-center gap-3 text-sm font-semibold text-white/90"><span className="grid h-9 w-9 place-items-center rounded-xl bg-white/10 text-[#a6df5c]"><Headphones className="h-4 w-4" /></span>Contato direto com o time PopSystem</div>
+            </div>
+
+            <img src={brandMascot} alt="Mascote PopSystem" className="pointer-events-none absolute -bottom-16 -right-16 z-10 h-[455px] w-auto max-w-none object-contain xl:-right-10 xl:h-[510px]" />
+          </section>
+
+          <section className="flex min-h-[620px] flex-col justify-center px-6 py-10 sm:px-12 lg:min-h-0 lg:px-14 xl:px-20">
+            <div className="relative mb-9 h-28 overflow-hidden rounded-2xl bg-[#033b2c] shadow-xl lg:hidden">
+              <div className="absolute -bottom-16 -left-10 h-28 w-[125%] -rotate-6 rounded-[50%] border-t-4 border-[#ff6a00] bg-[#07533c]" />
+              <div className="absolute left-4 top-4 z-10 rounded-xl bg-white px-4 py-2.5 shadow-lg"><img src={brandLogo} alt="PopSystem" className="h-7 w-auto" /></div>
+              <img src={brandMascot} alt="Mascote PopSystem" className="absolute -bottom-7 right-2 z-10 h-36 w-auto object-contain" />
+            </div>
+            <div className="mx-auto w-full max-w-[430px]">
+              <div className="grid h-12 w-12 place-items-center rounded-2xl bg-[#eaf6df] text-[#078844]"><Route className="h-6 w-6" /></div>
+              <p className="mt-6 text-xs font-extrabold uppercase tracking-[0.2em] text-[#ef5b0c]">PopSystem em campo</p>
+              <h2 className="mt-2 text-3xl font-black tracking-[-0.035em] text-[#082f26] sm:text-4xl">Portal do representante</h2>
+              <p className="mt-3 text-sm leading-6 text-slate-500">Entre com seu acesso comercial para registrar visitas e acompanhar seus contatos.</p>
+
+              <form className="mt-8 space-y-5" onSubmit={handleLogin}>
+                <div className="space-y-2"><Label htmlFor="representative-email" className="font-bold text-[#164d3e]">E-mail</Label><Input className="h-12 rounded-xl border-slate-200 bg-slate-50 focus-visible:ring-[#109352]" id="representative-email" type="email" autoComplete="email" required value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} /></div>
+                <div className="space-y-2"><Label htmlFor="representative-password" className="font-bold text-[#164d3e]">Senha</Label><Input className="h-12 rounded-xl border-slate-200 bg-slate-50 focus-visible:ring-[#109352]" id="representative-password" type="password" autoComplete="current-password" required value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} /></div>
+                <Button className="h-12 w-full rounded-xl bg-[#ff650b] font-extrabold text-white shadow-lg shadow-orange-500/20 hover:bg-[#ea5700]" disabled={loading}>{loading ? 'Entrando…' : <span className="flex items-center gap-2">Acessar minha carteira <ArrowRight className="h-4 w-4" /></span>}</Button>
+              </form>
+
+              <div className="mt-8 flex items-center justify-center gap-2 border-t border-slate-100 pt-6 text-xs text-slate-400"><ShieldCheck className="h-4 w-4 text-[#169354]" />Acesso exclusivo para representantes autorizados</div>
+            </div>
+          </section>
+        </div>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-[#f6f5fb] text-slate-950">
-      <header className="bg-gradient-to-r from-[#063f31] via-[#174c3d] to-[#4c1d95] text-white shadow-lg">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-6 lg:px-8">
-          <div><p className="text-xs font-bold uppercase tracking-[0.22em] text-orange-300">PopSystem em campo</p><h1 className="mt-1 text-2xl font-black">Olá, {representative?.display_name}</h1><p className="text-sm text-emerald-100">Sua ficha de visitas e carteira comercial.</p></div>
-          <Button variant="outline" className="border-white/25 bg-white/10 text-white hover:bg-white/20 hover:text-white" onClick={() => void logout()}><LogOut className="mr-2 h-4 w-4" />Sair</Button>
+    <main className="min-h-screen bg-[#f3f6f2] text-slate-950">
+      <header className="border-b border-emerald-950/10 bg-white shadow-sm">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 lg:px-8">
+          <img src={brandLogo} alt="PopSystem" className="h-9 w-auto sm:h-10" />
+          <div className="flex items-center gap-3">
+            <div className="hidden text-right sm:block"><p className="text-sm font-extrabold text-[#073d2e]">{representative?.display_name}</p><p className="text-xs text-slate-500">Representante PopSystem</p></div>
+            <Button variant="outline" className="border-emerald-900/15 text-[#073d2e] hover:bg-emerald-50" onClick={() => void logout()}><LogOut className="mr-2 h-4 w-4" />Sair</Button>
+          </div>
         </div>
       </header>
 
-      <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:px-8">
+      <section className="relative isolate overflow-hidden bg-[#033b2c] text-white">
+        <div className="pointer-events-none absolute inset-0 -z-20 bg-[radial-gradient(circle_at_80%_0%,rgba(121,205,74,0.2),transparent_28%),linear-gradient(120deg,#033b2c_0%,#07513b_72%,#064331_100%)]" />
+        <div className="pointer-events-none absolute -bottom-20 right-0 -z-10 h-32 w-[55%] -rotate-3 rounded-[50%] border-t-[8px] border-[#ff6a00] bg-[#07563e]" />
+        <div className="mx-auto flex min-h-[218px] max-w-7xl items-center justify-between gap-6 px-4 py-8 lg:px-8">
+          <div className="max-w-2xl">
+            <p className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-[0.2em] text-[#b4e86c]"><BadgeCheck className="h-4 w-4" /> PopSystem em campo</p>
+            <h1 className="mt-3 text-3xl font-black tracking-[-0.035em] sm:text-4xl">Olá, {representative?.display_name}</h1>
+            <p className="mt-3 max-w-xl text-sm leading-6 text-emerald-50/80 sm:text-base">Transforme cada visita em oportunidade. Cadastre o estabelecimento e acompanhe sua carteira comercial.</p>
+          </div>
+          <img src={brandMascot} alt="Mascote PopSystem" className="pointer-events-none absolute -bottom-16 right-0 h-[190px] w-auto object-contain opacity-40 sm:opacity-60 md:static md:-mb-20 md:h-[280px] md:shrink-0 md:opacity-100" />
+        </div>
+      </section>
+
+      <div className="mx-auto grid max-w-7xl gap-6 px-4 py-7 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:px-8">
         <Card className="h-fit overflow-hidden border-0 shadow-xl shadow-violet-950/5">
           <div className="h-2 bg-gradient-to-r from-orange-500 via-violet-600 to-emerald-500" />
           <CardHeader><div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-2xl bg-orange-100 text-orange-700"><ClipboardPlus className="h-5 w-5" /></div><div><CardTitle>Registrar visita</CardTitle><p className="text-sm text-slate-500">O contato entra automaticamente no funil.</p></div></div></CardHeader>

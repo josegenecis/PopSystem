@@ -4,7 +4,6 @@ import { Button } from '@/components/ui/button';
 import { ChevronLeft, ChevronRight, Instagram, Play } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { publicSupabase } from '@/integrations/supabase/publicClient';
-import { useAuth } from '@/contexts/AuthContext';
 import BannerStoryViewer, { StoryBanner, StoryLinkedProduct } from '@/components/marketing/BannerStoryViewer';
 import AutoplayVideo from '@/components/media/AutoplayVideo';
 import { isVideoAsset } from '@/utils/videoAutoplay';
@@ -46,9 +45,19 @@ const PromotionalBanner: React.FC<PromotionalBannerProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [storyIndex, setStoryIndex] = useState(0);
   const [storyOpen, setStoryOpen] = useState(false);
-  const { user } = useAuth();
-  
-  const userId = restaurantId || user?.id;
+  const [authenticatedUserId, setAuthenticatedUserId] = useState<string | undefined>();
+  const userId = restaurantId || authenticatedUserId;
+
+  useEffect(() => {
+    if (restaurantId) return;
+    let cancelled = false;
+    void supabase.auth.getSession().then(({ data }) => {
+      if (!cancelled) setAuthenticatedUserId(data.session?.user?.id);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [restaurantId]);
 
   const openLink = (href: string) => {
     const url = String(href || '').trim();

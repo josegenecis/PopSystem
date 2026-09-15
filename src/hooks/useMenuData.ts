@@ -138,7 +138,7 @@ async function fetchMenuDataFromApi(userId: string): Promise<MenuPayload | null>
   const timeoutId = window.setTimeout(() => controller.abort(), 8000);
 
   try {
-    const res = await fetch(`/api/menu/public?userId=${encodeURIComponent(userId)}`, {
+    const res = await fetch(`/api/menu/public?userId=${encodeURIComponent(userId)}&variations=deferred`, {
       method: 'GET',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -276,7 +276,10 @@ export const useMenuData = ({ userId, enableCache = false, cacheTTL = 1, pricing
   const queryClient = useQueryClient();
   const recoverAttemptRef = useRef(false);
 
-  const initialData = enableCache && userId ? readCache(userId, pricingChannel, cacheTTL) : null;
+  const initialData = useMemo(
+    () => enableCache && userId ? readCache(userId, pricingChannel, cacheTTL) : null,
+    [enableCache, userId, pricingChannel, cacheTTL]
+  );
 
   const query = useQuery({
     queryKey: ['menuData', userId, pricingChannel],
@@ -289,7 +292,9 @@ export const useMenuData = ({ userId, enableCache = false, cacheTTL = 1, pricing
     refetchOnReconnect: true,
     retry: 3,
     retryDelay: (attempt) => Math.min(2000, 250 * Math.pow(2, attempt)),
-    initialData: initialData || undefined
+    // Mostra o ultimo cardapio imediatamente, mas sempre revalida em segundo
+    // plano para que preco, estoque e disponibilidade continuem corretos.
+    placeholderData: initialData || undefined
   });
   const refetch = query.refetch;
 

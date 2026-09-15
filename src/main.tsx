@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client'
+import type { ComponentType } from 'react'
 import './index.css'
 import { recoverFromStaleChunk } from './utils/chunkRecovery'
 
@@ -92,14 +93,26 @@ if (isMainDomain && isStandalonePwa && window.location.pathname === '/') {
 }
 
 const isMarketingEntry = !isDesktopRuntime && isMainDomain && marketingPaths.has(window.location.pathname);
+const isPublicMenuEntry = !isDesktopRuntime && (
+  /^\/menu\/[^/]+\/?$/.test(window.location.pathname)
+  || window.location.pathname === '/menu-digital'
+);
 
 const root = createRoot(document.getElementById('root')!);
 
-void (isMarketingEntry ? import('./LandingApp.tsx') : import('./App.tsx'))
-  .then(({ default: RootApp }) => {
-    root.render(<RootApp />);
-  })
-  .catch(async (error) => {
-    if (await recoverFromStaleChunk(error)) return;
-    throw error;
-  });
+const renderRootApp = ({ default: RootApp }: { default: ComponentType }) => {
+  root.render(<RootApp />);
+};
+
+const handleRootImportError = async (error: unknown) => {
+  if (await recoverFromStaleChunk(error)) return;
+  throw error;
+};
+
+if (isPublicMenuEntry) {
+  void import('./MenuApp.tsx').then(renderRootApp).catch(handleRootImportError);
+} else if (isMarketingEntry) {
+  void import('./LandingApp.tsx').then(renderRootApp).catch(handleRootImportError);
+} else {
+  void import('./App.tsx').then(renderRootApp).catch(handleRootImportError);
+}

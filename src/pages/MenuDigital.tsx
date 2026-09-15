@@ -19,7 +19,6 @@ import CartBottomBar from '@/components/menu/CartBottomBar';
 import { Input } from '@/components/ui/input';
 import { MapPin, Search, ShoppingBag, SlidersHorizontal } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/contexts/AuthContext';
 import HighlightsSection from '@/components/menu/HighlightsSection';
 import CategoryTabs from '@/components/menu/CategoryTabs';
 import ProductCard from '@/components/menu/ProductCard';
@@ -64,9 +63,8 @@ const MenuDigital = () => {
   const location = useLocation();
   const queryParams = new URLSearchParams(location.search);
   const userIdFromQuery = queryParams.get('userId');
-  const { user } = useAuth();
-  
-  const finalUserId = userId || userIdFromQuery || user?.id || '';
+
+  const finalUserId = userId || userIdFromQuery || '';
   
   const { toast } = useToast();
   const { 
@@ -99,7 +97,7 @@ const MenuDigital = () => {
     deliverySettings,
     isLoading: menuLoading,
     error: menuError 
-  } = useMenuData({ userId: finalUserId, enableCache: false });
+  } = useMenuData({ userId: finalUserId, enableCache: true, cacheTTL: 5 });
   const storeOpenInfo = useMemo(() => getStoreOpenInfo((profile as any)?.opening_hours), [profile]);
   const menuProductIds = useMemo(() => {
     return Array.from(
@@ -255,18 +253,32 @@ const MenuDigital = () => {
       const idsWithVariations = await primeSimpleVariationPresence(menuProductIds);
       if (cancelled) return;
 
-      const idsToWarm = idsWithVariations.length > 0
-        ? idsWithVariations
-        : menuProductIds.filter((id) => getSimpleVariationPresence(id) !== 'none');
+      // A primeira tela nao deve disputar rede com os complementos de todo o
+      // cardapio. Aquecemos apenas os itens mais visiveis; os demais continuam
+      // com prefetch por intencao no ProductCard.
+      const priorityIds = menuProductIds.slice(0, 12);
+      const idsToWarm = idsWithVariations.filter((id) => priorityIds.includes(id));
 
       if (idsToWarm.length > 0) {
-        await prefetchSimpleVariationsBulk(idsToWarm, 12);
+        await prefetchSimpleVariationsBulk(idsToWarm, 4);
       }
     };
 
-    void run().catch(() => {});
+    const start = () => void run().catch(() => {});
+    let idleId: number | undefined;
+    let timeoutId: number | undefined;
+    if ('requestIdleCallback' in window) {
+      idleId = (window as any).requestIdleCallback(start, { timeout: 1500 });
+    } else {
+      timeoutId = window.setTimeout(start, 600);
+    }
+
     return () => {
       cancelled = true;
+      if (idleId !== undefined && 'cancelIdleCallback' in window) {
+        (window as any).cancelIdleCallback(idleId);
+      }
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
   }, [finalUserId, menuLoading, menuError, menuProductIds, variationsReadyFromCache]);
 

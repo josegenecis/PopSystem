@@ -85,6 +85,7 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onProductClick, isAd
           <Button
             type="button"
             size="icon"
+            aria-label={`Adicionar ${product.name}`}
             onClick={handleAddClick}
             disabled={!!isAdding}
             className="absolute bottom-2 right-2 h-8 w-8 rounded-full border-2 border-white text-white shadow-lg transition-all hover:scale-110 sm:bottom-3 sm:right-3 sm:h-11 sm:w-11"
@@ -171,6 +172,7 @@ const ProductCard: React.FC<ProductCardProps> = ({ product, onProductClick, isAd
           <Button
             type="button"
             size="icon"
+            aria-label={`Adicionar ${product.name}`}
             onClick={handleAddClick}
             disabled={!!isAdding}
             className="h-10 w-10 rounded-full text-white hover:scale-110 transition-all shadow-lg"

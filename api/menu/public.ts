@@ -84,7 +84,7 @@ async function fetchProducts(userId: string) {
   throw lastError;
 }
 
-async function fetchMenuPayload(userId: string) {
+async function fetchMenuPayload(userId: string, includeVariationDetails = true) {
   const [profileResult, categoriesResult, deliveryZonesResult, deliverySettingsResult, products] = await Promise.all([
     supabase
       .from('profiles')
@@ -127,7 +127,7 @@ async function fetchMenuPayload(userId: string) {
   let variationPayloadByProduct: Record<string, any[]> = {};
   let variationPresenceByProduct: Record<string, 'has' | 'none'> = {};
 
-  if (productIds.length > 0) {
+  if (includeVariationDetails && productIds.length > 0) {
     const [specificResult, linkResult] = await Promise.all([
       supabase
         .from('product_variations')
@@ -216,14 +216,14 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    const payload = await fetchMenuPayload(userId);
+    // Clientes novos adiam complementos para depois da primeira pintura. O
+    // comportamento completo permanece como padrao para versoes antigas.
+    const includeVariationDetails = String(req?.query?.variations || '').toLowerCase() !== 'deferred';
+    const payload = await fetchMenuPayload(userId, includeVariationDetails);
 
     res.statusCode = 200;
     res.setHeader('content-type', 'application/json; charset=utf-8');
-    res.setHeader('cache-control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    res.setHeader('pragma', 'no-cache');
-    res.setHeader('expires', '0');
-    res.setHeader('surrogate-control', 'no-store');
+    res.setHeader('cache-control', 'public, max-age=0, s-maxage=20, stale-while-revalidate=120');
     res.end(JSON.stringify(payload));
   } catch (error: any) {
     res.statusCode = 500;

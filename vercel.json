@@ -180,6 +180,7 @@
     },
     { "src": "^/share/menu/(.+)$", "dest": "/api/share/menu?id=$1" },
     { "src": "^/share/track/(.+)$", "dest": "/api/share/track?id=$1" },
+    { "src": "^/api/bridge/update/(.+)$", "dest": "/api/bridge/update/%5Basset%5D?asset=$1" },
     { "handle": "filesystem" },
     { "src": "^/(.*)$", "dest": "/index.html" }
   ]

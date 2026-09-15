@@ -8,6 +8,28 @@ import { POPSYSTEM_ORDER_SOUND_TYPE, soundNotifications } from '@/utils/soundUti
 import { useLocation } from 'react-router-dom';
 
 const getAutoAcceptKey = (userId?: string) => `orders_auto_accept:${userId || 'local'}`;
+const getPendingPrintKey = (userId: string) => `orders_auto_print_pending:${userId}`;
+
+const readPendingPrintIds = (userId: string) => {
+  try {
+    const value = JSON.parse(localStorage.getItem(getPendingPrintKey(userId)) || '[]');
+    return Array.isArray(value) ? value.map(String).filter(Boolean).slice(-50) : [];
+  } catch {
+    return [];
+  }
+};
+
+const savePendingPrintIds = (userId: string, ids: string[]) => {
+  localStorage.setItem(getPendingPrintKey(userId), JSON.stringify([...new Set(ids)].slice(-50)));
+};
+
+const enqueuePendingPrint = (userId: string, orderId: string) => {
+  savePendingPrintIds(userId, [...readPendingPrintIds(userId), orderId]);
+};
+
+const dequeuePendingPrint = (userId: string, orderId: string) => {
+  savePendingPrintIds(userId, readPendingPrintIds(userId).filter((id) => id !== orderId));
+};
 
 const normalizeItems = (value: any) => {
   if (Array.isArray(value)) return value;
@@ -89,34 +111,75 @@ export const useGlobalOrderAutoAccept = () => {
 
   const acceptOrder = useCallback(async (order: any) => {
     const orderId = String(order?.id || '');
-    if (!orderId || processingRef.current.has(orderId)) return;
+    const ownerId = String(order?.user_id || user?.id || '');
+    if (!orderId || !ownerId || processingRef.current.has(orderId)) return;
     if (!isPendingOrder(order) || isPdvCounterOrder(order) || isHiddenTableServiceOrder(order)) return;
 
     processingRef.current.add(orderId);
+    let accepted = false;
     try {
       const acceptedOrder = await updateOrderStatus(orderId, 'preparing');
+      accepted = true;
       const orderForPrint = {
         ...order,
         ...acceptedOrder,
         items: normalizeItems(acceptedOrder?.items ?? order?.items),
       };
 
+      enqueuePendingPrint(ownerId, orderId);
+      // O alerta não pode depender da impressora: se o bridge estiver fora do ar,
+      // o restaurante ainda precisa saber imediatamente que o pedido chegou.
+      void playTwoAlerts().catch((error) => console.warn('Não foi possível tocar o alerta do pedido:', error));
       await sendToKitchenOnce(orderForPrint);
-      await PrinterService.printOrderOnAccept(orderForPrint);
-      await playTwoAlerts();
+      const printResult = await PrinterService.printOrderOnAccept(orderForPrint);
+      if (!printResult?.success) {
+        throw new Error(printResult?.error || 'Pedido aceito, mas a impressão não foi confirmada.');
+      }
+      dequeuePendingPrint(ownerId, orderId);
 
       toast.success(`Pedido #${orderForPrint.order_number || orderId.slice(0, 8)} aceito automaticamente`, {
-        description: 'Pedido impresso e alerta tocado 2 vezes.',
+        description: printResult.skipped ? 'Pedido aceito; impressão automática desativada.' : 'Pedido impresso e alerta tocado 2 vezes.',
       });
     } catch (error: any) {
       console.error('Falha no aceite automático global:', error);
-      toast.error('Aceite automático falhou', {
-        description: error?.message || 'Abra o gestor de pedidos e aceite manualmente.',
+      toast.error(accepted ? 'Pedido aceito; impressão pendente' : 'Aceite automático falhou', {
+        description: accepted
+          ? 'O sistema continuará tentando imprimir automaticamente.'
+          : error?.message || 'Abra o gestor de pedidos e aceite manualmente.',
       });
     } finally {
       processingRef.current.delete(orderId);
     }
-  }, [sendToKitchenOnce]);
+  }, [sendToKitchenOnce, user?.id]);
+
+  const retryPendingPrints = useCallback(async () => {
+    if (!user?.id || isStandaloneOrderingScreen || localStorage.getItem(getAutoAcceptKey(user.id)) !== 'true') return;
+    const ids = readPendingPrintIds(user.id);
+    if (ids.length === 0) return;
+
+    const { data, error } = await supabase.from('orders').select('*').in('id', ids);
+    if (error) {
+      console.warn('Não foi possível recuperar a fila de impressão automática:', error);
+      return;
+    }
+
+    const foundIds = new Set((data || []).map((order: any) => String(order.id)));
+    for (const missingId of ids.filter((id) => !foundIds.has(id))) dequeuePendingPrint(user.id, missingId);
+
+    for (const order of data || []) {
+      const orderId = String(order.id);
+      if (processingRef.current.has(orderId)) continue;
+      processingRef.current.add(orderId);
+      try {
+        const result = await PrinterService.printOrderOnAccept({ ...order, items: normalizeItems(order.items) });
+        if (result?.success) dequeuePendingPrint(user.id, orderId);
+      } catch (error) {
+        console.warn(`Nova tentativa de impressão do pedido ${order.order_number || orderId} falhou:`, error);
+      } finally {
+        processingRef.current.delete(orderId);
+      }
+    }
+  }, [isStandaloneOrderingScreen, user?.id]);
 
   const scanPendingOrders = useCallback(async () => {
     if (!user?.id || isStandaloneOrderingScreen || localStorage.getItem(getAutoAcceptKey(user.id)) !== 'true') return;
@@ -163,6 +226,7 @@ export const useGlobalOrderAutoAccept = () => {
     if (!user?.id || !enabled || isStandaloneOrderingScreen) return;
 
     void scanPendingOrders();
+    void retryPendingPrints();
     const channel = supabase
       .channel(`global-order-auto-accept-${user.id}`)
       .on(
@@ -181,6 +245,7 @@ export const useGlobalOrderAutoAccept = () => {
 
     pollingRef.current = window.setInterval(() => {
       void scanPendingOrders();
+      void retryPendingPrints();
     }, 12000);
 
     return () => {
@@ -190,5 +255,5 @@ export const useGlobalOrderAutoAccept = () => {
       }
       supabase.removeChannel(channel);
     };
-  }, [acceptOrder, enabled, isStandaloneOrderingScreen, scanPendingOrders, user?.id]);
+  }, [acceptOrder, enabled, isStandaloneOrderingScreen, retryPendingPrints, scanPendingOrders, user?.id]);
 };

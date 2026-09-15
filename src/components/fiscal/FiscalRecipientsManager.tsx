@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Building2, CheckCircle2, Loader2, Pencil, Plus, Search, UserRound } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -48,15 +48,6 @@ type CnpjLookupResponse = {
   inscricoes_estaduais?: CnpjStateRegistration[];
 };
 
-type CnpjStateRegistration = { ativo?: boolean; uf?: string; inscricao_estadual?: string };
-type CnpjLookupResponse = {
-  razao_social?: string; nome?: string; ddd_telefone_1?: string; telefone?: string; email?: string;
-  logradouro?: string; numero?: string; complemento?: string; bairro?: string; municipio?: string;
-  uf?: string; cep?: string; codigo_municipio_ibge?: string | number; codigo_municipio?: string | number;
-  descricao_situacao_cadastral?: string; situacao_cadastral?: string | number;
-  inscricoes_estaduais?: CnpjStateRegistration[];
-};
-
 const emptyCustomer: FiscalCustomer = {
   id: '', name: '', phone: '', cpf_cnpj: '', state_registration: '', state_registration_indicator: 9,
   email: '', address: '', address_number: '', address_complement: '', neighborhood: '', city: '',
@@ -76,8 +67,8 @@ const BRAZILIAN_STATES = [
   'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO',
 ];
 
-export default function FiscalRecipientsManager({ onRecipientSelected }: FiscalRecipientsManagerProps = {}) {
-  const { user } = useAuth();
+export default function FiscalRecipientsManager({ onRecipientSelected, mode = 'customers' }: FiscalRecipientsManagerProps = {}) {
+  const { user, activeStoreId } = useAuth();
   const { toast } = useToast();
   const storeId = activeStoreId || user?.id;
   const fiscalMode = mode === 'fiscal' || Boolean(onRecipientSelected);

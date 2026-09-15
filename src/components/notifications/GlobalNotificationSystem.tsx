@@ -205,6 +205,7 @@ const GlobalNotificationSystem: React.FC = () => {
       }
 
       const list = ((data || []) as PendingOrder[]).filter((order) => !isPdvCounterOrder(order) && !isTableServiceOrder(order));
+      pendingOrdersRef.current = list;
       setPendingOrders(list);
       if (list.length > 0 && !isOnOrdersPageRef.current) {
         setIsAnimatingOut(false);
@@ -333,9 +334,17 @@ const GlobalNotificationSystem: React.FC = () => {
         }
       });
 
+    const refreshAndAlertNewOrders = async () => {
+      const prev = pendingOrdersRef.current || [];
+      const prevIds = new Set(prev.map((order) => order.id));
+      const next = await loadPendingOrders();
+      const newOnes = next.filter((order) => !prevIds.has(order.id));
+      if (newOnes.length > 0) await handleIncomingOrderAlert(newOnes[0]);
+    };
+
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
-        loadPendingOrders();
+        void refreshAndAlertNewOrders();
       }
     };
     const handleAutoAcceptChanged = () => {
@@ -354,13 +363,10 @@ const GlobalNotificationSystem: React.FC = () => {
     if (pollingRef.current) window.clearInterval(pollingRef.current);
     pollingRef.current = window.setInterval(async () => {
       if (!user?.id) return;
-      if (document.visibilityState !== 'visible' || realtimeHealthyRef.current) return;
-      const next = await loadPendingOrders();
-      const prev = pendingOrdersRef.current || [];
-      const prevIds = new Set(prev.map((order) => order.id));
-      const newOnes = next.filter((order) => !prevIds.has(order.id));
-      if (newOnes.length === 0) return;
-      await handleIncomingOrderAlert(newOnes[0]);
+      // SUBSCRIBED confirma o canal, não garante que nenhum evento individual
+      // foi perdido. A reconciliação leve evita pedidos silenciosos.
+      if (document.visibilityState !== 'visible') return;
+      await refreshAndAlertNewOrders();
     }, 8000);
 
     return () => {

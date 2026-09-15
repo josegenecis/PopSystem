@@ -1755,9 +1755,9 @@ export const PrinterService = {
 
     if (options.onlyIfAuto) {
       if (isElectron) {
-        if (settings?.auto_print === false) return;
+        if (settings?.auto_print === false) return { success: true, skipped: true, reason: 'auto_print_disabled' };
       } else {
-        if (settings?.auto_print !== true) return;
+        if (settings?.auto_print !== true) return { success: true, skipped: true, reason: 'auto_print_disabled' };
       }
     }
 
@@ -1957,7 +1957,9 @@ export const PrinterService = {
     }
 
     try {
-      return await this.printOrder(order, { onlyIfAuto: !isElectron });
+      const result = await this.printOrder(order, { onlyIfAuto: !isElectron });
+      if (!result?.success && orderId) printedAcceptedOrderIds.delete(orderId);
+      return result;
     } catch (error) {
       if (orderId) printedAcceptedOrderIds.delete(orderId);
       throw error;

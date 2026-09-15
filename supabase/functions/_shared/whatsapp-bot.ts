@@ -1130,6 +1130,19 @@ async function handleWhatsAppOrderFlow(params: {
   const draftActive = existingDraft && !existingDraft.cleared && Array.isArray(existingDraft.items);
   if (!draftActive && !wantsToOrder(text)) return null;
 
+  const whatsappTextOrderingEnabled = false;
+
+  // Pedidos montados por texto estão temporariamente desativados. O bot segue
+  // atendendo dúvidas e encaminha a compra ao cardápio, que valida produtos,
+  // complementos e valores antes de criar o pedido.
+  if (!whatsappTextOrderingEnabled) {
+    if (draftActive) await clearOrderDraft(supabase, conversationId);
+    return {
+      replyText: `Para garantir que produtos, adicionais e valores saiam corretos, faça o pedido pelo cardápio do restaurante: ${buildMenuShareUrl(restaurantId)}\n\nSe precisar, escreva “atendente” para falar com a equipe.`,
+      strategy: 'order_redirected_to_menu'
+    };
+  }
+
   if (isOrderCancel(text)) {
     await clearOrderDraft(supabase, conversationId);
     return { replyText: 'Pedido cancelado por aqui. Se quiser começar outro, é só me dizer o que deseja pedir.', strategy: 'order_cancelled' };

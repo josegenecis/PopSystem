@@ -33,6 +33,13 @@ jobs:
       - name: Install
         run: npm ci
 
+      - name: Sync version from release tag
+        if: startsWith(github.ref, 'refs/tags/bridge-v') || startsWith(github.ref, 'refs/tags/pop-connect-v')
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^bridge-v', '' -replace '^pop-connect-v', ''
+          node scripts/set-release-version.cjs $version
+
       - name: Build Pop Connect Installer
         run: npm run dist:pop-connect
 

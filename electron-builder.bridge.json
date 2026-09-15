@@ -50,5 +50,9 @@
   "linux": {
     "target": "AppImage",
     "icon": "public/icon-512x512.png"
+  },
+  "publish": {
+    "provider": "generic",
+    "url": "https://popsystem.com.br/api/bridge/update"
   }
 }

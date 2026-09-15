@@ -19,4 +19,12 @@ contextBridge.exposeInMainWorld('bridgeAPI', {
   readWeight: () => ipcRenderer.invoke('bridge:readWeight'),
   getAutoStart: () => ipcRenderer.invoke('bridge:getAutoStart'),
   setAutoStart: (enabled) => ipcRenderer.invoke('bridge:setAutoStart', { enabled }),
+  getOpenPwaAtLogin: () => ipcRenderer.invoke('bridge:getOpenPwaAtLogin'),
+  setOpenPwaAtLogin: (enabled) => ipcRenderer.invoke('bridge:setOpenPwaAtLogin', { enabled }),
+  getUpdateStatus: () => ipcRenderer.invoke('bridge:getUpdateStatus'),
+  onUpdateStatus: (callback) => {
+    const listener = (_event, status) => callback(status)
+    ipcRenderer.on('bridge:updateStatus', listener)
+    return () => ipcRenderer.removeListener('bridge:updateStatus', listener)
+  },
 })

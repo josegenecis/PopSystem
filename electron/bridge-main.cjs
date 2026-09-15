@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog } = require('electron')
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const { spawn, exec } = require('child_process')
@@ -33,6 +33,120 @@ const writeConfig = (cfg) => {
 let bridgeProc = null
 let tray = null
 let win = null
+let installingUpdate = false
+let updateStatus = { state: 'idle', message: 'Pop Connect atualizado.' }
+
+const LOGIN_START_ARG = '--popsystem-login-start'
+const POPSYSTEM_PWA_URL = 'https://popsystem.com.br/pwa?source=installed'
+
+const setLoginStartup = (enabled) => {
+  const settings = { openAtLogin: Boolean(enabled) }
+  if (process.platform === 'win32') settings.args = [LOGIN_START_ARG]
+  app.setLoginItemSettings(settings)
+}
+
+const emitUpdateStatus = (state, message) => {
+  updateStatus = { state, message: String(message || '') }
+  if (win && !win.isDestroyed()) win.webContents.send('bridge:updateStatus', updateStatus)
+}
+
+const findInstalledPwaShortcut = () => {
+  if (process.platform !== 'win32') return ''
+  const programs = path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs')
+  const candidates = [
+    path.join(programs, 'Chrome Apps'),
+    path.join(programs, 'Microsoft Edge Apps'),
+    path.join(programs, 'Edge Apps'),
+  ]
+  for (const directory of candidates) {
+    try {
+      const match = fs.readdirSync(directory, { withFileTypes: true }).find((entry) => {
+        const normalized = entry.name.toLowerCase().replace(/[^a-z0-9]/g, '')
+        return entry.isFile() && entry.name.toLowerCase().endsWith('.lnk') && normalized.includes('popsystem')
+      })
+      if (match) return path.join(directory, match.name)
+    } catch {}
+  }
+  return ''
+}
+
+const launchPopSystemPwa = async () => {
+  if (process.platform !== 'win32') return
+  const shortcut = findInstalledPwaShortcut()
+  if (shortcut) {
+    const error = await shell.openPath(shortcut)
+    if (!error) return
+    logStartupError('pwa shortcut', error)
+  }
+
+  const localAppData = process.env.LOCALAPPDATA || ''
+  const programFiles = process.env.ProgramFiles || ''
+  const programFilesX86 = process.env['ProgramFiles(x86)'] || ''
+  const browserCandidates = [
+    path.join(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    path.join(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    path.join(programFilesX86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    path.join(programFilesX86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    path.join(programFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+  ].filter(Boolean)
+  const browserPath = browserCandidates.find((candidate) => fs.existsSync(candidate))
+  if (browserPath) {
+    const browser = spawn(browserPath, [`--app=${POPSYSTEM_PWA_URL}`, '--start-maximized'], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: false,
+    })
+    browser.unref()
+    return
+  }
+  await shell.openExternal(POPSYSTEM_PWA_URL)
+}
+
+const configureAutoUpdater = () => {
+  // O canal atual publica instaladores NSIS. O macOS continuará usando a
+  // versão instalada até termos artefatos assinados e um canal próprio.
+  if (!app.isPackaged || process.platform !== 'win32') return
+  let autoUpdater
+  try {
+    autoUpdater = require('electron-updater').autoUpdater
+  } catch (error) {
+    logStartupError('auto updater unavailable', error)
+    return
+  }
+
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.allowPrerelease = false
+  autoUpdater.setFeedURL({
+    provider: 'generic',
+    url: 'https://popsystem.com.br/api/bridge/update',
+  })
+  autoUpdater.logger = {
+    info: (...args) => logStartupError('auto update info', args.join(' ')),
+    warn: (...args) => logStartupError('auto update warning', args.join(' ')),
+    error: (...args) => logStartupError('auto update error', args.join(' ')),
+    debug: () => {},
+  }
+  autoUpdater.on('checking-for-update', () => emitUpdateStatus('checking', 'Verificando atualização...'))
+  autoUpdater.on('update-available', (info) => emitUpdateStatus('downloading', `Baixando Pop Connect ${info?.version || ''}...`))
+  autoUpdater.on('update-not-available', () => emitUpdateStatus('ready', 'Pop Connect atualizado.'))
+  autoUpdater.on('download-progress', (progress) => {
+    emitUpdateStatus('downloading', `Baixando atualização: ${Math.round(Number(progress?.percent) || 0)}%`)
+  })
+  autoUpdater.on('update-downloaded', () => {
+    installingUpdate = true
+    emitUpdateStatus('installing', 'Instalando atualização automática...')
+    stopBridge()
+    setTimeout(() => autoUpdater.quitAndInstall(false, true), 700)
+  })
+  autoUpdater.on('error', (error) => {
+    logStartupError('auto update', error)
+    emitUpdateStatus('error', 'Não foi possível verificar a atualização agora.')
+  })
+  setTimeout(() => {
+    autoUpdater.checkForUpdates().catch((error) => logStartupError('auto update check', error))
+  }, 1800)
+}
 
 function bitmapToEscPos(bitmap, width, height, options = {}) {
   const safeWidth = Math.max(1, Number(width) || 1)
@@ -319,6 +433,7 @@ const createWindow = () => {
   })
   win.loadFile(path.join(__dirname, 'bridge-ui.html'))
   win.on('close', (e) => {
+    if (installingUpdate) return
     e.preventDefault()
     win.hide()
   })
@@ -568,10 +683,26 @@ ipcMain.handle('bridge:getAutoStart', async () => {
 })
 
 ipcMain.handle('bridge:setAutoStart', async (_event, payload) => {
+  const cfg = readConfig()
   const enabled = payload?.enabled !== false
-  app.setLoginItemSettings({ openAtLogin: enabled })
+  writeConfig({ ...cfg, autoStartEnabled: enabled })
+  setLoginStartup(enabled)
   return { ok: true, enabled }
 })
+
+ipcMain.handle('bridge:getOpenPwaAtLogin', async () => {
+  const cfg = readConfig()
+  return { ok: true, enabled: cfg?.openPwaAtLogin !== false }
+})
+
+ipcMain.handle('bridge:setOpenPwaAtLogin', async (_event, payload) => {
+  const cfg = readConfig()
+  const enabled = payload?.enabled !== false
+  writeConfig({ ...cfg, openPwaAtLogin: enabled })
+  return { ok: true, enabled }
+})
+
+ipcMain.handle('bridge:getUpdateStatus', async () => ({ ok: true, ...updateStatus }))
 
 app.whenReady().then(() => {
   if (!hasSingleInstanceLock) return
@@ -580,7 +711,11 @@ app.whenReady().then(() => {
     createTray()
     const cfg = readConfig()
     startBridge(cfg?.token || '')
-    app.setLoginItemSettings({ openAtLogin: true })
+    setLoginStartup(cfg?.autoStartEnabled !== false)
+    if (process.argv.includes(LOGIN_START_ARG) && cfg?.openPwaAtLogin !== false) {
+      setTimeout(() => launchPopSystemPwa().catch((error) => logStartupError('launch pwa', error)), 1200)
+    }
+    configureAutoUpdater()
   } catch (error) {
     showStartupError('startup', error)
     if (!win) app.quit()

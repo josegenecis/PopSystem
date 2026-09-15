@@ -12,11 +12,12 @@ if (import.meta.env.PROD) {
 // Global Error Handler for debugging white screens
 window.addEventListener('error', (event) => {
   console.error('Global Error Caught:', event.error);
-  // Optional: You could render a fallback UI directly into document.body here if React fails completely
+  void recoverFromStaleChunk(event.error || event.message);
 });
 
 window.addEventListener('unhandledrejection', (event) => {
   console.error('Unhandled Promise Rejection:', event.reason);
+  void recoverFromStaleChunk(event.reason);
 });
 
 // Service Worker: registrar sempre em produção para habilitar PWA

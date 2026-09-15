@@ -2,8 +2,13 @@ const RECOVERY_KEY = 'popsystem:chunk-recovery';
 const RECOVERY_WINDOW_MS = 60_000;
 
 export function isStaleChunkError(error: unknown): boolean {
-  const message = String((error as any)?.message || error || '');
-  return /Failed to fetch dynamically imported module|Importing a module script failed|ChunkLoadError|Loading chunk .+ failed/i.test(message);
+  const candidate = error as { name?: unknown; message?: unknown; cause?: unknown } | null;
+  const message = [candidate?.name, candidate?.message, candidate?.cause, error]
+    .filter(Boolean)
+    .map(String)
+    .join(' ');
+
+  return /Failed to fetch dynamically imported module|Importing a module script failed|ChunkLoadError|Loading chunk .+ failed|not a valid JavaScript MIME type|Expected a JavaScript(?:-or-Wasm)? module script|MIME type.{0,80}(?:text\/html|application\/html)/i.test(message);
 }
 
 export async function recoverFromStaleChunk(error: unknown): Promise<boolean> {
@@ -29,4 +34,3 @@ export async function recoverFromStaleChunk(error: unknown): Promise<boolean> {
   }
   return true;
 }
-

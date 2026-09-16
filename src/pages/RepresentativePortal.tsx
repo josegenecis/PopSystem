@@ -75,12 +75,24 @@ export default function RepresentativePortal() {
 
   const invoke = useCallback(async (body: Record<string, unknown>) => {
     const { data, error } = await supabase.functions.invoke('representative-portal', { body });
-    if (error) throw error;
+    if (error) {
+      let message = data?.error;
+      const context = 'context' in error ? error.context : null;
+      if (!message && context instanceof Response) {
+        try {
+          const responseBody = await context.clone().json();
+          message = responseBody?.error;
+        } catch {
+          // A mensagem padrão abaixo cobre respostas sem corpo JSON.
+        }
+      }
+      throw new Error(message || 'Não foi possível validar o acesso de representante.');
+    }
     if (!data?.ok) throw new Error(data?.error || 'Operação não concluída.');
     return data;
   }, []);
 
-  const loadPortal = useCallback(async () => {
+  const loadPortal = useCallback(async (silent = false) => {
     setLoading(true);
     try {
       const response = await invoke({ action: 'list' });
@@ -88,9 +100,10 @@ export default function RepresentativePortal() {
       setLeads((response.leads || []) as CommercialLead[]);
       setVisits((response.visits || []) as RepresentativeVisit[]);
       setAuthenticated(true);
-    } catch {
+    } catch (error) {
       setAuthenticated(false);
       setRepresentative(null);
+      if (!silent) throw error;
     } finally {
       setLoading(false);
     }
@@ -98,7 +111,7 @@ export default function RepresentativePortal() {
 
   useEffect(() => {
     void supabase.auth.getSession().then(({ data }) => {
-      if (data.session) void loadPortal();
+      if (data.session) void loadPortal(true);
       else setLoading(false);
     });
   }, [loadPortal]);
@@ -109,7 +122,7 @@ export default function RepresentativePortal() {
     try {
       const { error } = await supabase.auth.signInWithPassword({ email: loginEmail.trim(), password: loginPassword });
       if (error) throw error;
-      await loadPortal();
+      await loadPortal(false);
       setLoginPassword('');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Não foi possível entrar.');
@@ -194,11 +207,11 @@ export default function RepresentativePortal() {
 
   if (!authenticated) {
     return (
-      <main className="relative min-h-screen overflow-hidden bg-[#eef3ed] px-3 py-3 sm:px-5 sm:py-5 lg:px-8 lg:py-6">
+      <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#eef3ed] px-4 py-6 sm:px-6 lg:px-8 lg:py-6">
         <div className="pointer-events-none absolute -left-32 top-1/4 h-80 w-80 rounded-full bg-[#8dcc3f]/20 blur-3xl" />
         <div className="pointer-events-none absolute -right-20 bottom-0 h-96 w-96 rounded-full bg-[#ff6a00]/10 blur-3xl" />
 
-        <div className="relative mx-auto grid min-h-[calc(100vh-1.5rem)] w-full max-w-[1240px] overflow-hidden rounded-[28px] border border-white bg-white shadow-[0_35px_100px_-48px_rgba(0,55,38,0.5)] sm:min-h-[calc(100vh-2.5rem)] lg:grid-cols-[1.08fr_0.92fr]">
+        <div className="relative mx-auto w-full max-w-[460px] overflow-hidden rounded-[28px] border border-white bg-white shadow-[0_35px_100px_-48px_rgba(0,55,38,0.5)] lg:grid lg:min-h-[calc(100vh-3rem)] lg:max-w-[1240px] lg:grid-cols-[1.08fr_0.92fr]">
           <section className="relative isolate hidden min-h-[700px] overflow-hidden bg-[#033b2c] px-12 py-11 text-white lg:flex lg:flex-col xl:px-16">
             <div className="pointer-events-none absolute inset-0 -z-20 bg-[radial-gradient(circle_at_85%_10%,rgba(74,196,82,0.22),transparent_30%),linear-gradient(145deg,#043e2e_0%,#013126_60%,#00271e_100%)]" />
             <div className="pointer-events-none absolute -bottom-28 -left-24 -z-10 h-72 w-[130%] -rotate-6 rounded-[50%] border-t-[12px] border-[#ff6a00] bg-[#07533c]" />
@@ -207,11 +220,11 @@ export default function RepresentativePortal() {
               <img src={brandLogo} alt="PopSystem" className="h-9 w-auto xl:h-10" />
             </div>
 
-            <div className="relative z-20 mt-12 max-w-[500px]">
+            <div className="relative z-20 mt-12 max-w-[430px]">
               <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-4 py-2 text-xs font-bold uppercase tracking-[0.16em] text-[#b9ed72]">
                 <BadgeCheck className="h-4 w-4" /> Time comercial PopSystem
               </span>
-              <h1 className="mt-6 text-[42px] font-black leading-[1.05] tracking-[-0.04em] xl:text-[50px]">
+              <h1 className="mt-6 text-[40px] font-black leading-[1.04] tracking-[-0.04em] xl:text-[44px]">
                 Sua presença em campo.<br /><span className="text-[#ff7a16]">Nosso crescimento.</span>
               </h1>
               <p className="mt-5 max-w-[440px] text-[15px] leading-7 text-emerald-50/80">
@@ -219,34 +232,34 @@ export default function RepresentativePortal() {
               </p>
             </div>
 
-            <div className="relative z-20 mt-8 grid max-w-[360px] gap-3">
+            <div className="relative z-20 mt-8 grid max-w-[330px] gap-3">
               <div className="flex items-center gap-3 text-sm font-semibold text-white/90"><span className="grid h-9 w-9 place-items-center rounded-xl bg-white/10 text-[#a6df5c]"><Route className="h-4 w-4" /></span>Visitas organizadas por território</div>
               <div className="flex items-center gap-3 text-sm font-semibold text-white/90"><span className="grid h-9 w-9 place-items-center rounded-xl bg-white/10 text-[#a6df5c]"><ShieldCheck className="h-4 w-4" /></span>Carteira individual e protegida</div>
               <div className="flex items-center gap-3 text-sm font-semibold text-white/90"><span className="grid h-9 w-9 place-items-center rounded-xl bg-white/10 text-[#a6df5c]"><Headphones className="h-4 w-4" /></span>Contato direto com o time PopSystem</div>
             </div>
 
-            <img src={brandMascot} alt="Mascote PopSystem" className="pointer-events-none absolute -bottom-16 -right-16 z-10 h-[455px] w-auto max-w-none object-contain xl:-right-10 xl:h-[510px]" />
+            <img src={brandMascot} alt="Mascote PopSystem" className="pointer-events-none absolute -bottom-5 -right-3 z-10 h-[315px] w-auto max-w-none object-contain xl:right-1 xl:h-[340px]" />
           </section>
 
-          <section className="flex min-h-[620px] flex-col justify-center px-6 py-10 sm:px-12 lg:min-h-0 lg:px-14 xl:px-20">
-            <div className="relative mb-9 h-28 overflow-hidden rounded-2xl bg-[#033b2c] shadow-xl lg:hidden">
-              <div className="absolute -bottom-16 -left-10 h-28 w-[125%] -rotate-6 rounded-[50%] border-t-4 border-[#ff6a00] bg-[#07533c]" />
-              <div className="absolute left-4 top-4 z-10 rounded-xl bg-white px-4 py-2.5 shadow-lg"><img src={brandLogo} alt="PopSystem" className="h-7 w-auto" /></div>
-              <img src={brandMascot} alt="Mascote PopSystem" className="absolute -bottom-7 right-2 z-10 h-36 w-auto object-contain" />
+          <section className="flex flex-col justify-center px-6 py-8 sm:px-10 sm:py-10 lg:min-h-0 lg:px-14 xl:px-20">
+            <div className="mb-7 flex justify-center lg:hidden">
+              <div className="rounded-2xl bg-white px-5 py-3 shadow-[0_12px_35px_-18px_rgba(0,55,38,0.45)] ring-1 ring-emerald-950/5">
+                <img src={brandLogo} alt="PopSystem" className="h-9 w-auto" />
+              </div>
             </div>
             <div className="mx-auto w-full max-w-[430px]">
-              <div className="grid h-12 w-12 place-items-center rounded-2xl bg-[#eaf6df] text-[#078844]"><Route className="h-6 w-6" /></div>
-              <p className="mt-6 text-xs font-extrabold uppercase tracking-[0.2em] text-[#ef5b0c]">PopSystem em campo</p>
-              <h2 className="mt-2 text-3xl font-black tracking-[-0.035em] text-[#082f26] sm:text-4xl">Portal do representante</h2>
-              <p className="mt-3 text-sm leading-6 text-slate-500">Entre com seu acesso comercial para registrar visitas e acompanhar seus contatos.</p>
+              <div className="hidden h-12 w-12 place-items-center rounded-2xl bg-[#eaf6df] text-[#078844] lg:grid"><Route className="h-6 w-6" /></div>
+              <p className="hidden text-xs font-extrabold uppercase tracking-[0.2em] text-[#ef5b0c] lg:mt-6 lg:block">PopSystem em campo</p>
+              <h2 className="text-center text-[28px] font-black tracking-[-0.035em] text-[#082f26] sm:text-3xl lg:mt-2 lg:text-left lg:text-4xl">Portal do representante</h2>
+              <p className="mt-3 text-center text-sm leading-6 text-slate-500 lg:text-left">Entre com seu acesso comercial para registrar visitas e acompanhar seus contatos.</p>
 
-              <form className="mt-8 space-y-5" onSubmit={handleLogin}>
+              <form className="mt-7 space-y-5 lg:mt-8" onSubmit={handleLogin}>
                 <div className="space-y-2"><Label htmlFor="representative-email" className="font-bold text-[#164d3e]">E-mail</Label><Input className="h-12 rounded-xl border-slate-200 bg-slate-50 focus-visible:ring-[#109352]" id="representative-email" type="email" autoComplete="email" required value={loginEmail} onChange={(event) => setLoginEmail(event.target.value)} /></div>
                 <div className="space-y-2"><Label htmlFor="representative-password" className="font-bold text-[#164d3e]">Senha</Label><Input className="h-12 rounded-xl border-slate-200 bg-slate-50 focus-visible:ring-[#109352]" id="representative-password" type="password" autoComplete="current-password" required value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} /></div>
                 <Button className="h-12 w-full rounded-xl bg-[#ff650b] font-extrabold text-white shadow-lg shadow-orange-500/20 hover:bg-[#ea5700]" disabled={loading}>{loading ? 'Entrando…' : <span className="flex items-center gap-2">Acessar minha carteira <ArrowRight className="h-4 w-4" /></span>}</Button>
               </form>
 
-              <div className="mt-8 flex items-center justify-center gap-2 border-t border-slate-100 pt-6 text-xs text-slate-400"><ShieldCheck className="h-4 w-4 text-[#169354]" />Acesso exclusivo para representantes autorizados</div>
+              <div className="mt-7 flex items-center justify-center gap-2 border-t border-slate-100 pt-5 text-center text-xs text-slate-400 lg:mt-8 lg:pt-6"><ShieldCheck className="h-4 w-4 shrink-0 text-[#169354]" />Acesso exclusivo para representantes autorizados</div>
             </div>
           </section>
         </div>

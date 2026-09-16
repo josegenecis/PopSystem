@@ -365,10 +365,29 @@ serve(async (req) => {
         email_confirm: true,
         user_metadata: { full_name: representativeName, internal_account_type: "representative" },
       });
-      if (createError || !created.user) return json({ ok: false, error: createError?.message || "Representante não criado." }, 409);
+      let representativeAuthUser = created.user;
+      let linkedExistingAccount = false;
+      if (createError || !representativeAuthUser) {
+        const alreadyRegistered = /already|registered|exists/i.test(String(createError?.message || ""));
+        if (!alreadyRegistered) return json({ ok: false, error: createError?.message || "Representante não criado." }, 409);
+        const { data: authUsers, error: listUsersError } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
+        representativeAuthUser = authUsers?.users?.find((candidate) => candidate.email?.toLowerCase() === representativeEmail) || null;
+        if (listUsersError || !representativeAuthUser) {
+          return json({ ok: false, error: "A conta já existe, mas não foi possível vinculá-la ao portal." }, 409);
+        }
+        linkedExistingAccount = true;
+      }
+
+      const { data: existingMember } = await supabase.from("internal_admin_members")
+        .select("id,email,display_name,role,active")
+        .or(`auth_user_id.eq.${representativeAuthUser.id},email.eq.${representativeEmail}`)
+        .maybeSingle();
+      if (existingMember) {
+        return json({ ok: false, error: "Esta conta já possui um acesso interno cadastrado." }, 409);
+      }
 
       const { data: member, error: memberError } = await supabase.from("internal_admin_members").insert({
-        auth_user_id: created.user.id,
+        auth_user_id: representativeAuthUser.id,
         email: representativeEmail,
         display_name: representativeName,
         role: "representative",
@@ -376,7 +395,7 @@ serve(async (req) => {
         active: true,
       }).select("id,email,display_name,role,active").single();
       if (memberError || !member) {
-        await supabase.auth.admin.deleteUser(created.user.id);
+        if (!linkedExistingAccount) await supabase.auth.admin.deleteUser(representativeAuthUser.id);
         return json({ ok: false, error: memberError?.message || "Acesso do representante não criado." }, 500);
       }
       await supabase.from("internal_admin_audit_events").insert({
@@ -386,7 +405,7 @@ serve(async (req) => {
         entity_id: member.id,
         after_data: member,
       });
-      return json({ ok: true, representative: member });
+      return json({ ok: true, representative: member, linkedExistingAccount });
     }
 
     if (body?.action === "grant_subscription_access_24h") {

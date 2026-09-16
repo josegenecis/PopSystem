@@ -47,7 +47,9 @@ export default function RepresentativeManagement({ token, members, leads, onRefr
       if (!data?.ok) throw new Error(data?.error || 'Representante não criado.');
       setName(''); setEmail(''); setPassword('');
       await onRefresh();
-      toast.success('Representante criado. O acesso já está disponível em /representante.');
+      toast.success(data?.linkedExistingAccount
+        ? 'Conta existente vinculada. O representante deve usar a senha que já possuía.'
+        : 'Representante criado. O acesso já está disponível em /representante.');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Não foi possível criar o representante.');
     } finally {

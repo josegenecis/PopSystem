@@ -1,5 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { resolveStoreUserId } from '../_shared/multi-store.ts';
+import { sendWhatsAppByConfiguredProvider } from '../_shared/whatsapp-provider.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -126,10 +128,16 @@ serve(async (req) => {
   }
 
   try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
     const supabaseClient = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
+      supabaseUrl,
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
       { global: { headers: { Authorization: req.headers.get('Authorization')! } } }
+    );
+    const supabaseAdmin = createClient(
+      supabaseUrl,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || Deno.env.get('SERVICE_ROLE_KEY') || '',
+      { auth: { persistSession: false, autoRefreshToken: false } }
     );
 
     const {
@@ -140,37 +148,56 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const restaurant_id = user.id;
+    const requestBody = await req.json().catch(() => ({}));
+    const restaurant_id = await resolveStoreUserId(supabaseAdmin, user.id, requestBody?._storeId);
     const instanceSuffix = restaurant_id.replace(/-/g, '');
     const instanceName = `rest_${instanceSuffix}`;
     const instanceToken = `token_${instanceSuffix}`;
     const baseUrl = evolutionBaseUrl();
     const globalApiKey = evolutionApiKey();
 
-    const { number, message = '', mediaUrl, mediaType, mimeType, fileName } = await req.json();
+    const { number, message = '', mediaUrl, mediaType, mimeType, fileName } = requestBody;
 
     if (!number || (!String(message).trim() && !mediaUrl)) {
       return new Response(JSON.stringify({ error: 'Missing number or content' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const sent = await sendEvolutionMessage({
-      baseUrl,
-      globalApiKey,
-      instanceName,
-      instanceToken,
-      number,
-      message: String(message || '').trim(),
+    const configuredProvider = await sendWhatsAppByConfiguredProvider({
+      supabase: supabaseAdmin,
+      restaurantId: restaurant_id,
+      phone: number,
+      text: String(message || '').trim(),
       mediaUrl: String(mediaUrl || '').trim() || undefined,
       mediaType,
       mimeType,
-      fileName
+      fileName,
     });
-    const evoRes = sent.response;
-    const evoData = sent.data;
+    let providerResult: any = configuredProvider;
+    if (!providerResult) {
+      const sent = await sendEvolutionMessage({
+        baseUrl,
+        globalApiKey,
+        instanceName,
+        instanceToken,
+        number,
+        message: String(message || '').trim(),
+        mediaUrl: String(mediaUrl || '').trim() || undefined,
+        mediaType,
+        mimeType,
+        fileName
+      });
+      providerResult = {
+        ok: sent.response.ok,
+        status: sent.response.status,
+        data: sent.data,
+        providerMessageId: pickProviderMessageId(sent.data) || null,
+        transport: 'evolution',
+      };
+    }
 
-    if (!evoRes.ok) {
-      console.error("Evolution API Error (Send Message):", evoData);
-      return new Response(JSON.stringify({ error: true, message: 'Failed to send message', details: evoData, status: evoRes.status }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    if (!providerResult.ok) {
+      console.error("WhatsApp provider send error:", providerResult);
+      return new Response(JSON.stringify({ error: true, message: 'Failed to send message', details: providerResult.data || providerResult.error, status: providerResult.status }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
     const pause = getManualPauseWindow();
@@ -193,14 +220,14 @@ serve(async (req) => {
       updated_at: pause.nowIso
     };
 
-    let pauseResult = await supabaseClient
+    let pauseResult = await supabaseAdmin
       .from('whatsapp_conversations')
       .update(pausePayload)
       .eq('user_id', restaurant_id)
       .in('customer_phone', phoneCandidates);
 
     if (pauseResult.error && /bot_paused|owner|current_state|last_human_message_at|ai_resume_at|metadata|schema cache|column/i.test(String(pauseResult.error.message || ''))) {
-      pauseResult = await supabaseClient
+      pauseResult = await supabaseAdmin
         .from('whatsapp_conversations')
         .update({
           status: pause.status,
@@ -226,14 +253,14 @@ serve(async (req) => {
       last_message_at: pause.nowIso
     };
 
-    const aiPauseResult = await supabaseClient
+    const aiPauseResult = await supabaseAdmin
       .from('ai_conversations')
       .update(aiPausePayload)
       .eq('restaurant_id', restaurant_id)
       .in('phone', phoneCandidates);
 
     if (aiPauseResult.error && /owner|current_state|last_human_message_at|ai_resume_at|metadata|schema cache|column/i.test(String(aiPauseResult.error.message || ''))) {
-      await supabaseClient
+      await supabaseAdmin
         .from('ai_conversations')
         .update({
           status: 'human_active',
@@ -244,7 +271,7 @@ serve(async (req) => {
         .in('phone', phoneCandidates);
     }
 
-    return new Response(JSON.stringify({ success: true, data: evoData, providerMessageId: pickProviderMessageId(evoData) || null }), {
+    return new Response(JSON.stringify({ success: true, data: providerResult.data, providerMessageId: providerResult.providerMessageId || pickProviderMessageId(providerResult.data) || null, provider: providerResult.transport }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

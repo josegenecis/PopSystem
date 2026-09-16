@@ -2137,6 +2137,7 @@ export type Database = {
           enabled: boolean | null
           id: string
           phone_number: string
+          provider: string
           updated_at: string
           user_id: string
         }
@@ -2148,6 +2149,7 @@ export type Database = {
           enabled?: boolean | null
           id?: string
           phone_number: string
+          provider?: string
           updated_at?: string
           user_id: string
         }
@@ -2159,6 +2161,7 @@ export type Database = {
           enabled?: boolean | null
           id?: string
           phone_number?: string
+          provider?: string
           updated_at?: string
           user_id?: string
         }

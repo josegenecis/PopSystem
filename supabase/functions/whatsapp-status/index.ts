@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveStoreUserId } from "../_shared/multi-store.ts";
+import { getActiveWhatsAppProvider, getMetaWhatsAppAccount, metaGraphBaseUrl } from '../_shared/whatsapp-provider.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -176,6 +177,37 @@ serve(async (req) => {
 
     const requestBody = await req.json().catch(() => ({}));
     const restaurant_id = await resolveStoreUserId(supabaseAdmin, user.id, requestBody?._storeId);
+    const provider = await getActiveWhatsAppProvider(supabaseAdmin, restaurant_id);
+    if (provider === 'meta_cloud') {
+      const account = await getMetaWhatsAppAccount(supabaseAdmin, restaurant_id);
+      if (!account) {
+        return new Response(JSON.stringify({ status: 'disconnected', provider: 'meta_cloud', error: 'Conta oficial não encontrada.' }), {
+          status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      const response = await fetch(
+        `${metaGraphBaseUrl()}/${encodeURIComponent(account.phone_number_id)}?fields=id,display_phone_number,verified_name,quality_rating`,
+        { headers: { Authorization: `Bearer ${account.access_token}` } },
+      ).catch(() => null);
+      const data = response ? await response.json().catch(() => ({})) : {};
+      const connected = Boolean(response?.ok && data?.id);
+      await supabaseAdmin.from('whatsapp_provider_accounts').update({
+        status: connected ? 'connected' : 'error',
+        display_phone_number: data?.display_phone_number || account.display_phone_number || null,
+        verified_name: data?.verified_name || account.verified_name || null,
+        last_verified_at: new Date().toISOString(),
+        last_error: connected ? null : String(data?.error?.message || 'Não foi possível validar a conexão com a Meta.'),
+        updated_at: new Date().toISOString(),
+      }).eq('restaurant_id', restaurant_id).eq('provider', 'meta_cloud');
+      return new Response(JSON.stringify({
+        status: connected ? 'connected' : 'disconnected',
+        provider: 'meta_cloud',
+        phone: data?.display_phone_number || account.display_phone_number || null,
+        verifiedName: data?.verified_name || account.verified_name || null,
+        qualityRating: data?.quality_rating || null,
+        error: connected ? null : String(data?.error?.message || 'Conexão oficial inválida.'),
+      }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
     const instanceSuffix = restaurant_id.replace(/-/g, '');
     const instanceName = `rest_${instanceSuffix}`;
     const instanceToken = `token_${instanceSuffix}`;
@@ -293,7 +325,7 @@ serve(async (req) => {
       await ensureWhatsAppSettingsEnabled(supabaseAdmin, restaurant_id, baseUrl, globalApiKey);
     }
 
-    return new Response(JSON.stringify({ status: newStatus, phone, webhook: webhookResult, instanceNames: providerNames }), {
+    return new Response(JSON.stringify({ status: newStatus, phone, provider: 'evolution', webhook: webhookResult, instanceNames: providerNames }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

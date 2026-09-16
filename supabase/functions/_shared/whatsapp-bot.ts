@@ -1731,7 +1731,7 @@ async function sendEvolutionTypingPresence(instance: string, number: string, sec
   }
 }
 
-export async function sendEvolutionText(restaurantId: string, instanceName: string, phone: string, text: string) {
+export async function sendEvolutionText(restaurantId: string, instanceName: string, phone: string, text: string, supabase?: any) {
   const EVOLUTION_BASE_URL = getEnv('EVOLUTION_BASE_URL');
   const EVOLUTION_API_KEY = getEnv('EVOLUTION_API_KEY');
   const fallbackRestaurantId = String(restaurantId || '').trim();
@@ -1742,6 +1742,12 @@ export async function sendEvolutionText(restaurantId: string, instanceName: stri
 
   if (!number || !message) {
     return { ok: false, skipped: true };
+  }
+
+  // Webhooks oficiais usam uma instância lógica meta:<phone_number_id>. Nesse
+  // caso a resposta precisa voltar pela Graph API, sem tentar a Evolution.
+  if (instance.startsWith('meta:')) {
+    return sendRestaurantWhatsApp(fallbackRestaurantId, number, message, supabase);
   }
 
   const base = EVOLUTION_BASE_URL.replace(/\/$/, '');
@@ -1895,7 +1901,8 @@ async function sendTrackedBotText(params: {
     params.restaurantId,
     params.instanceName,
     params.customerPhone,
-    params.replyText
+    params.replyText,
+    params.supabase
   );
 }
 

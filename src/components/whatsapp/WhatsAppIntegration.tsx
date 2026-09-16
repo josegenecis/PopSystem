@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { QrCode, MessageCircle } from 'lucide-react';
+import { BadgeCheck, Cloud, Loader2, QrCode, MessageCircle, Unplug } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
@@ -20,10 +20,22 @@ const defaultAutoMessages = {
   welcome: 'Olá! 👋 Bem-vindo ao {restaurant_name}.\n\nClique aqui e faça seu pedido: {menu_link}'
 };
 
+type MetaLoginResponse = { authResponse?: { code?: string } };
+type MetaSdk = {
+  init: (options: { appId: string; cookie: boolean; xfbml: boolean; version: string }) => void;
+  login: (callback: (response: MetaLoginResponse) => void, options: Record<string, unknown>) => void;
+};
+type MetaWindow = Window & { FB?: MetaSdk; fbAsyncInit?: () => void };
+
+const errorMessage = (error: unknown, fallback: string) => error instanceof Error ? error.message : fallback;
+
 const WhatsAppIntegration: React.FC = () => {
   const [settings, setSettings] = useState({
     phone_number: '',
     connected: false,
+    provider: 'evolution' as 'evolution' | 'meta_cloud',
+    verified_name: '',
+    quality_rating: '',
     qr_code_data: '',
     auto_messages: defaultAutoMessages
   });
@@ -31,10 +43,14 @@ const WhatsAppIntegration: React.FC = () => {
   const { toast } = useToast();
   const { user } = useAuth();
   const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
+  const [metaAvailable, setMetaAvailable] = useState(false);
 
   useEffect(() => {
     loadSettings();
     checkStatus();
+    loadMetaConfig();
+    // Recarrega somente quando a conta ativa muda; as funções usam esse mesmo id.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
   const loadSettings = async () => {
@@ -55,7 +71,7 @@ const WhatsAppIntegration: React.FC = () => {
 
     const { data } = await supabase
       .from('whatsapp_settings')
-      .select('phone_number, auto_responses')
+      .select('phone_number, auto_responses, provider')
       .eq('user_id', user.id)
       .maybeSingle();
 
@@ -63,6 +79,7 @@ const WhatsAppIntegration: React.FC = () => {
       setSettings(prev => ({
         ...prev,
         phone_number: data.phone_number || prev.phone_number,
+        provider: data.provider === 'meta_cloud' ? 'meta_cloud' : 'evolution',
         auto_messages: {
           ...defaultAutoMessages,
           ...(typeof data.auto_responses === 'object' && data.auto_responses ? data.auto_responses as Record<string, string> : {})
@@ -71,15 +88,30 @@ const WhatsAppIntegration: React.FC = () => {
     }
   };
 
+  const loadMetaConfig = async () => {
+    if (!user?.id) return;
+    const { data } = await supabase.functions.invoke('whatsapp-meta-connect', {
+      body: { action: 'config', _storeId: user.id }
+    });
+    setMetaAvailable(Boolean(data?.available));
+  };
+
   const checkStatus = async () => {
     try {
       const { data, error } = await supabase.functions.invoke('whatsapp-status', {
         body: { _storeId: user?.id }
       });
       if (data?.status === 'connected') {
-        setSettings(prev => ({ ...prev, connected: true, phone_number: data.phone || prev.phone_number }));
+        setSettings(prev => ({
+          ...prev,
+          connected: true,
+          provider: data.provider === 'meta_cloud' ? 'meta_cloud' : 'evolution',
+          phone_number: data.phone || prev.phone_number,
+          verified_name: data.verifiedName || '',
+          quality_rating: data.qualityRating || ''
+        }));
       } else {
-        setSettings(prev => ({ ...prev, connected: false }));
+        setSettings(prev => ({ ...prev, connected: false, provider: data?.provider === 'meta_cloud' ? 'meta_cloud' : prev.provider }));
       }
     } catch (e) {
       console.error("Erro ao checar status inicial:", e);
@@ -95,6 +127,7 @@ const WhatsAppIntegration: React.FC = () => {
         const payload = {
           user_id: user.id,
           phone_number: settings.phone_number || '',
+          provider: settings.provider,
           default_message: settings.auto_messages.welcome || defaultAutoMessages.welcome,
           enabled: true,
           auto_responses: settings.auto_messages,
@@ -134,6 +167,145 @@ const WhatsAppIntegration: React.FC = () => {
         description: "Erro ao salvar configurações.",
         variant: "destructive"
       });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const ensureMetaSdk = async (appId: string, graphVersion = 'v23.0') => {
+    const metaWindow = window as MetaWindow;
+    if (metaWindow.FB) return;
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      let poll: number | undefined;
+      const finish = () => {
+        if (settled || !metaWindow.FB) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        if (poll) window.clearInterval(poll);
+        metaWindow.FB?.init({ appId, cookie: true, xfbml: false, version: graphVersion });
+        resolve();
+      };
+      const timeout = window.setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        if (poll) window.clearInterval(poll);
+        reject(new Error('O login da Meta demorou para carregar.'));
+      }, 15000);
+      metaWindow.fbAsyncInit = finish;
+      const existing = document.getElementById('facebook-jssdk');
+      if (existing) {
+        poll = window.setInterval(finish, 100);
+        finish();
+        return;
+      }
+      const script = document.createElement('script');
+      script.id = 'facebook-jssdk';
+      script.async = true;
+      script.defer = true;
+      script.crossOrigin = 'anonymous';
+      script.src = 'https://connect.facebook.net/pt_BR/sdk.js';
+      script.onload = finish;
+      script.onerror = () => {
+        settled = true;
+        window.clearTimeout(timeout);
+        if (poll) window.clearInterval(poll);
+        reject(new Error('Não foi possível carregar o login da Meta.'));
+      };
+      document.head.appendChild(script);
+    });
+  };
+
+  const connectMeta = async () => {
+    try {
+      setLoading(true);
+      const { data: config, error: configError } = await supabase.functions.invoke('whatsapp-meta-connect', {
+        body: { action: 'config', _storeId: user?.id }
+      });
+      if (configError || !config?.available || !config?.appId || !config?.configId) {
+        throw new Error('A conexão oficial ainda precisa das credenciais da Meta no servidor.');
+      }
+      await ensureMetaSdk(config.appId, config.graphVersion || 'v23.0');
+
+      let sessionInfo: { wabaId?: string; phoneNumberId?: string } = {};
+      const sessionListener = (event: MessageEvent) => {
+        if (!String(event.origin || '').endsWith('facebook.com')) return;
+        let payload: unknown = event.data;
+        if (typeof payload === 'string') {
+          try { payload = JSON.parse(payload); } catch { return; }
+        }
+        if (!payload || typeof payload !== 'object' || !('type' in payload) || payload.type !== 'WA_EMBEDDED_SIGNUP') return;
+        const data = 'data' in payload && payload.data && typeof payload.data === 'object'
+          ? payload.data as Record<string, unknown>
+          : {};
+        sessionInfo = {
+          wabaId: String(data.waba_id || data.wabaId || ''),
+          phoneNumberId: String(data.phone_number_id || data.phoneNumberId || '')
+        };
+      };
+      window.addEventListener('message', sessionListener);
+
+      const authResponse = await new Promise<{ code: string }>((resolve, reject) => {
+        const metaSdk = (window as MetaWindow).FB;
+        if (!metaSdk) {
+          reject(new Error('O SDK da Meta não foi inicializado.'));
+          return;
+        }
+        metaSdk.login((response: MetaLoginResponse) => {
+          if (response?.authResponse?.code) resolve(response.authResponse);
+          else reject(new Error('Conexão cancelada ou não autorizada na Meta.'));
+        }, {
+          config_id: config.configId,
+          response_type: 'code',
+          override_default_response_type: true,
+          extras: { featureType: 'whatsapp_business_app_onboarding', sessionInfoVersion: '3' }
+        });
+      }).finally(() => window.setTimeout(() => window.removeEventListener('message', sessionListener), 5000));
+
+      const deadline = Date.now() + 5000;
+      while ((!sessionInfo.wabaId || !sessionInfo.phoneNumberId) && Date.now() < deadline) {
+        await new Promise(resolve => window.setTimeout(resolve, 150));
+      }
+      window.removeEventListener('message', sessionListener);
+
+      const { data, error } = await supabase.functions.invoke('whatsapp-meta-connect', {
+        body: {
+          action: 'complete',
+          code: authResponse.code,
+          wabaId: sessionInfo.wabaId,
+          phoneNumberId: sessionInfo.phoneNumberId,
+          _storeId: user?.id
+        }
+      });
+      if (error || data?.error) throw new Error(data?.error || 'Não foi possível concluir a conexão oficial.');
+      setSettings(prev => ({
+        ...prev,
+        connected: true,
+        provider: 'meta_cloud',
+        phone_number: data.phone || prev.phone_number,
+        verified_name: data.verifiedName || ''
+      }));
+      setQrCodeUrl(null);
+      toast({ title: 'WhatsApp oficial conectado', description: 'As novas mensagens já usarão a Cloud API da Meta.' });
+    } catch (error: unknown) {
+      toast({ title: 'Não foi possível conectar à Meta', description: errorMessage(error, 'Tente novamente.'), variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const disconnectMeta = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase.functions.invoke('whatsapp-meta-connect', {
+        body: { action: 'disconnect', _storeId: user?.id }
+      });
+      if (error || data?.error) throw new Error(data?.error || 'Não foi possível desconectar.');
+      setSettings(prev => ({ ...prev, connected: false, provider: 'evolution', verified_name: '', quality_rating: '' }));
+      toast({ title: 'Conexão oficial desativada', description: 'A conexão por QR Code continua disponível.' });
+      await checkStatus();
+    } catch (error: unknown) {
+      toast({ title: 'Erro ao desconectar', description: errorMessage(error, 'Tente novamente.'), variant: 'destructive' });
     } finally {
       setLoading(false);
     }
@@ -224,11 +396,11 @@ const WhatsAppIntegration: React.FC = () => {
          throw new Error('Não foi possível gerar o QR Code. Aguarde alguns segundos e tente novamente.');       
       }
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Erro ao gerar QR Code:', error);
       toast({
         title: "Erro de Conexão",
-        description: error.message || "Verifique se a API está online.",
+        description: errorMessage(error, "Verifique se a API está online."),
         variant: "destructive"
       });
     } finally {
@@ -246,6 +418,29 @@ const WhatsAppIntegration: React.FC = () => {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {(metaAvailable || settings.provider === 'meta_cloud') && <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+              <div className="flex items-start gap-3">
+                <div className="rounded-full bg-emerald-600 p-2 text-white"><Cloud className="h-5 w-5" /></div>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <strong className="text-sm text-emerald-950">WhatsApp oficial da Meta</strong>
+                    {settings.provider === 'meta_cloud' && settings.connected ? <span className="inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white"><BadgeCheck className="h-3 w-3" />Ativo</span> : null}
+                  </div>
+                  <p className="mt-1 text-xs leading-5 text-emerald-800">Conexão estável, mensagens instantâneas e webhook oficial. A conexão atual por QR Code permanece disponível.</p>
+                  {settings.verified_name ? <p className="mt-1 text-xs font-semibold text-emerald-950">{settings.verified_name} · {settings.phone_number}</p> : null}
+                </div>
+              </div>
+              {settings.provider === 'meta_cloud' && settings.connected ? (
+                <Button type="button" variant="outline" onClick={disconnectMeta} disabled={loading} className="border-emerald-300 bg-white text-emerald-900"><Unplug className="mr-2 h-4 w-4" />Desconectar</Button>
+              ) : (
+                <Button type="button" onClick={connectMeta} disabled={loading || !metaAvailable} className="bg-emerald-700 hover:bg-emerald-800">
+                  {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BadgeCheck className="mr-2 h-4 w-4" />}
+                  {metaAvailable ? 'Conectar com a Meta' : 'Configuração pendente'}
+                </Button>
+              )}
+            </div>
+          </div>}
           <div className="space-y-2">
             <Label htmlFor="phone">Número do WhatsApp</Label>
             <div className="flex gap-2">

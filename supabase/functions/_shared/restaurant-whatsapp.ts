@@ -1,3 +1,5 @@
+import { sendWhatsAppByConfiguredProvider } from './whatsapp-provider.ts';
+
 const EVOLUTION_URL = "https://api.boracume.com";
 
 type AutoResponses = {
@@ -527,10 +529,18 @@ async function recordNotificationAttempt(
   }).then(() => undefined).catch(() => undefined);
 }
 
-export async function sendRestaurantWhatsApp(restaurantId: string, phone: string, text: string, supabase?: any) {
+export async function sendRestaurantWhatsApp(restaurantId: string, phone: string, text: string, supabase?: any): Promise<any> {
   const to = normalizePhone(phone);
   const message = String(text || "").trim();
   if (!restaurantId || !to || !message) return { ok: false, skipped: true };
+
+  const configuredProviderResult = await sendWhatsAppByConfiguredProvider({
+    supabase,
+    restaurantId,
+    phone: to,
+    text: message,
+  });
+  if (configuredProviderResult) return configuredProviderResult;
 
   const instanceToken = `token_${restaurantId.replace(/-/g, "")}`;
   const evolutionUrl = await loadEvolutionUrl(supabase, restaurantId);

@@ -111,6 +111,16 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/evolution-webhook/index.ts"
 
+[functions.whatsapp-meta-connect]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/whatsapp-meta-connect/index.ts"
+
+[functions.meta-whatsapp-webhook]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/meta-whatsapp-webhook/index.ts"
+
 [functions.waiter-web-auth]
 enabled = true
 verify_jwt = false

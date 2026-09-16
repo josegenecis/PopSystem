@@ -85,6 +85,8 @@ serve(async (req) => {
       const ownerName = clean(body?.ownerName, 120);
       const ownerPhone = normalizeBrazilPhone(body?.ownerPhone);
       const email = clean(body?.email, 255).toLowerCase() || null;
+      const submittedStreet = clean(body?.street, 180);
+      const submittedNeighborhood = clean(body?.neighborhood, 120);
       const streetNumber = clean(body?.streetNumber, 30) || null;
       const complement = clean(body?.complement, 120) || null;
       const notes = clean(body?.notes, 5000) || null;
@@ -100,6 +102,10 @@ serve(async (req) => {
       }
 
       const location = await lookupPostalCode(body?.postalCode);
+      const street = submittedStreet || location.street;
+      if (!street) {
+        return json({ ok: false, error: "Informe o endereço ou a rua do estabelecimento." }, 400);
+      }
       const { data: existing } = await supabase.from("commercial_leads").select("id,representative_member_id,marketing_consent,marketing_consent_at,commercial_stage").eq("owner_phone", ownerPhone).maybeSingle();
       if (existing && existing.representative_member_id !== representative.id) {
         return json({ ok: false, error: "Este contato já está cadastrado no funil comercial." }, 409);
@@ -122,8 +128,8 @@ serve(async (req) => {
         postal_code: location.postalCode,
         city: location.city,
         state: location.state,
-        neighborhood: location.neighborhood || null,
-        street: location.street || null,
+        neighborhood: submittedNeighborhood || location.neighborhood || null,
+        street,
         street_number: streetNumber,
         complement,
         interest_level: interestLevel,

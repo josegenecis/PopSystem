@@ -47,7 +47,7 @@ type PostalLocation = { postalCode: string; city: string; state: string; neighbo
 
 const initialForm = {
   restaurantName: '', ownerName: '', ownerPhone: '', email: '', postalCode: '',
-  streetNumber: '', complement: '', notes: '', interestLevel: 'warm', outcome: 'registered', marketingConsent: false,
+  street: '', streetNumber: '', neighborhood: '', complement: '', notes: '', interestLevel: 'warm', outcome: 'registered', marketingConsent: false,
 };
 
 const stageLabels: Record<string, string> = {
@@ -148,8 +148,14 @@ export default function RepresentativePortal() {
     setLookingUpPostalCode(true);
     try {
       const response = await invoke({ action: 'lookup_postal_code', postalCode });
-      setLocation(response.location as PostalLocation);
-      setForm((current) => ({ ...current, postalCode }));
+      const resolvedLocation = response.location as PostalLocation;
+      setLocation(resolvedLocation);
+      setForm((current) => ({
+        ...current,
+        postalCode,
+        street: resolvedLocation.street || current.street,
+        neighborhood: resolvedLocation.neighborhood || current.neighborhood,
+      }));
     } catch (error) {
       setLocation(null);
       toast.error(error instanceof Error ? error.message : 'CEP não encontrado.');
@@ -302,9 +308,12 @@ export default function RepresentativePortal() {
               <div className="space-y-2"><Label htmlFor="lead-owner">Proprietário *</Label><Input id="lead-owner" required value={form.ownerName} onChange={(event) => setForm((current) => ({ ...current, ownerName: event.target.value }))} /></div>
               <div className="space-y-2"><Label htmlFor="lead-phone">WhatsApp *</Label><Input id="lead-phone" type="tel" required placeholder="(85) 99999-9999" value={form.ownerPhone} onChange={(event) => setForm((current) => ({ ...current, ownerPhone: formatOwnerPhoneInput(event.target.value) }))} /></div>
               <div className="space-y-2 sm:col-span-2"><Label htmlFor="lead-email">E-mail</Label><Input id="lead-email" type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} /></div>
-              <div className="space-y-2"><Label htmlFor="lead-postal">CEP *</Label><div className="flex gap-2"><Input id="lead-postal" inputMode="numeric" maxLength={9} required value={form.postalCode} onChange={(event) => { setLocation(null); setForm((current) => ({ ...current, postalCode: event.target.value.replace(/\D/g, '').replace(/^(\d{5})(\d)/, '$1-$2') })); }} /><Button type="button" variant="outline" onClick={() => void lookupPostalCode()} disabled={lookingUpPostalCode}>{lookingUpPostalCode ? 'Buscando…' : 'Consultar'}</Button></div></div>
+              <div className="space-y-2"><Label htmlFor="lead-postal">CEP *</Label><div className="flex gap-2"><Input id="lead-postal" inputMode="numeric" maxLength={9} required value={form.postalCode} onChange={(event) => { setLocation(null); setForm((current) => ({ ...current, postalCode: event.target.value.replace(/\D/g, '').replace(/^(\d{5})(\d)/, '$1-$2'), street: '', neighborhood: '' })); }} /><Button type="button" variant="outline" onClick={() => void lookupPostalCode()} disabled={lookingUpPostalCode}>{lookingUpPostalCode ? 'Buscando…' : 'Consultar'}</Button></div></div>
               <div className="space-y-2"><Label htmlFor="lead-number">Número</Label><Input id="lead-number" value={form.streetNumber} onChange={(event) => setForm((current) => ({ ...current, streetNumber: event.target.value }))} /></div>
-              {location ? <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 sm:col-span-2"><MapPin className="mr-1 inline h-4 w-4" />{location.street ? `${location.street}, ` : ''}{location.neighborhood ? `${location.neighborhood} · ` : ''}{location.city}/{location.state}</div> : null}
+              {location ? <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900 sm:col-span-2"><MapPin className="mr-1 inline h-4 w-4" />CEP confirmado em {location.city}/{location.state}{!location.street ? ' — CEP geral: informe o endereço abaixo.' : ''}</div> : null}
+              <div className="space-y-2 sm:col-span-2"><Label htmlFor="lead-street">Endereço / rua *</Label><Input id="lead-street" required placeholder="Digite a rua ou avenida" value={form.street} onChange={(event) => setForm((current) => ({ ...current, street: event.target.value }))} /><p className="text-xs text-slate-500">Preenchido pelo CEP quando disponível. Em CEP geral da cidade, digite o endereço.</p></div>
+              <div className="space-y-2"><Label htmlFor="lead-neighborhood">Bairro</Label><Input id="lead-neighborhood" value={form.neighborhood} onChange={(event) => setForm((current) => ({ ...current, neighborhood: event.target.value }))} /></div>
+              <div className="space-y-2"><Label htmlFor="lead-complement">Complemento</Label><Input id="lead-complement" placeholder="Sala, loja, ponto de referência" value={form.complement} onChange={(event) => setForm((current) => ({ ...current, complement: event.target.value }))} /></div>
               <div className="space-y-2"><Label>Nível de interesse</Label><Select value={form.interestLevel} onValueChange={(value) => setForm((current) => ({ ...current, interestLevel: value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="cold">Baixo</SelectItem><SelectItem value="warm">Médio</SelectItem><SelectItem value="hot">Alto</SelectItem></SelectContent></Select></div>
               <div className="space-y-2"><Label>Resultado da visita</Label><Select value={form.outcome} onValueChange={(value) => setForm((current) => ({ ...current, outcome: value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="registered">Contato cadastrado</SelectItem><SelectItem value="interested">Interessado</SelectItem><SelectItem value="demo_scheduled">Demonstração agendada</SelectItem><SelectItem value="follow_up">Retornar contato</SelectItem><SelectItem value="not_interested">Sem interesse agora</SelectItem><SelectItem value="closed">Venda fechada</SelectItem></SelectContent></Select></div>
               <div className="space-y-2 sm:col-span-2"><Label htmlFor="lead-notes">Observações da visita</Label><Textarea id="lead-notes" rows={3} value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} /></div>

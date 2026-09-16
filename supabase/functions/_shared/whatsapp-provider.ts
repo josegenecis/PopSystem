@@ -41,6 +41,8 @@ export async function getActiveWhatsAppProvider(supabase: any, restaurantId: str
     .from('whatsapp_settings')
     .select('provider')
     .eq('user_id', restaurantId)
+    .order('updated_at', { ascending: false })
+    .limit(1)
     .maybeSingle();
   return data?.provider === 'meta_cloud' ? 'meta_cloud' : 'evolution';
 }

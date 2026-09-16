@@ -15,7 +15,11 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 
 async function readMeta(response: Response) {
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(String(data?.error?.message || `meta_http_${response.status}`));
+  if (!response.ok) {
+    const error = new Error(String(data?.error?.message || `meta_http_${response.status}`));
+    (error as Error & { code?: number }).code = Number(data?.error?.code || 0) || undefined;
+    throw error;
+  }
   return data;
 }
 
@@ -52,6 +56,51 @@ Deno.serve(async (req) => {
     const testPhoneNumberId = String(Deno.env.get('META_WHATSAPP_TEST_PHONE_NUMBER_ID') || '').trim();
     const testModeAvailable = Boolean(accessEnabled && testAccessToken && testWabaId && testPhoneNumberId);
 
+    const exchangeForLongLivedToken = async (accessToken: string) => {
+      if (!appId || !appSecret) return { accessToken, tokenExpiresAt: null as string | null };
+      const tokenUrl = new URL(`${metaGraphBaseUrl()}/oauth/access_token`);
+      tokenUrl.searchParams.set('grant_type', 'fb_exchange_token');
+      tokenUrl.searchParams.set('client_id', appId);
+      tokenUrl.searchParams.set('client_secret', appSecret);
+      tokenUrl.searchParams.set('fb_exchange_token', accessToken);
+      const response = await fetch(tokenUrl);
+      if (!response.ok) return { accessToken, tokenExpiresAt: null as string | null };
+      const data = await response.json().catch(() => ({}));
+      const exchangedToken = String(data?.access_token || '').trim();
+      const expiresIn = Number(data?.expires_in || 0);
+      return {
+        accessToken: exchangedToken || accessToken,
+        tokenExpiresAt: expiresIn > 0 ? new Date(Date.now() + expiresIn * 1000).toISOString() : null,
+      };
+    };
+
+    const activateSettings = async (phoneNumber: string) => {
+      const now = new Date().toISOString();
+      const settingsPayload = {
+        provider: 'meta_cloud', enabled: true, phone_number: phoneNumber, updated_at: now,
+      };
+      const existing = await admin
+        .from('whatsapp_settings')
+        .select('id')
+        .eq('user_id', restaurantId)
+        .limit(1)
+        .maybeSingle();
+      if (existing.error) throw existing.error;
+      if (existing.data?.id) {
+        // Atualiza todas as linhas legadas para impedir que uma duplicata antiga
+        // faça o sistema voltar silenciosamente para o Evolution.
+        const { error } = await admin.from('whatsapp_settings').update(settingsPayload).eq('user_id', restaurantId);
+        if (error) throw error;
+        return;
+      }
+      const { error } = await admin.from('whatsapp_settings').insert({
+        user_id: restaurantId,
+        default_message: 'Olá! Bem-vindo ao nosso restaurante. Como posso ajudar?',
+        ...settingsPayload,
+      });
+      if (error) throw error;
+    };
+
     const persistAccount = async (params: {
       accessToken: string;
       wabaId: string;
@@ -86,21 +135,7 @@ Deno.serve(async (req) => {
       }, { onConflict: 'restaurant_id,provider' });
       if (accountError) throw accountError;
 
-      const settingsPayload = {
-        provider: 'meta_cloud', enabled: true, phone_number: phoneData?.display_phone_number || '', updated_at: now,
-      };
-      const existing = await admin.from('whatsapp_settings').select('id').eq('user_id', restaurantId).maybeSingle();
-      if (existing.data?.id) {
-        const { error } = await admin.from('whatsapp_settings').update(settingsPayload).eq('id', existing.data.id);
-        if (error) throw error;
-      } else {
-        const { error } = await admin.from('whatsapp_settings').insert({
-          user_id: restaurantId,
-          default_message: 'Olá! Bem-vindo ao nosso restaurante. Como posso ajudar?',
-          ...settingsPayload,
-        });
-        if (error) throw error;
-      }
+      await activateSettings(phoneData?.display_phone_number || '');
       return phoneData;
     };
 
@@ -128,12 +163,22 @@ Deno.serve(async (req) => {
 
     if (action === 'activate_test') {
       if (!testModeAvailable) return json({ error: 'Ambiente de teste da Meta não configurado.' }, 503);
-      const phoneData = await persistAccount({
-        accessToken: testAccessToken,
-        wabaId: testWabaId,
-        phoneNumberId: testPhoneNumberId,
-        testMode: true,
-      });
+      let phoneData;
+      try {
+        const durableToken = await exchangeForLongLivedToken(testAccessToken);
+        phoneData = await persistAccount({
+          accessToken: durableToken.accessToken,
+          wabaId: testWabaId,
+          phoneNumberId: testPhoneNumberId,
+          tokenExpiresAt: durableToken.tokenExpiresAt,
+          testMode: true,
+        });
+      } catch (error) {
+        if ((error as Error & { code?: number })?.code === 190) {
+          return json({ error: 'O token de teste da Meta expirou. Gere um novo token no painel da Meta e tente novamente.' }, 401);
+        }
+        throw error;
+      }
       return json({
         ok: true,
         provider: 'meta_cloud',

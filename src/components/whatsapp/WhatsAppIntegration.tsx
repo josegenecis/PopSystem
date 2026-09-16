@@ -8,6 +8,7 @@ import { BadgeCheck, Cloud, Loader2, QrCode, MessageCircle, Unplug } from 'lucid
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { invokeEdgeFunction } from '@/utils/invokeEdgeFunction';
 import MetaWhatsAppTemplates from './MetaWhatsAppTemplates';
 
 const defaultAutoMessages = {
@@ -75,6 +76,8 @@ const WhatsAppIntegration: React.FC = () => {
       .from('whatsapp_settings')
       .select('phone_number, auto_responses, provider')
       .eq('user_id', user.id)
+      .order('updated_at', { ascending: false })
+      .limit(1)
       .maybeSingle();
 
     if (data) {
@@ -141,6 +144,7 @@ const WhatsAppIntegration: React.FC = () => {
           .from('whatsapp_settings')
           .select('id')
           .eq('user_id', user.id)
+          .limit(1)
           .maybeSingle();
 
         if (existing?.id) {
@@ -317,10 +321,13 @@ const WhatsAppIntegration: React.FC = () => {
   const activateMetaTest = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase.functions.invoke('whatsapp-meta-connect', {
-        body: { action: 'activate_test', _storeId: user?.id }
-      });
-      if (error || data?.error) throw new Error(data?.error || error?.message || 'Não foi possível ativar o ambiente de teste.');
+      const { data } = await invokeEdgeFunction<{
+        error?: string;
+        phone?: string;
+        verifiedName?: string;
+      }>('whatsapp-meta-connect', { action: 'activate_test', _storeId: user?.id });
+      if (data?.error) throw new Error(data.error);
+      if (!data) throw new Error('Não foi possível ativar o ambiente de teste.');
       setSettings(prev => ({
         ...prev,
         connected: true,

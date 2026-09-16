@@ -197,6 +197,18 @@ serve(async (req) => {
 
     if (!providerResult.ok) {
       console.error("WhatsApp provider send error:", providerResult);
+      if (providerResult.transport === 'meta_cloud') {
+        const providerError = String(
+          providerResult.data?.error?.message ||
+          providerResult.error ||
+          `HTTP ${providerResult.status || 500}`
+        ).slice(0, 1000);
+        await supabaseAdmin
+          .from('whatsapp_provider_accounts')
+          .update({ last_error: providerError, updated_at: new Date().toISOString() })
+          .eq('restaurant_id', restaurant_id)
+          .eq('provider', 'meta_cloud');
+      }
       return new Response(JSON.stringify({ error: true, message: 'Failed to send message', details: providerResult.data || providerResult.error, status: providerResult.status }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
@@ -220,23 +232,6 @@ serve(async (req) => {
       updated_at: pause.nowIso
     };
 
-    let pauseResult = await supabaseAdmin
-      .from('whatsapp_conversations')
-      .update(pausePayload)
-      .eq('user_id', restaurant_id)
-      .in('customer_phone', phoneCandidates);
-
-    if (pauseResult.error && /bot_paused|owner|current_state|last_human_message_at|ai_resume_at|metadata|schema cache|column/i.test(String(pauseResult.error.message || ''))) {
-      pauseResult = await supabaseAdmin
-        .from('whatsapp_conversations')
-        .update({
-          status: pause.status,
-          updated_at: pause.nowIso
-        })
-        .eq('user_id', restaurant_id)
-        .in('customer_phone', phoneCandidates);
-    }
-
     const aiPausePayload = {
       status: 'human_active',
       owner: 'HUMAN',
@@ -253,23 +248,46 @@ serve(async (req) => {
       last_message_at: pause.nowIso
     };
 
-    const aiPauseResult = await supabaseAdmin
-      .from('ai_conversations')
-      .update(aiPausePayload)
-      .eq('restaurant_id', restaurant_id)
-      .in('phone', phoneCandidates);
+    const postSendTask = (async () => {
+      if (providerResult.transport === 'meta_cloud') {
+        await supabaseAdmin
+          .from('whatsapp_provider_accounts')
+          .update({ last_error: null, updated_at: new Date().toISOString() })
+          .eq('restaurant_id', restaurant_id)
+          .eq('provider', 'meta_cloud');
+      }
 
-    if (aiPauseResult.error && /owner|current_state|last_human_message_at|ai_resume_at|metadata|schema cache|column/i.test(String(aiPauseResult.error.message || ''))) {
-      await supabaseAdmin
+      let pauseResult = await supabaseAdmin
+        .from('whatsapp_conversations')
+        .update(pausePayload)
+        .eq('user_id', restaurant_id)
+        .in('customer_phone', phoneCandidates);
+
+      if (pauseResult.error && /bot_paused|owner|current_state|last_human_message_at|ai_resume_at|metadata|schema cache|column/i.test(String(pauseResult.error.message || ''))) {
+        pauseResult = await supabaseAdmin
+          .from('whatsapp_conversations')
+          .update({ status: pause.status, updated_at: pause.nowIso })
+          .eq('user_id', restaurant_id)
+          .in('customer_phone', phoneCandidates);
+      }
+
+      const aiPauseResult = await supabaseAdmin
         .from('ai_conversations')
-        .update({
-          status: 'human_active',
-          metadata: aiPausePayload.metadata,
-          last_message_at: pause.nowIso
-        })
+        .update(aiPausePayload)
         .eq('restaurant_id', restaurant_id)
         .in('phone', phoneCandidates);
-    }
+
+      if (aiPauseResult.error && /owner|current_state|last_human_message_at|ai_resume_at|metadata|schema cache|column/i.test(String(aiPauseResult.error.message || ''))) {
+        await supabaseAdmin
+          .from('ai_conversations')
+          .update({ status: 'human_active', metadata: aiPausePayload.metadata, last_message_at: pause.nowIso })
+          .eq('restaurant_id', restaurant_id)
+          .in('phone', phoneCandidates);
+      }
+    })().catch((error) => console.error('WhatsApp post-send state update error:', error));
+
+    const edgeRuntime = (globalThis as any).EdgeRuntime;
+    if (edgeRuntime?.waitUntil) edgeRuntime.waitUntil(postSendTask);
 
     return new Response(JSON.stringify({ success: true, data: providerResult.data, providerMessageId: providerResult.providerMessageId || pickProviderMessageId(providerResult.data) || null, provider: providerResult.transport }), {
       status: 200,

@@ -47,11 +47,68 @@ Deno.serve(async (req) => {
       userEmail: user.email,
       restaurantId,
     });
+    const testAccessToken = String(Deno.env.get('META_WHATSAPP_TEST_TOKEN') || '').trim();
+    const testWabaId = String(Deno.env.get('META_WHATSAPP_TEST_WABA_ID') || '').trim();
+    const testPhoneNumberId = String(Deno.env.get('META_WHATSAPP_TEST_PHONE_NUMBER_ID') || '').trim();
+    const testModeAvailable = Boolean(accessEnabled && testAccessToken && testWabaId && testPhoneNumberId);
+
+    const persistAccount = async (params: {
+      accessToken: string;
+      wabaId: string;
+      phoneNumberId: string;
+      tokenExpiresAt?: string | null;
+      testMode?: boolean;
+    }) => {
+      const phoneData = await readMeta(await fetch(
+        `${metaGraphBaseUrl()}/${encodeURIComponent(params.phoneNumberId)}?fields=id,display_phone_number,verified_name,quality_rating`,
+        { headers: { Authorization: `Bearer ${params.accessToken}` } },
+      ));
+      await readMeta(await fetch(`${metaGraphBaseUrl()}/${encodeURIComponent(params.wabaId)}/subscribed_apps`, {
+        method: 'POST', headers: { Authorization: `Bearer ${params.accessToken}` },
+      }));
+
+      const now = new Date().toISOString();
+      const encryptedAccessToken = await encryptMetaToken(params.accessToken);
+      const { error: accountError } = await admin.from('whatsapp_provider_accounts').upsert({
+        restaurant_id: restaurantId,
+        provider: 'meta_cloud',
+        status: 'connected',
+        waba_id: params.wabaId,
+        phone_number_id: params.phoneNumberId,
+        display_phone_number: phoneData?.display_phone_number || null,
+        verified_name: phoneData?.verified_name || null,
+        access_token_encrypted: encryptedAccessToken,
+        token_expires_at: params.tokenExpiresAt || null,
+        last_verified_at: now,
+        last_error: null,
+        metadata: { quality_rating: phoneData?.quality_rating || null, test_mode: Boolean(params.testMode) },
+        updated_at: now,
+      }, { onConflict: 'restaurant_id,provider' });
+      if (accountError) throw accountError;
+
+      const settingsPayload = {
+        provider: 'meta_cloud', enabled: true, phone_number: phoneData?.display_phone_number || '', updated_at: now,
+      };
+      const existing = await admin.from('whatsapp_settings').select('id').eq('user_id', restaurantId).maybeSingle();
+      if (existing.data?.id) {
+        const { error } = await admin.from('whatsapp_settings').update(settingsPayload).eq('id', existing.data.id);
+        if (error) throw error;
+      } else {
+        const { error } = await admin.from('whatsapp_settings').insert({
+          user_id: restaurantId,
+          default_message: 'Olá! Bem-vindo ao nosso restaurante. Como posso ajudar?',
+          ...settingsPayload,
+        });
+        if (error) throw error;
+      }
+      return phoneData;
+    };
 
     if (action === 'config') {
       const available = Boolean(appId && appSecret && configId && accessEnabled);
       return json({
         available,
+        testModeAvailable,
         appId: available ? appId : null,
         configId: available ? configId : null,
         graphVersion: metaGraphVersion(),
@@ -67,6 +124,23 @@ Deno.serve(async (req) => {
         provider: 'evolution', updated_at: new Date().toISOString(),
       }).eq('user_id', restaurantId);
       return json({ ok: true, provider: 'evolution' });
+    }
+
+    if (action === 'activate_test') {
+      if (!testModeAvailable) return json({ error: 'Ambiente de teste da Meta não configurado.' }, 503);
+      const phoneData = await persistAccount({
+        accessToken: testAccessToken,
+        wabaId: testWabaId,
+        phoneNumberId: testPhoneNumberId,
+        testMode: true,
+      });
+      return json({
+        ok: true,
+        provider: 'meta_cloud',
+        testMode: true,
+        phone: phoneData?.display_phone_number || null,
+        verifiedName: phoneData?.verified_name || 'Meta Test Number',
+      });
     }
 
     if (action !== 'complete') return json({ error: 'Invalid action' }, 400);
@@ -86,51 +160,9 @@ Deno.serve(async (req) => {
     const tokenData = await readMeta(await fetch(tokenUrl));
     const accessToken = String(tokenData?.access_token || '').trim();
     if (!accessToken) throw new Error('A Meta não devolveu um token de acesso.');
-    const encryptedAccessToken = await encryptMetaToken(accessToken);
-
-    const phoneData = await readMeta(await fetch(
-      `${metaGraphBaseUrl()}/${encodeURIComponent(phoneNumberId)}?fields=id,display_phone_number,verified_name,quality_rating`,
-      { headers: { Authorization: `Bearer ${accessToken}` } },
-    ));
-    await readMeta(await fetch(`${metaGraphBaseUrl()}/${encodeURIComponent(wabaId)}/subscribed_apps`, {
-      method: 'POST', headers: { Authorization: `Bearer ${accessToken}` },
-    }));
-
-    const now = new Date().toISOString();
     const expiresIn = Number(tokenData?.expires_in || 0);
     const tokenExpiresAt = expiresIn > 0 ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
-    const { error: accountError } = await admin.from('whatsapp_provider_accounts').upsert({
-      restaurant_id: restaurantId,
-      provider: 'meta_cloud',
-      status: 'connected',
-      waba_id: wabaId,
-      phone_number_id: phoneNumberId,
-      display_phone_number: phoneData?.display_phone_number || null,
-      verified_name: phoneData?.verified_name || null,
-      access_token_encrypted: encryptedAccessToken,
-      token_expires_at: tokenExpiresAt,
-      last_verified_at: now,
-      last_error: null,
-      metadata: { quality_rating: phoneData?.quality_rating || null },
-      updated_at: now,
-    }, { onConflict: 'restaurant_id,provider' });
-    if (accountError) throw accountError;
-
-    const settingsPayload = {
-      provider: 'meta_cloud', enabled: true, phone_number: phoneData?.display_phone_number || '', updated_at: now,
-    };
-    const existing = await admin.from('whatsapp_settings').select('id').eq('user_id', restaurantId).maybeSingle();
-    if (existing.data?.id) {
-      const { error } = await admin.from('whatsapp_settings').update(settingsPayload).eq('id', existing.data.id);
-      if (error) throw error;
-    } else {
-      const { error } = await admin.from('whatsapp_settings').insert({
-        user_id: restaurantId,
-        default_message: 'Olá! Bem-vindo ao nosso restaurante. Como posso ajudar?',
-        ...settingsPayload,
-      });
-      if (error) throw error;
-    }
+    const phoneData = await persistAccount({ accessToken, wabaId, phoneNumberId, tokenExpiresAt });
 
     return json({ ok: true, provider: 'meta_cloud', phone: phoneData?.display_phone_number || null, verifiedName: phoneData?.verified_name || null });
   } catch (error) {

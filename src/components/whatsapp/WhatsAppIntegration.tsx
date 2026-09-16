@@ -45,6 +45,7 @@ const WhatsAppIntegration: React.FC = () => {
   const { user } = useAuth();
   const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
   const [metaAvailable, setMetaAvailable] = useState(false);
+  const [metaTestModeAvailable, setMetaTestModeAvailable] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -95,6 +96,7 @@ const WhatsAppIntegration: React.FC = () => {
       body: { action: 'config', _storeId: user.id }
     });
     setMetaAvailable(Boolean(data?.available));
+    setMetaTestModeAvailable(Boolean(data?.testModeAvailable));
   };
 
   const checkStatus = async () => {
@@ -312,6 +314,29 @@ const WhatsAppIntegration: React.FC = () => {
     }
   };
 
+  const activateMetaTest = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase.functions.invoke('whatsapp-meta-connect', {
+        body: { action: 'activate_test', _storeId: user?.id }
+      });
+      if (error || data?.error) throw new Error(data?.error || error?.message || 'Não foi possível ativar o ambiente de teste.');
+      setSettings(prev => ({
+        ...prev,
+        connected: true,
+        provider: 'meta_cloud',
+        phone_number: data.phone || prev.phone_number,
+        verified_name: data.verifiedName || 'Meta Test Number'
+      }));
+      setQrCodeUrl(null);
+      toast({ title: 'Ambiente de homologação ativo', description: 'O número de teste oficial da Meta foi conectado ao PopSystem.' });
+    } catch (error: unknown) {
+      toast({ title: 'Não foi possível ativar o teste', description: errorMessage(error, 'Tente novamente.'), variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const startPolling = () => {
     const checkInterval = setInterval(async () => {
       try {
@@ -435,9 +460,9 @@ const WhatsAppIntegration: React.FC = () => {
               {settings.provider === 'meta_cloud' && settings.connected ? (
                 <Button type="button" variant="outline" onClick={disconnectMeta} disabled={loading} className="border-emerald-300 bg-white text-emerald-900"><Unplug className="mr-2 h-4 w-4" />Desconectar</Button>
               ) : (
-                <Button type="button" onClick={connectMeta} disabled={loading || !metaAvailable} className="bg-emerald-700 hover:bg-emerald-800">
+                <Button type="button" onClick={metaTestModeAvailable ? activateMetaTest : connectMeta} disabled={loading || !metaAvailable} className="bg-emerald-700 hover:bg-emerald-800">
                   {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BadgeCheck className="mr-2 h-4 w-4" />}
-                  {metaAvailable ? 'Conectar com a Meta' : 'Configuração pendente'}
+                  {metaAvailable ? (metaTestModeAvailable ? 'Ativar homologação Meta' : 'Conectar com a Meta') : 'Configuração pendente'}
                 </Button>
               )}
             </div>

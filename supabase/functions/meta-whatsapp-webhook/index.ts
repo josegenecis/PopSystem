@@ -125,6 +125,7 @@ Deno.serve(async (req) => {
   const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
 
   const changes = (body?.entry || []).flatMap((entry: any) => entry?.changes || []);
+  const backgroundTasks: Promise<unknown>[] = [];
   for (const change of changes) {
     const value = change?.value || {};
     const phoneNumberId = String(value?.metadata?.phone_number_id || '').trim();
@@ -137,8 +138,6 @@ Deno.serve(async (req) => {
       .eq('status', 'connected')
       .maybeSingle();
     if (!account?.restaurant_id) continue;
-    account.access_token = await decryptMetaToken(account.access_token_encrypted);
-
     for (const status of value?.statuses || []) await recordStatus(supabase, account.restaurant_id, status);
 
     for (const message of value?.messages || []) {
@@ -147,8 +146,49 @@ Deno.serve(async (req) => {
       let text = messageText(message);
       if (!customerPhone || !providerMessageId || !text) continue;
       const rawMedia = messageMedia(message);
-      const media = rawMedia ? await loadMedia(supabase, account, rawMedia, providerMessageId) : null;
       const customerName = String(value?.contacts?.find((contact: any) => normalizeWhatsAppPhone(contact?.wa_id) === customerPhone)?.profile?.name || '').trim();
+
+      // Text messages take the one-round-trip database path so Realtime can
+      // update the operator screen before any AI/catalog work starts.
+      if (!rawMedia) {
+        const providerTimestamp = Number(message?.timestamp || 0);
+        const sentAt = providerTimestamp > 0 ? new Date(providerTimestamp * 1000).toISOString() : null;
+        const { data: persisted, error: persistError } = await supabase.rpc('persist_whatsapp_inbound_fast', {
+          p_restaurant_id: account.restaurant_id,
+          p_customer_phone: customerPhone,
+          p_customer_name: customerName || null,
+          p_content: text,
+          p_provider_message_id: providerMessageId,
+          p_instance_name: `meta:${phoneNumberId}`,
+          p_message_type: String(message?.type || 'text'),
+          p_provider_sent_at: sentAt,
+        });
+        if (!persistError && persisted?.claimed && persisted?.conversation_id) {
+          const processing = processPopAiMessage({
+            supabase,
+            restaurantId: account.restaurant_id,
+            instanceName: `meta:${phoneNumberId}`,
+            customerPhone,
+            text,
+            providerMessageId,
+            messageType: message?.type || 'text',
+            quotedProviderMessageId: String(message?.context?.id || '').trim(),
+            persistedInbound: {
+              conversationId: String(persisted.conversation_id),
+              messageId: String(persisted.message_id || ''),
+            },
+          }).then((result) => {
+            if (!result.ok) console.error('[meta-whatsapp-webhook] message processing failed', result);
+          });
+          backgroundTasks.push(processing);
+          continue;
+        }
+        if (!persistError && persisted?.claimed === false) continue;
+        if (persistError) console.warn('[meta-whatsapp-webhook] fast persistence unavailable', persistError.message || persistError);
+      }
+
+      if (rawMedia && !account.access_token) account.access_token = await decryptMetaToken(account.access_token_encrypted);
+      const media = rawMedia ? await loadMedia(supabase, account, rawMedia, providerMessageId) : null;
 
       await logWhatsAppBotStep(supabase, account.restaurant_id, 'whatsapp_webhook_received', 'Webhook oficial da Meta recebido', {
         provider: 'meta_cloud', phoneNumberId, customerPhone, customerName, messageType: message?.type || 'text',
@@ -166,6 +206,12 @@ Deno.serve(async (req) => {
       });
       if (!result.ok) console.error('[meta-whatsapp-webhook] message processing failed', result);
     }
+  }
+  if (backgroundTasks.length > 0) {
+    const task = Promise.allSettled(backgroundTasks);
+    const edgeRuntime = (globalThis as any).EdgeRuntime;
+    if (edgeRuntime?.waitUntil) edgeRuntime.waitUntil(task);
+    else await task;
   }
   return json({ received: true });
 });

@@ -111,11 +111,11 @@ export async function processPopAiMessage(params: PopAiIncomingMessage): Promise
     return { ok: false, skipped: true, reason: 'missing_input' };
   }
 
-  // Reserve the inbound message before any AI work. WhatsApp providers can
-  // deliver the same event simultaneously to more than one webhook/worker;
-  // the database function serializes those deliveries per message.
-  let inboundClaimed = false;
-  try {
+  // Some provider webhooks use the atomic inbox fast path and hand us the
+  // already-persisted row. In that case, do not claim the provider event a
+  // second time or it would be incorrectly classified as a duplicate.
+  let inboundClaimed = Boolean(params.persistedInbound?.conversationId);
+  if (!inboundClaimed) try {
     const { data: claimed, error: claimError } = await supabase.rpc('claim_whatsapp_inbound_message', {
       p_restaurant_id: restaurantId,
       p_customer_phone: phone,
@@ -139,7 +139,7 @@ export async function processPopAiMessage(params: PopAiIncomingMessage): Promise
   }
 
   let processingParams = params;
-  if (inboundClaimed) {
+  if (inboundClaimed && !params.persistedInbound) {
     try {
       const persistedInbound = await persistRestaurantInboundMessage({
         supabase,

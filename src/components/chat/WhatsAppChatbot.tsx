@@ -261,6 +261,7 @@ const WhatsAppChatbot = () => {
   const [dashboardPeriod, setDashboardPeriod] = useState<1 | 7 | 30>(1);
   const selectedConversationRef = useRef<string | null>(null);
   const conversationsRef = useRef<Conversation[]>([]);
+  const messagesRef = useRef<Message[]>([]);
   const messagesBottomRef = useRef<HTMLDivElement>(null);
   const messagesListRef = useRef<HTMLDivElement>(null);
   const pendingScrollRestoreRef = useRef<{ height: number; top: number } | null>(null);
@@ -275,6 +276,7 @@ const WhatsAppChatbot = () => {
 
   useEffect(() => { selectedConversationRef.current = selectedConversation; }, [selectedConversation]);
   useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
   useEffect(() => () => { document.title = 'PopSystem'; }, []);
   useEffect(() => {
     const container = messagesListRef.current;
@@ -329,6 +331,8 @@ const WhatsAppChatbot = () => {
   // Buscar mensagens da conversa selecionada
   useEffect(() => {
     if (selectedConversation) {
+      messagesRef.current = [];
+      setMessages([]);
       fetchMessages(selectedConversation);
       fetchAiLogs();
       void (supabase as any).from('whatsapp_conversations').update({
@@ -403,18 +407,21 @@ const WhatsAppChatbot = () => {
           const normalized = { ...next, bot_paused: isBotPaused(next), unread_count: Number(next.unread_count || 0) };
           const exists = current.some((item) => item.id === normalized.id);
           const merged = exists ? current.map((item) => item.id === normalized.id ? { ...item, ...normalized } : item) : [normalized, ...current];
-          return merged.sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime());
+          const sorted = merged.sort((a, b) => new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime());
+          conversationsRef.current = sorted;
+          return sorted;
         });
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'whatsapp_messages' }, (payload) => {
-        const message = payload.new as Message;
+        const message = mapWhatsAppMessage(payload.new);
         if (!message?.id) return;
         if (message.message_type === 'order_draft') return;
         const conversation = conversationsRef.current.find((item) => item.id === message.conversation_id);
-        if (!conversation) return;
-        setConversations((current) => current.map((item) => item.id === message.conversation_id
-          ? { ...item, last_message: message.content, last_message_sender: message.sender, updated_at: message.sent_at }
-          : item));
+        if (conversation) {
+          setConversations((current) => current.map((item) => item.id === message.conversation_id
+            ? { ...item, last_message: message.content, last_message_sender: message.sender, updated_at: message.sent_at }
+            : item));
+        }
         if (message.conversation_id === selectedConversationRef.current) {
           void hydrateMessageMedia(message).then((hydrated) => {
             setMessages((current) => current.some((item) => item.id === hydrated.id)
@@ -422,7 +429,7 @@ const WhatsAppChatbot = () => {
               : [...current, hydrated]);
           });
         }
-        if (payload.eventType === 'INSERT' && message.sender === 'customer') {
+        if (payload.eventType === 'INSERT' && message.sender === 'customer' && conversation) {
           if (document.hidden || message.conversation_id !== selectedConversationRef.current) {
             document.title = `Nova mensagem${conversation?.customer_name ? ` de ${conversation.customer_name}` : ''} · PopSystem`;
             window.setTimeout(() => { document.title = 'PopSystem'; }, 5000);
@@ -463,6 +470,43 @@ const WhatsAppChatbot = () => {
       void supabase.removeChannel(channel);
     };
   }, [notificationPermission, user?.id]);
+
+  // Realtime remains the primary path. This small incremental watchdog closes
+  // the gap when a browser sleeps, reconnects or misses an event while a video
+  // or another heavy task is running in the foreground.
+  useEffect(() => {
+    if (!selectedConversation || !user?.id) return;
+    let active = true;
+    const syncRecentMessages = async () => {
+      if (document.hidden || !active || selectedConversationRef.current !== selectedConversation) return;
+      const latestSentAt = messagesRef.current.reduce<string | null>((latest, item) => {
+        if (!item.sent_at) return latest;
+        return !latest || new Date(item.sent_at).getTime() > new Date(latest).getTime() ? item.sent_at : latest;
+      }, null);
+      let query = supabase
+        .from('whatsapp_messages')
+        .select('*')
+        .eq('conversation_id', selectedConversation)
+        .neq('message_type', 'order_draft')
+        .order('sent_at', { ascending: true });
+      query = latestSentAt ? query.gt('sent_at', latestSentAt) : query.limit(10);
+      const { data, error } = await query;
+      if (error || !active || !data?.length || selectedConversationRef.current !== selectedConversation) return;
+      const incoming = await Promise.all(data.map(mapWhatsAppMessage).map(hydrateMessageMedia));
+      setMessages((current) => {
+        const ids = new Set(current.map((item) => item.id));
+        const merged = [...current, ...incoming.filter((item) => !ids.has(item.id))]
+          .sort((a, b) => new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime());
+        messagesRef.current = merged;
+        return merged;
+      });
+    };
+    const timer = window.setInterval(() => { void syncRecentMessages(); }, 2500);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [selectedConversation, user?.id]);
 
   useEffect(() => {
     const orderId = recentOrders[0]?.id;

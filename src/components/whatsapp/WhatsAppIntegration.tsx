@@ -8,6 +8,7 @@ import { BadgeCheck, Cloud, Loader2, QrCode, MessageCircle, Unplug } from 'lucid
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import MetaWhatsAppTemplates from './MetaWhatsAppTemplates';
 
 const defaultAutoMessages = {
   order_received: '🎉 Recebemos seu pedido #{order_number}! Acompanhe aqui: {track_link}',
@@ -441,6 +442,10 @@ const WhatsAppIntegration: React.FC = () => {
               )}
             </div>
           </div>}
+          <MetaWhatsAppTemplates
+            enabled={settings.provider === 'meta_cloud' && settings.connected}
+            storeId={user?.id}
+          />
           <div className="space-y-2">
             <Label htmlFor="phone">Número do WhatsApp</Label>
             <div className="flex gap-2">

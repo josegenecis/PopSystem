@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { metaGraphBaseUrl, metaGraphVersion } from '../_shared/whatsapp-provider.ts';
 import { resolveStoreUserId } from '../_shared/multi-store.ts';
 import { encryptMetaToken } from '../_shared/meta-token.ts';
+import { hasMetaWhatsAppAccess } from '../_shared/meta-rollout.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -41,10 +42,14 @@ Deno.serve(async (req) => {
     // O Embedded Signup do WhatsApp precisa de uma configuracao propria.
     // Nao reutilize META_LOGIN_CONFIG_ID: ela pertence ao OAuth de anuncios.
     const configId = String(Deno.env.get('META_WHATSAPP_CONFIG_ID') || '').trim();
-    const rolloutEnabled = String(Deno.env.get('META_WHATSAPP_ROLLOUT_ENABLED') || '').trim().toLowerCase() === 'true';
+    const accessEnabled = hasMetaWhatsAppAccess({
+      userId: user.id,
+      userEmail: user.email,
+      restaurantId,
+    });
 
     if (action === 'config') {
-      const available = Boolean(appId && appSecret && configId && rolloutEnabled);
+      const available = Boolean(appId && appSecret && configId && accessEnabled);
       return json({
         available,
         appId: available ? appId : null,
@@ -65,7 +70,7 @@ Deno.serve(async (req) => {
     }
 
     if (action !== 'complete') return json({ error: 'Invalid action' }, 400);
-    if (!rolloutEnabled || !appId || !appSecret || !configId) {
+    if (!accessEnabled || !appId || !appSecret || !configId) {
       return json({ error: 'Meta Embedded Signup ainda não está liberado para conexão.' }, 503);
     }
 

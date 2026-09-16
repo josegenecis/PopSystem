@@ -116,6 +116,11 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/whatsapp-meta-connect/index.ts"
 
+[functions.whatsapp-meta-templates]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/whatsapp-meta-templates/index.ts"
+
 [functions.meta-whatsapp-webhook]
 enabled = true
 verify_jwt = false

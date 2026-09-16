@@ -467,10 +467,18 @@ const WhatsAppIntegration: React.FC = () => {
               {settings.provider === 'meta_cloud' && settings.connected ? (
                 <Button type="button" variant="outline" onClick={disconnectMeta} disabled={loading} className="border-emerald-300 bg-white text-emerald-900"><Unplug className="mr-2 h-4 w-4" />Desconectar</Button>
               ) : (
-                <Button type="button" onClick={metaTestModeAvailable ? activateMetaTest : connectMeta} disabled={loading || !metaAvailable} className="bg-emerald-700 hover:bg-emerald-800">
-                  {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BadgeCheck className="mr-2 h-4 w-4" />}
-                  {metaAvailable ? (metaTestModeAvailable ? 'Ativar homologação Meta' : 'Conectar com a Meta') : 'Configuração pendente'}
-                </Button>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Button type="button" onClick={connectMeta} disabled={loading || !metaAvailable} className="bg-emerald-700 hover:bg-emerald-800">
+                    {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Cloud className="mr-2 h-4 w-4" />}
+                    {metaAvailable ? 'Conectar com a Meta' : 'Configuração pendente'}
+                  </Button>
+                  {metaTestModeAvailable ? (
+                    <Button type="button" variant="outline" onClick={activateMetaTest} disabled={loading} className="border-emerald-300 bg-white text-emerald-900">
+                      <BadgeCheck className="mr-2 h-4 w-4" />
+                      Ativar número de teste
+                    </Button>
+                  ) : null}
+                </div>
               )}
             </div>
           </div>}

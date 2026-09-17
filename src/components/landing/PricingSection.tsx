@@ -38,7 +38,7 @@ const PricingSection = () => {
             >
               <div className={`absolute top-1 left-1 w-6 h-6 bg-white rounded-full shadow transition-transform duration-300 ${isAnnual ? 'translate-x-8' : ''}`}></div>
             </button>
-            <span className={`text-sm font-semibold ${isAnnual ? 'text-slate-900' : 'text-slate-500'}`}>Anual · 10% OFF</span>
+            <span className={`text-sm font-semibold ${isAnnual ? 'text-slate-900' : 'text-slate-500'}`}>Anual · melhor preço</span>
           </div>
         </div>
 

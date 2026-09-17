@@ -57,6 +57,34 @@ export const calculatePeriodPrice = (monthlyValue: number, period: BillingPeriod
   };
 };
 
+export const calculatePlanPeriodPrice = (
+  plan: Pick<PlanCatalogItem, 'monthlyPrice' | 'annualPrice' | 'includedStores' | 'extraStorePrice'>,
+  period: BillingPeriod,
+  storeCount = 1,
+) => {
+  const additionalStores = Math.max(0, Number(storeCount || 1) - plan.includedStores);
+  const extraStoresMonthlyValue = additionalStores * Number(plan.extraStorePrice || 0);
+  const monthlyValue = Number(plan.monthlyPrice || 0) + extraStoresMonthlyValue;
+
+  if (period !== 'yearly') return calculatePeriodPrice(monthlyValue, period);
+
+  const config = getBillingPeriodConfig(period);
+  const grossValue = Number((monthlyValue * config.months).toFixed(2));
+  const extraStoresAnnualValue = calculatePeriodPrice(extraStoresMonthlyValue, period).totalValue;
+  const totalValue = Number((Number(plan.annualPrice || 0) + extraStoresAnnualValue).toFixed(2));
+
+  return {
+    ...config,
+    discountPercent: grossValue > 0
+      ? Number((((grossValue - totalValue) / grossValue) * 100).toFixed(2))
+      : 0,
+    grossValue,
+    totalValue,
+    monthlyEquivalent: Number((totalValue / config.months).toFixed(2)),
+    savings: Number((grossValue - totalValue).toFixed(2)),
+  };
+};
+
 const ESSENCIAL_FEATURE_GROUPS: PlanFeatureGroup[] = [
   {
     title: 'Vendas e atendimento',
@@ -154,8 +182,8 @@ export const PLAN_CATALOG: PlanCatalogItem[] = [
     name: 'Essencial',
     shortName: 'Essencial',
     description: 'O básico profissional para vender no balcão, no delivery e organizar a operação do dia a dia.',
-    monthlyPrice: 189,
-    annualPrice: 2041.20,
+    monthlyPrice: 129,
+    annualPrice: 1068,
     includedStores: 1,
     storeLimit: 1,
     badge: 'Comece organizado',

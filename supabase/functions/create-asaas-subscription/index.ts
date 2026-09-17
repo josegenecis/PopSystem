@@ -10,6 +10,7 @@ type PlanConfig = {
   id: number;
   name: string;
   price: number;
+  annualPrice: number;
   includedStores: number;
   extraStorePrice: number;
 };
@@ -29,9 +30,9 @@ const billingPeriods: Record<BillingPeriod, {
 };
 
 const fallbackPlans: Record<number, PlanConfig> = {
-  1: { id: 1, name: "Essencial", price: 189, includedStores: 1, extraStorePrice: 0 },
-  2: { id: 2, name: "Pro", price: 289, includedStores: 1, extraStorePrice: 0 },
-  3: { id: 3, name: "Multi", price: 389, includedStores: 1, extraStorePrice: 189 },
+  1: { id: 1, name: "Essencial", price: 129, annualPrice: 1068, includedStores: 1, extraStorePrice: 0 },
+  2: { id: 2, name: "Pro", price: 289, annualPrice: 3121.20, includedStores: 1, extraStorePrice: 0 },
+  3: { id: 3, name: "Multi", price: 389, annualPrice: 4201.20, includedStores: 1, extraStorePrice: 189 },
 };
 
 const money = (value: unknown) => Number(Number(value || 0).toFixed(2));
@@ -294,6 +295,7 @@ serve(async (req) => {
       id: Number(planRow?.id || fallback.id),
       name: String(planRow?.name || fallback.name),
       price: fallback.price,
+      annualPrice: fallback.annualPrice,
       includedStores: fallback.includedStores,
       extraStorePrice: fallback.extraStorePrice,
     };
@@ -301,7 +303,13 @@ serve(async (req) => {
     const additionalStoreCount = Math.max(0, storeCount - plan.includedStores);
     const monthlyValue = money(plan.price + additionalStoreCount * plan.extraStorePrice);
     const grossPeriodValue = money(monthlyValue * billingPeriod.months);
-    const value = money(grossPeriodValue * (1 - billingPeriod.discountPercent / 100));
+    const annualExtraStoresValue = money(additionalStoreCount * plan.extraStorePrice * 12 * 0.9);
+    const value = billingPeriodKey === "yearly"
+      ? money(plan.annualPrice + annualExtraStoresValue)
+      : money(grossPeriodValue * (1 - billingPeriod.discountPercent / 100));
+    const appliedDiscountPercent = grossPeriodValue > 0
+      ? money(((grossPeriodValue - value) / grossPeriodValue) * 100)
+      : 0;
 
     const { data: existingSubscription } = await supabaseAdmin
       .from("subscriptions")
@@ -381,6 +389,7 @@ serve(async (req) => {
       && Number(existingSubscription.plan_id) === plan.id
       && Number(existingSubscription.store_count || 1) === storeCount
       && String(existingSubscription.billing_cycle || "MONTHLY") === billingPeriod.cycle
+      && money(existingSubscription.billing_amount) === value
       && existingSubscription.asaas_payment_id;
 
     if (matchingPendingPayment) {
@@ -424,7 +433,7 @@ serve(async (req) => {
           billingPeriod: billingPeriodKey,
           billingCycle: billingPeriod.cycle,
           billingMonths: billingPeriod.months,
-          discountPercent: billingPeriod.discountPercent,
+          discountPercent: appliedDiscountPercent,
           installmentCount,
           installmentValue: money(chargeValue / installmentCount),
           isUpgrade: false,
@@ -574,7 +583,7 @@ serve(async (req) => {
           to_billing_months: billingPeriod.months,
           from_billing_amount: oldBillingAmount,
           to_billing_amount: value,
-          billing_discount_percent: billingPeriod.discountPercent,
+          billing_discount_percent: appliedDiscountPercent,
           to_installment_count: installmentCount,
           credit_amount: creditAmount,
           charge_amount: chargeValue,
@@ -683,7 +692,7 @@ serve(async (req) => {
       payment_method: paymentMethod,
       billing_cycle: billingPeriod.cycle,
       billing_months: billingPeriod.months,
-      billing_discount_percent: billingPeriod.discountPercent,
+      billing_discount_percent: appliedDiscountPercent,
       billing_amount: value,
       current_period_start: periodStart.toISOString(),
       current_period_end: periodEnd.toISOString(),
@@ -728,7 +737,7 @@ serve(async (req) => {
       billingPeriod: billingPeriodKey,
       billingCycle: billingPeriod.cycle,
       billingMonths: billingPeriod.months,
-      discountPercent: billingPeriod.discountPercent,
+      discountPercent: appliedDiscountPercent,
       installmentCount,
       installmentValue: money(chargeValue / installmentCount),
       isUpgrade,

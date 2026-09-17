@@ -16,6 +16,7 @@ import { formatBRL } from '@/lib/currency';
 import {
   BILLING_PERIODS,
   PLAN_CATALOG,
+  calculatePlanPeriodPrice,
   calculatePeriodPrice,
   getBillingPeriodConfig,
   getPlanCatalogItem,
@@ -180,7 +181,7 @@ const Subscription = () => {
     if (!plan) return;
     const additionalStores = Math.max(0, storeCount - plan.includedStores);
     const monthlyValue = plan.monthlyPrice + additionalStores * Number(plan.extraStorePrice || 0);
-    const periodPricing = calculatePeriodPrice(monthlyValue, billingPeriod);
+    const periodPricing = calculatePlanPeriodPrice(plan, billingPeriod, storeCount);
     const oldPlan = getPlanCatalogItem(subscription?.plan_id);
     const oldStoreCount = Math.max(1, Number(subscription?.store_count || 1));
     const oldAdditionalStores = oldPlan ? Math.max(0, oldStoreCount - oldPlan.includedStores) : 0;
@@ -200,7 +201,7 @@ const Subscription = () => {
           ? 'quarterly'
           : 'monthly';
     const oldBillingAmount = Number(subscription?.billing_amount)
-      || calculatePeriodPrice(oldMonthlyValue, oldPeriod).totalValue;
+      || (oldPlan ? calculatePlanPeriodPrice(oldPlan, oldPeriod, oldStoreCount).totalValue : 0);
     const configurationChanged = subscription?.plan_id !== planId
       || oldStoreCount !== storeCount
       || String(subscription?.billing_cycle || 'MONTHLY') !== periodPricing.asaasCycle;
@@ -472,7 +473,7 @@ const Subscription = () => {
           : 'monthly';
     const currentPeriodConfig = getBillingPeriodConfig(currentPeriod);
     const recurringAmount = Number(subscription.billing_amount)
-      || calculatePeriodPrice(monthlyTotal, currentPeriod).totalValue;
+      || calculatePlanPeriodPrice(currentPlan, currentPeriod, storeCount).totalValue;
     const currentInstallments = Math.max(1, Number(subscription.installment_count || 1));
     const storedPaymentMethod = subscription.payment_method || lastPaidPaymentMethod;
     const paymentMethodLabel = storedPaymentMethod === 'PIX'
@@ -557,12 +558,6 @@ const Subscription = () => {
   const isTrialSubscription = String(subscription?.status || '').toLowerCase().includes('trial');
   const offeredPlan = periodOffer ? getPlanCatalogItem(periodOffer.planId) : null;
   const offeredStoreCount = Math.max(1, Number(periodOffer?.storeCount || 1));
-  const offeredExtraStores = offeredPlan
-    ? Math.max(0, offeredStoreCount - offeredPlan.includedStores)
-    : 0;
-  const offeredMonthlyValue = offeredPlan
-    ? offeredPlan.monthlyPrice + offeredExtraStores * Number(offeredPlan.extraStorePrice || 0)
-    : 0;
   const maxCheckoutInstallments = Math.min(12, Math.max(1, Number(checkoutPlan?.billingMonths || 1)));
 
   const backToSystemButton = (
@@ -628,7 +623,7 @@ const Subscription = () => {
               >
                 Anual
                 <span className={`rounded-full px-2 py-0.5 text-xs ${pricingMode === 'yearly' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-700'}`}>
-                  -10%
+                  Melhor preço
                 </span>
               </button>
             </div>
@@ -654,7 +649,7 @@ const Subscription = () => {
             const extraStorePrice = Number(plan.extraStorePrice || 189);
             const monthlyTotal = Number(plan.monthlyPrice || 0) + extraStores * extraStorePrice;
             const displayedPeriod: BillingPeriod = pricingMode === 'yearly' ? 'yearly' : 'monthly';
-            const displayedPricing = calculatePeriodPrice(monthlyTotal, displayedPeriod);
+            const displayedPricing = calculatePlanPeriodPrice(plan, displayedPeriod, selectedStores);
             const selectedCycle = getBillingPeriodConfig(displayedPeriod).asaasCycle;
             const isCurrentPlan = currentCatalogPlan?.slug === plan.slug
               && subscription?.status === 'active';
@@ -861,7 +856,8 @@ const Subscription = () => {
             </DialogHeader>
             <div className="grid gap-3 px-6 py-6 sm:grid-cols-2">
               {(Object.keys(BILLING_PERIODS) as BillingPeriod[]).map((period) => {
-                const periodPricing = calculatePeriodPrice(offeredMonthlyValue, period);
+                if (!offeredPlan) return null;
+                const periodPricing = calculatePlanPeriodPrice(offeredPlan, period, offeredStoreCount);
                 const isBestOffer = period === 'yearly';
                 const periodStyle = {
                   monthly: {

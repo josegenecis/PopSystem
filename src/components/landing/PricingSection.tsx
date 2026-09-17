@@ -75,7 +75,7 @@ const PricingSection = () => {
                 </div>
                 {isAnnual && (
                   <p className="text-xs text-boracume-green font-semibold mt-2">
-                    Cobrado anualmente: {formatPrice(plan.annualPrice)}
+                    Valor mensal no plano anual
                   </p>
                 )}
                 {plan.extraStorePrice && (

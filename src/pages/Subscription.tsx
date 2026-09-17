@@ -842,52 +842,58 @@ const Subscription = () => {
         )}
 
         <Dialog open={Boolean(periodOffer)} onOpenChange={(open) => !open && setPeriodOffer(null)}>
-          <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto p-0">
-            <DialogHeader className="border-b bg-gradient-to-br from-emerald-50 via-orange-50 to-purple-100 px-6 py-6 text-left">
-              <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[#003223] to-[#FF6400] text-white shadow-lg shadow-orange-200">
-                <Sparkles className="h-5 w-5" />
+          <DialogContent className="max-h-[94vh] max-w-5xl overflow-y-auto overflow-x-hidden rounded-[28px] border-0 bg-[#fffdf8] p-0 shadow-[0_32px_100px_-25px_rgba(0,50,35,0.55)] [&>button]:z-30 [&>button]:rounded-full [&>button]:bg-white/95 [&>button]:p-1.5 [&>button]:text-[#064733] [&>button]:opacity-100 [&>button]:shadow-md">
+            <DialogHeader className="relative isolate min-h-[190px] overflow-hidden bg-[#064733] px-6 py-7 pr-24 text-left sm:px-9 sm:py-8 sm:pr-64">
+              <div className="absolute -left-16 -top-24 h-52 w-52 rounded-full border-[42px] border-white/[0.06]" />
+              <div className="absolute -bottom-28 right-24 h-64 w-64 rounded-full bg-[#ff6b00]/25 blur-3xl" />
+              <div className="relative z-10 max-w-xl">
+                <img
+                  src="/LOGOMARCA/logo-pop.webp"
+                  alt="PopSystem"
+                  className="mb-4 h-8 w-auto rounded-lg bg-white px-3 py-1.5 shadow-sm sm:h-10"
+                />
+                <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-[#c9f59f]">
+                  <Sparkles className="h-3.5 w-3.5" /> Uma escolha boa para o seu negócio
+                </div>
+                <DialogTitle className="max-w-lg text-2xl font-black leading-tight tracking-[-0.035em] text-white sm:text-3xl">
+                  Escolha seu ritmo e continue crescendo com a gente
+                </DialogTitle>
+                <DialogDescription className="mt-2 max-w-lg text-sm font-medium leading-6 text-white/75 sm:text-base">
+                  {offeredPlan
+                    ? `Seu plano ${offeredPlan.name} fica ainda mais vantajoso quando você escolhe um período maior.`
+                    : 'Escolha o período que combina melhor com o seu momento.'}
+                </DialogDescription>
               </div>
-              <DialogTitle className="text-2xl text-[#003223]">Economize escolhendo um período maior</DialogTitle>
-              <DialogDescription className="text-base">
-                {offeredPlan
-                  ? `${offeredPlan.name}: escolha como prefere pagar. O desconto vale sobre todo o período contratado.`
-                  : 'Escolha o período da sua assinatura.'}
-              </DialogDescription>
+              <img
+                src="/CRIATIVOS/mascote-popsystem.webp"
+                alt="Mascote PopSystem"
+                className="pointer-events-none absolute -bottom-7 -right-6 z-20 h-40 w-auto select-none drop-shadow-[0_18px_18px_rgba(0,0,0,0.22)] sm:-bottom-12 sm:right-4 sm:h-64"
+              />
             </DialogHeader>
-            <div className="grid gap-3 px-6 py-6 sm:grid-cols-2">
+
+            <div className="bg-[linear-gradient(180deg,#fff9f2_0%,#fffdf9_34%,#ffffff_100%)] px-5 py-6 sm:px-8">
+              <div className="mb-5 flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
+                <div>
+                  <p className="text-lg font-black text-[#073e2e]">Qual opção fica melhor para você?</p>
+                  <p className="mt-1 text-sm font-medium text-[#6c7e76]">Toque em uma opção para continuar com a assinatura.</p>
+                </div>
+                {offeredPlan && (
+                  <span className="w-fit rounded-full bg-[#eaf6e2] px-3 py-1.5 text-xs font-black text-[#397520]">
+                    Plano {offeredPlan.name}
+                  </span>
+                )}
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {(Object.keys(BILLING_PERIODS) as BillingPeriod[]).map((period) => {
                 if (!offeredPlan) return null;
                 const periodPricing = calculatePlanPeriodPrice(offeredPlan, period, offeredStoreCount);
                 const isBestOffer = period === 'yearly';
-                const periodStyle = {
-                  monthly: {
-                    card: 'border-sky-200 bg-gradient-to-br from-sky-50 via-white to-blue-50 hover:border-sky-400 hover:shadow-sky-100',
-                    icon: 'bg-sky-500 text-white',
-                    price: 'text-sky-800',
-                    badge: 'bg-sky-100 text-sky-700 hover:bg-sky-100',
-                    saving: 'text-sky-700',
-                  },
-                  quarterly: {
-                    card: 'border-orange-200 bg-gradient-to-br from-orange-50 via-white to-amber-50 hover:border-orange-400 hover:shadow-orange-100',
-                    icon: 'bg-[#FF6400] text-white',
-                    price: 'text-orange-800',
-                    badge: 'bg-orange-100 text-orange-700 hover:bg-orange-100',
-                    saving: 'text-orange-700',
-                  },
-                  semiannual: {
-                    card: 'border-violet-200 bg-gradient-to-br from-violet-50 via-white to-fuchsia-50 hover:border-violet-400 hover:shadow-violet-100',
-                    icon: 'bg-violet-600 text-white',
-                    price: 'text-violet-800',
-                    badge: 'bg-violet-100 text-violet-700 hover:bg-violet-100',
-                    saving: 'text-violet-700',
-                  },
-                  yearly: {
-                    card: 'border-emerald-400 bg-gradient-to-br from-emerald-100 via-white to-lime-100 hover:border-emerald-600 hover:shadow-emerald-200',
-                    icon: 'bg-[#003223] text-white',
-                    price: 'text-[#003223]',
-                    badge: 'bg-emerald-200 text-emerald-800 hover:bg-emerald-200',
-                    saving: 'text-emerald-800',
-                  },
+                const periodMessage = {
+                  monthly: 'Liberdade para começar',
+                  quarterly: 'Economia no trimestre',
+                  semiannual: 'Mais tranquilidade',
+                  yearly: 'O melhor valor por mês',
                 }[period];
                 const isExactCurrentPeriod = subscription?.status === 'active'
                   && Number(subscription.plan_id) === Number(periodOffer?.planId)
@@ -910,53 +916,57 @@ const Subscription = () => {
                       setPeriodOffer(null);
                       openCheckout(selectedOffer.planId, selectedOffer.storeCount, period);
                     }}
-                    className={`relative overflow-hidden rounded-2xl border-2 p-4 text-left transition hover:-translate-y-1 hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-55 ${periodStyle.card}`}
+                    className={`group relative flex min-h-[245px] flex-col overflow-hidden rounded-2xl border p-4 text-left transition duration-200 hover:-translate-y-1 hover:border-[#5b9a43] hover:shadow-[0_18px_45px_-24px_rgba(6,71,51,0.55)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff6b00] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-55 ${isBestOffer ? 'border-[#ff6b00] bg-[#fff8f1] ring-1 ring-[#ff6b00]/20' : 'border-[#dfe8e3] bg-white'}`}
                   >
                     {isBestOffer && (
-                      <span className="absolute right-3 top-3 rounded-full bg-[#003223] px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-white">
-                        Maior economia
+                      <span className="absolute right-3 top-3 rounded-full bg-[#ff6b00] px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.1em] text-white shadow-sm">
+                        Mais escolhido
                       </span>
                     )}
                     <div className="flex items-center gap-2">
-                      <span className={`flex h-9 w-9 items-center justify-center rounded-xl shadow-sm ${periodStyle.icon}`}>
+                      <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${isBestOffer ? 'bg-[#ff6b00] text-white' : 'bg-[#eaf6e2] text-[#397520]'}`}>
                         <CalendarDays className="h-5 w-5" />
                       </span>
-                      <span className="font-bold text-slate-900">{periodPricing.label}</span>
-                      {periodPricing.discountPercent > 0 && (
-                        <Badge className={periodStyle.badge}>
-                          -{periodPricing.discountPercent}%
-                        </Badge>
-                      )}
+                      <span className="font-black text-[#073e2e]">{periodPricing.label}</span>
                     </div>
-                    <p className={`mt-4 text-2xl font-bold ${periodStyle.price}`}>
+                    <p className="mt-3 text-xs font-bold text-[#7b8b85]">{periodMessage}</p>
+                    <p className="mt-3 text-2xl font-black tracking-[-0.035em] text-[#073e2e]">
                       {formatCurrency(periodPricing.monthlyEquivalent)}
-                      <span className="text-sm font-medium text-slate-500">/mês</span>
+                      <span className="text-xs font-bold tracking-normal text-[#7b8b85]">/mês</span>
                     </p>
-                    <p className="mt-1 text-sm text-slate-600">
-                      {formatCurrency(periodPricing.totalValue)} por {periodPricing.shortLabel}
+                    <p className="mt-1 text-xs font-medium text-[#6c7e76]">
+                      {period === 'monthly' ? 'Renovação mensal' : `Ciclo de ${periodPricing.shortLabel}`}
                     </p>
                     {periodPricing.months > 1 && (
-                      <p className={`mt-1 text-xs font-semibold ${periodStyle.saving}`}>
-                        No cartão: até {Math.min(12, periodPricing.months)}x
+                      <p className="mt-1 text-xs font-bold text-[#397520]">
+                        No cartão, até {Math.min(12, periodPricing.months)}x
                       </p>
                     )}
                     {periodPricing.savings > 0 && (
-                      <p className={`mt-2 text-sm font-semibold ${periodStyle.saving}`}>
-                        Você economiza {formatCurrency(periodPricing.savings)}
+                      <p className="mt-2 inline-flex w-fit rounded-full bg-[#eaf6e2] px-2.5 py-1 text-[11px] font-black text-[#397520]">
+                        Economize {formatCurrency(periodPricing.savings)}
                       </p>
                     )}
                     {isUnavailablePeriod && (
-                      <p className="mt-2 text-xs font-semibold text-slate-500">
+                      <p className="mt-2 text-xs font-bold text-[#7b8b85]">
                         {isExactCurrentPeriod ? 'Período atual' : 'Disponível no próximo vencimento'}
                       </p>
+                    )}
+                    {!isUnavailablePeriod && (
+                      <span className={`mt-auto flex items-center justify-between border-t pt-3 text-xs font-black ${isBestOffer ? 'border-orange-200 text-[#d9560b]' : 'border-[#e4ebe6] text-[#397520]'}`}>
+                        Escolher {periodPricing.label.toLowerCase()}
+                        <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+                      </span>
                     )}
                   </button>
                 );
               })}
+              </div>
             </div>
-            <p className="border-t px-6 py-4 text-center text-xs leading-5 text-slate-500">
-              A cobrança é feita antecipadamente pelo período escolhido. A renovação segue o mesmo ciclo.
-            </p>
+            <div className="flex items-center justify-center gap-2 border-t border-[#e7ece8] bg-white px-6 py-4 text-center text-xs font-semibold leading-5 text-[#6c7e76]">
+              <span className="flex h-5 w-5 flex-none items-center justify-center rounded-full bg-[#eaf6e2] text-[#397520]"><Check className="h-3.5 w-3.5" /></span>
+              Pagamento seguro. Você confere todos os detalhes antes de finalizar.
+            </div>
           </DialogContent>
         </Dialog>
 

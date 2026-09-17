@@ -3,6 +3,7 @@ import { Helmet } from 'react-helmet-async';
 import {
   ArrowRight,
   BarChart3,
+  BellRing,
   BookOpenCheck,
   Boxes,
   Check,
@@ -22,6 +23,7 @@ import {
   Trophy,
   Truck,
   UsersRound,
+  Video,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -29,6 +31,7 @@ import { Card } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
+import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 
 type CategoryId = 'all' | 'start' | 'sales' | 'delivery' | 'products' | 'finance' | 'customers' | 'reports' | 'settings';
@@ -171,7 +174,7 @@ const readStoredIds = (key: string) => {
 
 const categoryMap = new Map(categories.map((category) => [category.id, category]));
 
-const Tutorials = () => {
+const TutorialLibrary = () => {
   const [query, setQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<CategoryId>('all');
   const [sortMode, setSortMode] = useState<SortMode>('recent');
@@ -457,6 +460,81 @@ const Tutorials = () => {
       </Dialog>
     </>
   );
+};
+
+const TutorialsComingSoon = () => (
+  <>
+    <Helmet>
+      <title>Tutoriais em breve | PopSystem</title>
+      <meta name="description" content="A nova Central de Tutoriais PopSystem estará disponível em breve." />
+    </Helmet>
+
+    <div className="mx-auto flex min-h-[calc(100vh-8rem)] w-full max-w-[1500px] items-center py-4 sm:py-8">
+      <Card className="relative isolate w-full overflow-hidden rounded-[30px] border-0 bg-[#064733] shadow-[0_32px_90px_-45px_rgba(0,50,35,0.8)]">
+        <img
+          src="/landing/hero-restaurante-popsystem.webp"
+          alt=""
+          className="absolute inset-0 h-full w-full object-cover opacity-[0.14] mix-blend-luminosity"
+        />
+        <div className="absolute inset-0 bg-[linear-gradient(105deg,#033d2c_0%,#07563e_62%,rgba(4,67,48,0.9)_100%)]" />
+        <div className="absolute -left-28 -top-28 h-80 w-80 rounded-full border-[56px] border-white/[0.05]" />
+        <div className="absolute -bottom-32 right-[22%] h-80 w-80 rounded-full bg-[#ff6b00]/25 blur-3xl" />
+
+        <div className="relative z-10 grid min-h-[610px] items-center gap-8 px-6 py-10 sm:px-10 lg:grid-cols-[1.1fr_.8fr] lg:px-16 lg:py-14">
+          <div className="max-w-2xl">
+            <img src="/LOGOMARCA/logo-pop.webp" alt="PopSystem" className="h-12 w-auto rounded-2xl bg-white px-4 py-2.5 shadow-xl" />
+            <Badge className="mt-7 border border-[#c9f59f]/25 bg-[#c9f59f]/15 px-4 py-2 text-[#d9ffb7] hover:bg-[#c9f59f]/15">
+              <Sparkles className="mr-2 h-4 w-4" /> NOVIDADE A CAMINHO
+            </Badge>
+            <h1 className="mt-5 text-4xl font-black leading-[1.05] tracking-[-0.045em] text-white sm:text-5xl lg:text-6xl">
+              Nossa Central de Tutoriais chega <span className="text-[#ff8a32]">em breve.</span>
+            </h1>
+            <p className="mt-5 max-w-xl text-base font-medium leading-7 text-white/75 sm:text-lg">
+              Estamos preparando vídeos rápidos e objetivos para sua equipe dominar o PopSystem e ganhar ainda mais agilidade no dia a dia.
+            </p>
+
+            <div className="mt-8 grid gap-3 sm:grid-cols-3">
+              {[
+                { icon: Video, label: 'Vídeos práticos' },
+                { icon: BookOpenCheck, label: 'Passo a passo' },
+                { icon: Lightbulb, label: 'Dicas rápidas' },
+              ].map(({ icon: Icon, label }) => (
+                <div key={label} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/15 px-4 py-3 text-sm font-black text-white backdrop-blur-sm">
+                  <span className="flex h-9 w-9 flex-none items-center justify-center rounded-xl bg-[#ff6b00] text-white"><Icon className="h-4 w-4" /></span>
+                  {label}
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-8 flex items-center gap-3 rounded-2xl border border-[#c9f59f]/20 bg-[#c9f59f]/10 p-4 text-sm font-bold text-white/85 sm:w-fit sm:pr-7">
+              <BellRing className="h-5 w-5 flex-none text-[#c9f59f]" />
+              Avisaremos assim que os primeiros tutoriais estiverem disponíveis.
+            </div>
+          </div>
+
+          <div className="relative flex min-h-[330px] items-end justify-center lg:min-h-[500px]">
+            <div className="absolute bottom-3 h-48 w-72 rounded-[50%] bg-black/25 blur-2xl" />
+            <div className="absolute right-0 top-0 rounded-3xl border border-white/15 bg-white/10 px-5 py-4 text-white shadow-xl backdrop-blur-md sm:right-8">
+              <p className="text-xs font-black uppercase tracking-[0.16em] text-[#c9f59f]">PopSystem ensina</p>
+              <p className="mt-1 max-w-[210px] text-lg font-black leading-tight">Aprender ficará tão simples quanto vender.</p>
+            </div>
+            <img
+              src="/CRIATIVOS/mascote-popsystem.webp"
+              alt="Mascote PopSystem"
+              className="relative z-10 max-h-[480px] w-auto max-w-full object-contain object-bottom drop-shadow-[0_28px_35px_rgba(0,0,0,0.38)]"
+            />
+          </div>
+        </div>
+      </Card>
+    </div>
+  </>
+);
+
+const Tutorials = () => {
+  const { user } = useAuth();
+  const canPreviewTutorials = user?.email?.trim().toLowerCase() === 'teste02@gmail.com';
+
+  return canPreviewTutorials ? <TutorialLibrary /> : <TutorialsComingSoon />;
 };
 
 export default Tutorials;

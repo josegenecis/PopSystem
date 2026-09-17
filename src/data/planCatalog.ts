@@ -92,7 +92,13 @@ const ESSENCIAL_FEATURE_GROUPS: PlanFeatureGroup[] = [
   },
   {
     title: 'Cardápio e pagamentos',
-    features: ['Cardápio digital com link e QR Code', 'PIX e cadastro de formas de pagamento', 'WhatsApp Bot', 'Artes e banners, cupons e fidelidade'],
+    features: [
+      'Cardápio digital com link e QR Code',
+      'PIX e cadastro de formas de pagamento',
+      'PopPay: receba o pedido somente após a confirmação do pagamento',
+      'WhatsApp Bot',
+      'Artes e banners, cupons e fidelidade',
+    ],
   },
   {
     title: 'Gestão da operação',

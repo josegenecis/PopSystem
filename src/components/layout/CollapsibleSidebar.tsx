@@ -38,6 +38,7 @@ import {
   Download,
   Megaphone,
   BookOpenCheck,
+  GraduationCap,
   X
 } from 'lucide-react';
 
@@ -229,6 +230,7 @@ const CollapsibleSidebar = () => {
   }, [subscription]);
 
   const standaloneLinks: SidebarLink[] = [
+    { to: '/tutoriais', icon: GraduationCap, label: 'Tutoriais' },
     { to: '/lojas', icon: Network, label: 'Minha Rede', detail: 'Multi', feature: 'multiStore', area: 'dashboard' },
     { to: '/agente', icon: Bot, label: 'Pop Agente', feature: 'agent', area: 'agent' },
     { to: '/downloads', icon: Download, label: 'App Desktop', feature: 'desktop', area: 'desktop' },

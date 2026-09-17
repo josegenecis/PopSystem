@@ -66,6 +66,7 @@ const MercadoPagoReturn = lazy(() => import('@/pages/MercadoPagoReturn'));
 const MpCallback = lazy(() => import('@/pages/MpCallback'));
 const PopPayCallback = lazy(() => import('@/pages/PopPayCallback').then((module) => ({ default: module.PopPayCallback })));
 const AgentDashboard = lazy(() => import('@/pages/AgentDashboard'));
+const Tutorials = lazy(() => import('@/pages/Tutorials'));
 const WaiterLogin = lazy(() => import('@/pages/WaiterLogin'));
 const EmployeeLogin = lazy(() => import('@/pages/EmployeeLogin'));
 const OperatorLogin = lazy(() => import('@/pages/OperatorLogin'));
@@ -253,6 +254,7 @@ function AppContent() {
           {import.meta.env.DEV && <Route path="/debug-pix" element={<DebugPix />} />}
           <Route path="/cardapio" element={<OperatorRoute area="products"><FeatureRoute feature="menu"><Menu /></FeatureRoute></OperatorRoute>} />
           <Route path="/agente" element={<OperatorRoute area="agent"><FeatureRoute feature="agent"><AgentDashboard /></FeatureRoute></OperatorRoute>} />
+          <Route path="/tutoriais" element={<Tutorials />} />
           <Route path="/marketing" element={<OperatorRoute area="marketing"><FeatureRoute feature="marketingEssential"><Marketing /></FeatureRoute></OperatorRoute>} />
 
           {import.meta.env.DEV && <Route path="/system-check" element={<SystemCheck />} />}

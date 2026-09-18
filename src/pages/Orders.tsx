@@ -650,7 +650,28 @@ const Orders = () => {
           });
         });
 
-        PrinterService.printOrderOnAccept(order);
+        try {
+          const printResult = await PrinterService.printOrderOnAccept({
+            ...order,
+            ...data,
+            user_id: order.user_id || user.id,
+            items: normalizeItems((data as any)?.items ?? order.items),
+          });
+          if (!printResult?.success) {
+            toast({
+              title: 'Pedido aceito; impressão pendente',
+              description: 'O PopSystem tentará imprimir novamente assim que o Pop Connect estiver disponível.',
+              variant: 'destructive',
+            });
+          }
+        } catch (printError) {
+          console.error('Pedido aceito, mas a impressão ficou pendente:', printError);
+          toast({
+            title: 'Pedido aceito; impressão pendente',
+            description: 'O PopSystem continuará tentando sem duplicar o pedido.',
+            variant: 'destructive',
+          });
+        }
 
       } else {
         if (!options?.silent) {

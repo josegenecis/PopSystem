@@ -5,6 +5,7 @@ import { getPublicWebBaseUrl } from '@/utils/publicUrl';
 import { bridgeOpenCashDrawer, bridgePrintReceipt, bridgePrintReport } from '@/services/bridgePrinterClient';
 import { discoverBridgeWebsocketUrl } from '@/services/bridgeDiscovery';
 import { loadPrinterConfig } from '@/services/printerConfig';
+import { dequeuePendingOrderPrint, enqueuePendingOrderPrint } from '@/services/orderPrintQueue';
 
 // ESC/POS Commands
 const ESC = '\x1B';
@@ -27,12 +28,16 @@ let usbDevice: any = null;
 const printedAcceptedOrderIds =
   (globalThis as any).__popsystemPrintedAcceptedOrders || new Set<string>();
 (globalThis as any).__popsystemPrintedAcceptedOrders = printedAcceptedOrderIds;
+const printingAcceptedOrderIds =
+  (globalThis as any).__popsystemPrintingAcceptedOrders || new Set<string>();
+(globalThis as any).__popsystemPrintingAcceptedOrders = printingAcceptedOrderIds;
 
 type PrintOrderOptions = {
   onlyIfAuto?: boolean;
   openCashDrawer?: boolean;
   rasterizeSystemReceipt?: boolean;
   throwOnError?: boolean;
+  allowBrowserDialog?: boolean;
 };
 
 type NormalizedPrintConfig = {
@@ -1753,12 +1758,10 @@ export const PrinterService = {
       .eq('user_id', order.user_id)
       .maybeSingle();
 
-    if (options.onlyIfAuto) {
-      if (isElectron) {
-        if (settings?.auto_print === false) return { success: true, skipped: true, reason: 'auto_print_disabled' };
-      } else {
-        if (settings?.auto_print !== true) return { success: true, skipped: true, reason: 'auto_print_disabled' };
-      }
+    // Ausência de configuração mantém a impressão ligada, evitando que contas
+    // antigas deixem de imprimir. Somente uma desativação explícita é respeitada.
+    if (options.onlyIfAuto && settings?.auto_print === false) {
+      return { success: true, skipped: true, reason: 'auto_print_disabled' };
     }
 
     // O DANFE NFC-e exige o layout térmico completo de 80 mm. Alguns clientes
@@ -1939,6 +1942,11 @@ export const PrinterService = {
     }
 
     // 4. Fallback: Janela de Impressão HTML (Navegador)
+    if (options.allowBrowserDialog === false) {
+      const message = 'Pop Connect indisponível. A impressão ficará pendente e será tentada novamente.';
+      if (options.throwOnError) throw new Error(message);
+      return { success: false, error: message };
+    }
     this.printHtml(enrichedOrder, config);
     return { success: true };
   },
@@ -1948,21 +1956,45 @@ export const PrinterService = {
   },
 
   async printOrderOnAccept(order: any) {
-    const api = typeof window !== 'undefined' ? (window as any)?.electronAPI : null;
-    const isElectron = Boolean(api?.printSystem && api?.printReceipt);
     const orderId = String(order?.id || '').trim();
+    const ownerId = String(order?.user_id || '').trim();
     if (orderId) {
-      if (printedAcceptedOrderIds.has(orderId)) return { success: true, skipped: true };
-      printedAcceptedOrderIds.add(orderId);
+      if (printedAcceptedOrderIds.has(orderId)) {
+        if (ownerId) dequeuePendingOrderPrint(ownerId, orderId);
+        return { success: true, skipped: true, reason: 'already_printed' };
+      }
+      if (printingAcceptedOrderIds.has(orderId)) {
+        return { success: true, skipped: true, reason: 'print_in_progress' };
+      }
+      if (ownerId) enqueuePendingOrderPrint(ownerId, orderId);
+      printingAcceptedOrderIds.add(orderId);
     }
 
     try {
-      const result = await this.printOrder(order, { onlyIfAuto: !isElectron });
-      if (!result?.success && orderId) printedAcceptedOrderIds.delete(orderId);
+      // Aceitar um pedido sempre representa uma intenção explícita de impressão,
+      // tanto no PWA quanto no desktop. O fallback do diálogo do navegador não
+      // confirma impressão e, por isso, não pode retirar o pedido da fila.
+      const result = await this.printOrder(order, { onlyIfAuto: true, allowBrowserDialog: false });
+      if (result?.success) {
+        if (orderId) printedAcceptedOrderIds.add(orderId);
+        if (ownerId && orderId) dequeuePendingOrderPrint(ownerId, orderId);
+      } else {
+        console.warn('[delivery-print] impressão pendente', {
+          orderId,
+          orderNumber: order?.order_number,
+          error: result?.error,
+        });
+      }
       return result;
     } catch (error) {
-      if (orderId) printedAcceptedOrderIds.delete(orderId);
+      console.warn('[delivery-print] falha ao imprimir pedido aceito', {
+        orderId,
+        orderNumber: order?.order_number,
+        error,
+      });
       throw error;
+    } finally {
+      if (orderId) printingAcceptedOrderIds.delete(orderId);
     }
   },
 

@@ -1,14 +1,122 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { bridgeOpenCashDrawer, bridgePrintReport, isRecentBridgeScaleReading } from './bridgePrinterClient';
+import {
+  bridgeOpenCashDrawer,
+  bridgePrintReport,
+  bridgeReadScaleWeight,
+  isBridgeScaleReadingFromRequest,
+} from './bridgePrinterClient';
 
-test('accepts a current cached scale reading for instant PWA feedback', () => {
-  assert.equal(isRecentBridgeScaleReading({ weight: 0.75, unit: 'kg', stable: true, readAt: 9_500 }, 10_000), true);
+test('requires a scale reading produced after the PDV request', () => {
+  assert.equal(
+    isBridgeScaleReadingFromRequest(
+      { weight: 0.75, unit: 'kg', stable: true, readAt: 9_999 },
+      10_000,
+      10_100,
+    ),
+    false,
+  );
+  assert.equal(
+    isBridgeScaleReadingFromRequest(
+      { weight: 0, unit: 'kg', stable: true, readAt: 10_001 },
+      10_000,
+      10_100,
+    ),
+    true,
+  );
+  assert.equal(
+    isBridgeScaleReadingFromRequest(
+      { weight: 0.75, unit: 'kg', stable: true, readAt: 10_001 },
+      10_000,
+      10_100,
+    ),
+    true,
+  );
 });
 
-test('rejects old or invalid cached scale readings', () => {
-  assert.equal(isRecentBridgeScaleReading({ weight: 0.75, unit: 'kg', stable: true, readAt: 7_000 }, 10_000), false);
-  assert.equal(isRecentBridgeScaleReading({ weight: Number.NaN, unit: 'kg', stable: true, readAt: 9_900 }, 10_000), false);
+test('rejects the previous weight returned by an older Pop Connect', async () => {
+  class MockWebSocket {
+    onopen: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    private listeners = new Set<(event: { data: string }) => void>();
+
+    constructor(_url: string) { queueMicrotask(() => this.onopen?.()); }
+    addEventListener(event: string, listener: (event: { data: string }) => void) {
+      if (event === 'message') this.listeners.add(listener);
+    }
+    removeEventListener(event: string, listener: (event: { data: string }) => void) {
+      if (event === 'message') this.listeners.delete(listener);
+    }
+    send(raw: string) {
+      const message = JSON.parse(raw);
+      const response = message.action === 'get_status'
+        ? { ok: true, event: 'status', scale: { connected: true } }
+        : {
+            ok: true,
+            event: 'weight_read',
+            cached: true,
+            reading: { weight: 0.75, unit: 'kg', stable: true, readAt: Date.now() - 5000 },
+          };
+      queueMicrotask(() => this.listeners.forEach((listener) => listener({ data: JSON.stringify(response) })));
+    }
+    close() {}
+  }
+
+  const originalWindow = (globalThis as any).window;
+  const originalWebSocket = (globalThis as any).WebSocket;
+  (globalThis as any).window = globalThis;
+  (globalThis as any).WebSocket = MockWebSocket;
+
+  try {
+    const result = await bridgeReadScaleWeight({ websocketUrl: 'ws://localhost:8766', timeoutMs: 2000 });
+    assert.equal(result.reading, undefined);
+    assert.equal(result.error, 'stale_scale_reading');
+  } finally {
+    (globalThis as any).window = originalWindow;
+    (globalThis as any).WebSocket = originalWebSocket;
+  }
+});
+
+test('accepts a fresh zero reading so the PDV knows the scale is empty', async () => {
+  class MockWebSocket {
+    onopen: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    private listeners = new Set<(event: { data: string }) => void>();
+
+    constructor(_url: string) { queueMicrotask(() => this.onopen?.()); }
+    addEventListener(event: string, listener: (event: { data: string }) => void) {
+      if (event === 'message') this.listeners.add(listener);
+    }
+    removeEventListener(event: string, listener: (event: { data: string }) => void) {
+      if (event === 'message') this.listeners.delete(listener);
+    }
+    send(raw: string) {
+      const message = JSON.parse(raw);
+      const response = message.action === 'get_status'
+        ? { ok: true, event: 'status', scale: { connected: true } }
+        : {
+            ok: true,
+            event: 'weight_read',
+            reading: { weight: 0, unit: 'kg', stable: true, readAt: Date.now() },
+          };
+      queueMicrotask(() => this.listeners.forEach((listener) => listener({ data: JSON.stringify(response) })));
+    }
+    close() {}
+  }
+
+  const originalWindow = (globalThis as any).window;
+  const originalWebSocket = (globalThis as any).WebSocket;
+  (globalThis as any).window = globalThis;
+  (globalThis as any).WebSocket = MockWebSocket;
+
+  try {
+    const result = await bridgeReadScaleWeight({ websocketUrl: 'ws://localhost:8766', timeoutMs: 2000 });
+    assert.equal(result.error, undefined);
+    assert.equal(result.reading?.weight, 0);
+  } finally {
+    (globalThis as any).window = originalWindow;
+    (globalThis as any).WebSocket = originalWebSocket;
+  }
 });
 
 test('sends the automatic dual-connector drawer command to Pop Connect', async () => {

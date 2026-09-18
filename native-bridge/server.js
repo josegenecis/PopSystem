@@ -148,13 +148,11 @@ async function writeScaleCommand(command) {
 async function readScaleWeight(timeoutMs = 2200) {
   if (!scalePort?.isOpen || !scaleConfig) return { ok: false, error: 'scale_not_connected' }
   const protocol = SCALE_PROTOCOLS[scaleConfig.protocol] || SCALE_PROTOCOLS.generic
-  const cachedReading = latestScaleReading
-  if (cachedReading?.weight > 0 && Date.now() - cachedReading.readAt <= 1200) {
-    void writeScaleCommand(protocol.request)
-    return { ok: true, reading: cachedReading, cached: true }
-  }
   const startedAt = Date.now()
-  await writeScaleCommand(protocol.request)
+  // Uma leitura solicitada pelo PDV precisa ser posterior ao clique. Reutilizar
+  // latestScaleReading aqui pode vender novamente o produto que já saiu da balança.
+  const requested = await writeScaleCommand(protocol.request)
+  if (!requested) return { ok: false, error: 'scale_request_failed' }
   return await new Promise((resolve) => {
     const poll = setInterval(() => {
       if (latestScaleReading?.readAt >= startedAt) {
@@ -165,8 +163,7 @@ async function readScaleWeight(timeoutMs = 2200) {
     }, 40)
     const timeout = setTimeout(() => {
       clearInterval(poll)
-      if (latestScaleReading) resolve({ ok: true, reading: latestScaleReading, cached: true })
-      else resolve({ ok: false, error: 'scale_read_timeout' })
+      resolve({ ok: false, error: 'scale_read_timeout' })
     }, Math.max(400, Number(timeoutMs) || 2200))
   })
 }

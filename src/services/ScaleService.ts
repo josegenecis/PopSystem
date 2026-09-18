@@ -37,8 +37,6 @@ export class ScaleService {
   async getReading(timeoutMs = 1800): Promise<ScaleReading> {
     if (!this.scale.connected) throw new Error('Nenhuma balança conectada');
     const startedAt = Date.now();
-    const existing = this.scale.latestReading;
-    if (existing?.stable && existing.readAt && Date.now() - existing.readAt < 1200) return existing;
     return new Promise<ScaleReading>(async (resolve, reject) => {
       let unsubscribe = () => {};
       const timeout = window.setTimeout(() => { unsubscribe(); reject(new Error('A balança não enviou peso')); }, timeoutMs);

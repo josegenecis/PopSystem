@@ -98,13 +98,17 @@ const normalizeScaleReading = (reading?: Partial<BridgeScaleReading> | null): Br
   }
 }
 
-export const isRecentBridgeScaleReading = (
-  reading?: Partial<BridgeScaleReading> | null,
+export const isBridgeScaleReadingFromRequest = (
+  reading: Partial<BridgeScaleReading> | null | undefined,
+  requestedAt: number,
   now = Date.now(),
-  maxAgeMs = 2000,
 ) => {
   const normalized = normalizeScaleReading(reading)
-  return Boolean(normalized?.readAt && now - normalized.readAt >= 0 && now - normalized.readAt <= maxAgeMs)
+  return Boolean(
+    normalized?.readAt &&
+    normalized.readAt >= requestedAt &&
+    normalized.readAt <= now + 1000
+  )
 }
 
 export const bridgeReadScaleWeight = async (params: {
@@ -127,11 +131,7 @@ export const bridgeReadScaleWeight = async (params: {
     }
     scaleConnected = true
 
-    const statusReading = normalizeScaleReading(status.scale.reading)
-    if (statusReading && statusReading.weight > 0 && isRecentBridgeScaleReading(statusReading)) {
-      return { available: true, scaleConnected: true, reading: statusReading }
-    }
-
+    const requestedAt = Date.now()
     const response = await sendAndWait(
       ws,
       'read_weight',
@@ -148,8 +148,8 @@ export const bridgeReadScaleWeight = async (params: {
     }
 
     const reading = normalizeScaleReading(response.reading)
-    if (!reading) {
-      return { available: true, scaleConnected: true, error: 'invalid_scale_reading' }
+    if (!reading || !isBridgeScaleReadingFromRequest(reading, requestedAt)) {
+      return { available: true, scaleConnected: true, error: 'stale_scale_reading' }
     }
 
     return {

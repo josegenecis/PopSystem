@@ -115,8 +115,12 @@ export const bridgeReadScaleWeight = async (params: {
   websocketUrl: string
   timeoutMs?: number
 }): Promise<BridgeScaleResult> => {
-  const timeoutMs = Math.max(1000, params.timeoutMs ?? 4000)
-  const { ws, opened } = await openBridgeSocket(params.websocketUrl, timeoutMs)
+  // O teste do Pop Connect aguarda 2,5 s pela resposta serial. O PDV não pode
+  // encerrar a mesma leitura antes disso, nem disputar o mesmo limite com a
+  // resposta WebSocket que transporta o resultado.
+  const scaleTimeoutMs = Math.max(2500, params.timeoutMs ?? 2500)
+  const socketTimeoutMs = Math.max(4000, scaleTimeoutMs + 1000)
+  const { ws, opened } = await openBridgeSocket(params.websocketUrl, socketTimeoutMs)
 
   if (!opened) {
     try { ws.close() } catch { /* Socket did not finish opening. */ }
@@ -125,7 +129,7 @@ export const bridgeReadScaleWeight = async (params: {
 
   let scaleConnected = false
   try {
-    const status = await sendAndWait(ws, 'get_status', {}, 'status', timeoutMs)
+    const status = await sendAndWait(ws, 'get_status', {}, 'status', socketTimeoutMs)
     if (!status?.ok || !status?.scale?.connected) {
       return { available: true, scaleConnected: false, error: 'scale_not_connected' }
     }
@@ -135,9 +139,9 @@ export const bridgeReadScaleWeight = async (params: {
     const response = await sendAndWait(
       ws,
       'read_weight',
-      { timeoutMs: Math.max(1800, timeoutMs - 1000) },
+      { timeoutMs: scaleTimeoutMs },
       'weight_read',
-      timeoutMs,
+      socketTimeoutMs,
     )
     if (!response?.ok || !response?.reading) {
       return {

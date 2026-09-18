@@ -119,6 +119,53 @@ test('accepts a fresh zero reading so the PDV knows the scale is empty', async (
   }
 });
 
+test('uses the same serial response window as the Pop Connect weight test', async () => {
+  let readWeightTimeout = 0;
+
+  class MockWebSocket {
+    onopen: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    private listeners = new Set<(event: { data: string }) => void>();
+
+    constructor(_url: string) { queueMicrotask(() => this.onopen?.()); }
+    addEventListener(event: string, listener: (event: { data: string }) => void) {
+      if (event === 'message') this.listeners.add(listener);
+    }
+    removeEventListener(event: string, listener: (event: { data: string }) => void) {
+      if (event === 'message') this.listeners.delete(listener);
+    }
+    send(raw: string) {
+      const message = JSON.parse(raw);
+      const response = message.action === 'get_status'
+        ? { ok: true, event: 'status', scale: { connected: true } }
+        : (() => {
+            readWeightTimeout = Number(message.payload?.timeoutMs || 0);
+            return {
+              ok: true,
+              event: 'weight_read',
+              reading: { weight: 0.45, unit: 'kg', stable: true, readAt: Date.now() },
+            };
+          })();
+      queueMicrotask(() => this.listeners.forEach((listener) => listener({ data: JSON.stringify(response) })));
+    }
+    close() {}
+  }
+
+  const originalWindow = (globalThis as any).window;
+  const originalWebSocket = (globalThis as any).WebSocket;
+  (globalThis as any).window = globalThis;
+  (globalThis as any).WebSocket = MockWebSocket;
+
+  try {
+    const result = await bridgeReadScaleWeight({ websocketUrl: 'ws://localhost:8766', timeoutMs: 1800 });
+    assert.equal(readWeightTimeout, 2500);
+    assert.equal(result.reading?.weight, 0.45);
+  } finally {
+    (globalThis as any).window = originalWindow;
+    (globalThis as any).WebSocket = originalWebSocket;
+  }
+});
+
 test('sends the automatic dual-connector drawer command to Pop Connect', async () => {
   const sentMessages: Array<{ action: string; payload: unknown }> = [];
 

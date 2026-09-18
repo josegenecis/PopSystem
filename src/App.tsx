@@ -6,7 +6,6 @@ import { HelmetProvider } from 'react-helmet-async';
 import { Toaster as SonnerToaster } from '@/components/ui/sonner';
 import { Toaster as ShadcnToaster } from '@/components/ui/toaster';
 import { ThemeProvider } from '@/components/theme-provider';
-import SystemAppearanceSync from '@/components/settings/SystemAppearanceSync';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { SubscriptionProvider } from '@/contexts/SubscriptionContext';
 import { RouteGuard } from '@/components/auth/RouteGuard';
@@ -453,7 +452,6 @@ function App() {
         <AuthProvider>
           <SubscriptionProvider>
             <ThemeProvider defaultTheme="light" storageKey="boracume-ui-theme">
-              <SystemAppearanceSync />
               <ConfirmDialogProvider>
                 <Router>
                   <ErrorBoundary>

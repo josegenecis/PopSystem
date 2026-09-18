@@ -170,7 +170,7 @@ const Configuracoes: React.FC = () => {
               onChange={(e) => setTabAndUrl(e.target.value)}
             >
               {canAccessOperatorTab('profile') && <option value="profile">Perfil</option>}
-              {canAccessOperatorTab('appearance') && <option value="appearance">Aparência</option>}
+              {canAccessOperatorTab('appearance') && <option value="appearance">Cores do Cardápio</option>}
               {canAccessOperatorTab('delivery') && <option value="delivery">Delivery</option>}
               {canAccessOperatorTab('payment-methods') && <option value="payment-methods">Formas de Pagamento</option>}
               {canAccessOperatorTab('pix') && <option value="pix">PIX</option>}
@@ -190,7 +190,7 @@ const Configuracoes: React.FC = () => {
       <Tabs value={tab} onValueChange={setTabAndUrl} className="w-full">
         <TabsList className="mb-4 hidden sm:flex flex-wrap justify-start overflow-x-auto scrollbar-hide">
           {canAccessOperatorTab('profile') && <TabsTrigger value="profile">{tabLabel('Perfil', 'settings')}</TabsTrigger>}
-          {canAccessOperatorTab('appearance') && <TabsTrigger value="appearance">{tabLabel('Aparência', 'settings')}</TabsTrigger>}
+          {canAccessOperatorTab('appearance') && <TabsTrigger value="appearance">{tabLabel('Cores do Cardápio', 'settings')}</TabsTrigger>}
           {canAccessOperatorTab('delivery') && <TabsTrigger value="delivery">{tabLabel('Delivery', 'delivery')}</TabsTrigger>}
           {canAccessOperatorTab('payment-methods') && <TabsTrigger value="payment-methods">{tabLabel('Formas de Pagamento', 'pix')}</TabsTrigger>}
           {canAccessOperatorTab('pix') && <TabsTrigger value="pix">{tabLabel('PIX', 'pix')}</TabsTrigger>}

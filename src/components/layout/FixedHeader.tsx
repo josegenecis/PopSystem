@@ -141,14 +141,14 @@ const FixedHeader = () => {
   };
 
   return (
-    <header className="fixed left-0 right-0 top-0 z-50 border-b border-[#E7ECE8] bg-white shadow-[0_12px_30px_-24px_rgba(0,50,35,0.16)]">
+    <header className="fixed left-0 right-0 top-0 z-50 border-b border-[color:var(--app-primary-border)] bg-white shadow-[0_12px_30px_-24px_rgba(var(--app-primary-rgb),0.2)]">
       <div className={`flex items-center justify-between ${isMobile ? 'mobile-safe-x px-3 py-2' : 'px-3 py-3 sm:px-6'}`}>
         <div className="flex items-center space-x-2 sm:space-x-4">
           <Button
             variant="ghost"
             size="sm"
             onClick={toggleSidebar}
-            className="h-8 w-8 rounded-[16px] border border-[#DCE6DF] bg-white p-0 text-[#003223] shadow-sm hover:bg-[#F5F8F6]"
+            className="h-8 w-8 rounded-[16px] border border-[color:var(--app-primary-border)] bg-white p-0 text-[var(--app-primary-deep)] shadow-sm hover:bg-[var(--app-primary-soft)]"
           >
             <Menu size={16} />
           </Button>
@@ -162,10 +162,10 @@ const FixedHeader = () => {
               <Button
                 variant="outline"
                 size="sm"
-                className={`h-9 rounded-xl border font-semibold shadow-sm hover:bg-[#F5F8F6] ${
+                className={`h-9 rounded-xl border font-semibold shadow-sm hover:bg-[var(--app-primary-soft)] ${
                   cashStatus === 'open'
-                    ? 'border-[#8CC850] bg-[#F4FAEC] text-[#245B2B]'
-                    : 'border-[#DCE6DF] bg-white text-[#003223]'
+                    ? 'border-[var(--app-primary)] bg-[var(--app-primary-soft)] text-[var(--app-primary-deep)]'
+                    : 'border-[color:var(--app-primary-border)] bg-white text-[var(--app-primary-deep)]'
                 } ${isMobile ? 'h-8 w-8 rounded-[16px] p-0 md:hidden' : 'hidden px-3 md:inline-flex'}`}
               >
                 <Wallet size={16} className={isMobile ? '' : 'mr-2'} />
@@ -214,8 +214,8 @@ const FixedHeader = () => {
                   key={shortcut.label}
                   variant="outline"
                   size="sm"
-                  className={`relative h-9 rounded-xl border-[#DCE6DF] bg-white px-3 font-semibold text-[#003223] shadow-sm hover:bg-[#F5F8F6] ${
-                    isWhatsApp && whatsAppConnected ? 'border-[#8CC850] bg-[#F4FAEC] text-[#245B2B]' : ''
+                  className={`relative h-9 rounded-xl border-[color:var(--app-primary-border)] bg-white px-3 font-semibold text-[var(--app-primary-deep)] shadow-sm hover:bg-[var(--app-primary-soft)] ${
+                    isWhatsApp && whatsAppConnected ? 'border-[var(--app-primary)] bg-[var(--app-primary-soft)] text-[var(--app-primary-deep)]' : ''
                   }`}
                   onClick={() => goToFeature(shortcut.path, shortcut.feature)}
                 >

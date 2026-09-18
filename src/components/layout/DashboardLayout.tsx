@@ -14,7 +14,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
   const { isOpen, isMobile, isPinned, closeSidebar } = useSidebar();
 
   return (
-    <div className="relative min-h-screen w-full overflow-x-hidden bg-gradient-to-br from-slate-50 via-white to-orange-50 dark:from-[#07110d] dark:via-[#0b1512] dark:to-[#101c17]">
+    <div className="relative min-h-screen w-full overflow-x-hidden bg-gradient-to-br from-[var(--app-primary-soft)] via-white to-[var(--app-surface)] dark:from-[#07110d] dark:via-[#0b1512] dark:to-[#101c17]">
       <FixedHeader />
       
       {/* Overlay para mobile */}
@@ -36,7 +36,7 @@ const DashboardLayoutContent: React.FC<DashboardLayoutProps> = ({ children }) =>
               : 'ml-16 pt-16'
           }
         `}>
-          <div className={`${isMobile ? 'min-h-[calc(100vh-60px)] bg-[#F7F8F6]' : 'h-[calc(100vh-64px)]'} w-full`}>
+          <div className={`${isMobile ? 'min-h-[calc(100vh-60px)] bg-[var(--app-surface)]' : 'h-[calc(100vh-64px)]'} w-full`}>
             <div
               className={`
                 mobile-safe-x h-full w-full max-w-full

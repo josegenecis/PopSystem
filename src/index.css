@@ -34,6 +34,14 @@ body.waiter-app-active #root {
 
 @layer base {
   :root {
+    --app-primary: #85C441;
+    --app-primary-dark: #0B5137;
+    --app-primary-deep: #063D2E;
+    --app-primary-soft: #F2F9EA;
+    --app-surface: #F8FBF6;
+    --app-primary-border: #D8E7D4;
+    --app-primary-rgb: 133, 196, 65;
+
     --background: 40 50% 97%; /* FDF8F0 - Bege clarinho original */
     --foreground: 164 100% 11%; /* 003A2B - Verde escuro original */
 

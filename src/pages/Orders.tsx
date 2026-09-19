@@ -288,13 +288,33 @@ const Orders = () => {
     setAutoAcceptEnabled(localStorage.getItem(getAutoAcceptKey(user.id)) === 'true');
   }, [user?.id]);
 
-  const toggleAutoAccept = () => {
+  const toggleAutoAccept = async () => {
     const next = !autoAcceptEnabled;
-    setAutoAcceptEnabled(next);
-    if (user?.id) {
-      localStorage.setItem(getAutoAcceptKey(user.id), String(next));
-      window.dispatchEvent(new CustomEvent('orders-auto-accept-changed', { detail: { enabled: next } }));
+    if (!user?.id) return;
+
+    if (next) {
+      const { error } = await (supabase as any)
+        .from('printer_settings')
+        .upsert({
+          user_id: user.id,
+          auto_print: true,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id' });
+
+      if (error) {
+        console.error('Nao foi possivel ativar a impressao automatica:', error);
+        toast({
+          title: 'Não foi possível ligar o aceite automático',
+          description: 'A impressão automática não pôde ser ativada. Tente novamente.',
+          variant: 'destructive',
+        });
+        return;
+      }
     }
+
+    setAutoAcceptEnabled(next);
+    localStorage.setItem(getAutoAcceptKey(user.id), String(next));
+    window.dispatchEvent(new CustomEvent('orders-auto-accept-changed', { detail: { enabled: next } }));
     toast({
       title: next ? 'Aceite automático ligado' : 'Aceite automático desligado',
       description: next

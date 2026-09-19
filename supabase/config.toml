@@ -151,6 +151,11 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/motoboy-tracking/index.ts"
 
+[functions.public-order-tracking]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/public-order-tracking/index.ts"
+
 [functions.ifood-webhook]
 enabled = true
 verify_jwt = false

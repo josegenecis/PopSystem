@@ -50,6 +50,7 @@ export const useKDS = () => {
       await enqueuePrintJob({
         restaurantUserId: userId,
         jobType: 'kds_receipt',
+        idempotencyKey: `kds:${order.id}`,
         payload: {
           order_id: order.id,
           order_number: order.order_number,

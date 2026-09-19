@@ -200,6 +200,7 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
   const [changeAmount, setChangeAmount] = React.useState('');
   const [notes, setNotes] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(false);
+  const submittingRef = React.useRef(false);
   const [pixCheckout, setPixCheckout] = React.useState<null | { correlationID: string; brCode: string; qrCodeImage?: string; paymentLinkUrl?: string; paymentId?: string }>(null);
   const [cardCheckoutOrder, setCardCheckoutOrder] = React.useState<any | null>(null);
   const [upsellOpen, setUpsellOpen] = React.useState(false);
@@ -1074,6 +1075,7 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
 
   const handlePlaceOrder = async () => {
     if (!isFormValid()) return;
+    if (submittingRef.current) return;
     if (!isStoreOpen) {
       toast({
         title: 'Loja fechada',
@@ -1082,6 +1084,7 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
       });
       return;
     }
+    submittingRef.current = true;
     if (!paymentTrackedRef.current) {
       paymentTrackedRef.current = true;
       trackMarketingEvent('AddPaymentInfo', {
@@ -1233,6 +1236,7 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
         variant: 'destructive'
       });
     } finally {
+      submittingRef.current = false;
       setIsLoading(false);
     }
   };

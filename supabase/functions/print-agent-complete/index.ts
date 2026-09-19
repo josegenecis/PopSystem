@@ -57,21 +57,24 @@ Deno.serve(async (req: Request) => {
 
     const { data: job, error: jobErr } = await supabase
       .from('print_jobs')
-      .select('id, restaurant_user_id, status')
+      .select('id, restaurant_user_id, status, attempts')
       .eq('id', jobId)
       .maybeSingle()
 
     if (jobErr) return new Response(JSON.stringify({ ok: false, error: 'db_error', details: jobErr }), { status: 500, headers: corsHeaders })
     if (!job || job.restaurant_user_id !== agent.restaurant_user_id) return new Response(JSON.stringify({ ok: false, error: 'not_found' }), { status: 404, headers: corsHeaders })
 
+    const shouldRetry = !ok && Number(job.attempts || 0) < 5
     const update: any = {
-      status: ok ? 'printed' : 'failed',
+      status: ok ? 'printed' : shouldRetry ? 'queued' : 'failed',
       error: ok ? null : errorText,
       printed_at: ok ? new Date().toISOString() : null,
-      attempts: (body?.attempts && Number.isFinite(Number(body.attempts))) ? Number(body.attempts) : undefined,
+      picked_at: shouldRetry ? null : undefined,
+      picked_by: shouldRetry ? null : undefined,
       updated_at: new Date().toISOString(),
     }
-    if (update.attempts === undefined) delete update.attempts
+    if (update.picked_at === undefined) delete update.picked_at
+    if (update.picked_by === undefined) delete update.picked_by
 
     const { error: updErr } = await supabase
       .from('print_jobs')
@@ -85,4 +88,3 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify({ ok: false, error: 'internal_error', message: e?.message }), { status: 500, headers: corsHeaders })
   }
 })
-

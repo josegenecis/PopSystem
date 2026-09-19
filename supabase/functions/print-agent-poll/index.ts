@@ -50,26 +50,25 @@ Deno.serve(async (req: Request) => {
     try { body = await req.json() } catch { body = {} }
     const limit = Math.min(20, Math.max(1, Number(body?.limit || 5)))
 
-    const { data: jobs, error: jobsErr } = await supabase
-      .from('print_jobs')
-      .select('id, job_type, payload, created_at')
-      .eq('restaurant_user_id', agent.restaurant_user_id)
-      .eq('status', 'queued')
-      .order('created_at', { ascending: true })
-      .limit(limit)
+    const { data: jobs, error: jobsErr } = await supabase.rpc('claim_print_jobs', {
+      p_token_hash: tokenHash,
+      p_limit: limit,
+    })
 
     if (jobsErr) return new Response(JSON.stringify({ ok: false, error: 'db_error', details: jobsErr }), { status: 500, headers: corsHeaders })
     if (!jobs || jobs.length === 0) return new Response(JSON.stringify({ ok: true, jobs: [] }), { headers: corsHeaders })
 
-    const jobIds = jobs.map(j => j.id)
-    await supabase
-      .from('print_jobs')
-      .update({ status: 'processing', picked_at: new Date().toISOString(), picked_by: agent.id, updated_at: new Date().toISOString() })
-      .in('id', jobIds)
-
-    return new Response(JSON.stringify({ ok: true, jobs }), { headers: corsHeaders })
+    return new Response(JSON.stringify({
+      ok: true,
+      jobs: jobs.map((job: any) => ({
+        id: job.id,
+        job_type: job.job_type,
+        payload: job.payload,
+        created_at: job.created_at,
+        attempts: job.attempts,
+      })),
+    }), { headers: corsHeaders })
   } catch (e: any) {
     return new Response(JSON.stringify({ ok: false, error: 'internal_error', message: e?.message }), { status: 500, headers: corsHeaders })
   }
 })
-

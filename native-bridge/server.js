@@ -4,6 +4,7 @@ import net from 'net'
 import printerLib from '@thiagoelg/node-printer'
 import { SerialPort } from 'serialport'
 import { buildEscposReceipt, buildEscposReport, buildReceiptLogoHtml } from './receipt.js'
+import { createPrintQueue } from './print-queue.js'
 
 const bridgePort = Number(process.env.POP_CONNECT_PORT || process.env.BRIDGE_PORT || 8766)
 const bridgeHost = process.env.POP_CONNECT_HOST || process.env.BRIDGE_HOST || '127.0.0.1'
@@ -17,6 +18,7 @@ let scaleBuffer = ''
 let latestScaleReading = null
 let renderRequestSequence = 0
 const pendingRenderRequests = new Map()
+const physicalPrintQueue = createPrintQueue()
 let shuttingDown = false
 
 async function shutdown() {
@@ -297,6 +299,17 @@ async function printReceipt(data) {
   return false
 }
 
+async function queueReceiptPrint(data) {
+  const key = String(data?.print_job_id || '').trim()
+  const result = await physicalPrintQueue.run(() => printReceipt(data), { key })
+  return result.ok
+}
+
+async function queueReportPrint(data) {
+  const result = await physicalPrintQueue.run(() => printReport(data))
+  return result.ok
+}
+
 async function printReport(data) {
   const escposData = buildEscposReport(data)
   const logoHtml = data?.hide_store_header ? '' : buildReceiptLogoHtml(data)
@@ -393,13 +406,13 @@ wss.on('connection', (ws) => {
         }
         case 'print_receipt': {
           restoreConfiguredPrinter()
-          const ok = (systemPrinterName || networkAddress) ? await printReceipt(payload) : false
+          const ok = (systemPrinterName || networkAddress) ? await queueReceiptPrint(payload) : false
           ws.send(JSON.stringify({ ok, event: 'printed_receipt' }))
           break
         }
         case 'print_report': {
           restoreConfiguredPrinter()
-          const ok = (systemPrinterName || networkAddress) ? await printReport(payload) : false
+          const ok = (systemPrinterName || networkAddress) ? await queueReportPrint(payload) : false
           ws.send(JSON.stringify({
             ok,
             event: 'printed_report',
@@ -533,7 +546,7 @@ async function pollPrintJobs() {
         const transport = printerCfg.transport || relayTransport
         const address = printerCfg.address || relayAddress || undefined
         try { openPrinter(transport, address) } catch {}
-        ok = await printReceipt(job?.payload || {})
+        ok = await queueReceiptPrint({ ...(job?.payload || {}), print_job_id: `relay:${job.id}` })
       } catch (e) {
         ok = false
         errText = String(e?.message || e)

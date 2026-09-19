@@ -1022,7 +1022,7 @@ function buildOrderHtml(order: any, config: any, store?: any) {
               ${splitLines.map((line) => `<div>${line.label}: ${formatCurrencyValue(line.amount)}</div>`).join('')}
             `;
           })()}
-          ${order.change_amount ? `<div>Troco: ${formatCurrencyValue(Number(order.change_amount || 0))}</div>` : ''}
+          ${Number(order.change_amount || 0) > 0 ? `<div>Troco para: ${formatCurrencyValue(Number(order.change_amount || 0))}</div>${Number(order.change_amount || 0) > Number(order.total || 0) ? `<div>Troco: ${formatCurrencyValue(Number(order.change_amount || 0) - Number(order.total || 0))}</div>` : ''}` : ''}
 
           ${buildNfceHtmlBlock(order)}
           
@@ -1516,6 +1516,7 @@ async function printElectron(order: any, config: any, options: PrintOrderOptions
     discount: Number(order.discount || 0),
     delivery_fee: Number(order.delivery_fee || 0),
     payment_method: formatPaymentMethodLabel(order.payment_method, order),
+    change_amount: Number(order.change_amount || 0),
     nfce: normalizeNfcePrintData(order),
   };
 
@@ -1648,6 +1649,8 @@ function buildPopConnectReceiptPayload(order: any, config: NormalizedPrintConfig
       logo_url: normalizeEscPosText(resolveReceiptLogoUrl(order.store, config)),
     },
     order_number: normalizeEscPosText(order.order_number),
+    order_id: normalizeEscPosText(order.id),
+    print_job_id: normalizeEscPosText(order.__auto_print_job_id || ''),
     ticket_code: shouldPrintTicketCode(order),
     customer_name: normalizeEscPosText(order.customer_name || 'Balcao'),
     customer_phone: normalizeEscPosText(order.customer_phone || ''),
@@ -1675,6 +1678,7 @@ function buildPopConnectReceiptPayload(order: any, config: NormalizedPrintConfig
     discount: Number(order.discount || 0),
     delivery_fee: Number(order.delivery_fee || 0),
     payment_method: normalizeEscPosText(formatPaymentMethodLabel(order.payment_method, order)),
+    change_amount: Number(order.change_amount || 0),
     nfce: normalizeNfcePrintData(order),
   };
 }
@@ -1974,7 +1978,10 @@ export const PrinterService = {
       // Aceitar um pedido sempre representa uma intenção explícita de impressão,
       // tanto no PWA quanto no desktop. O fallback do diálogo do navegador não
       // confirma impressão e, por isso, não pode retirar o pedido da fila.
-      const result = await this.printOrder(order, { onlyIfAuto: true, allowBrowserDialog: false });
+      const result = await this.printOrder(
+        { ...order, __auto_print_job_id: orderId || undefined },
+        { onlyIfAuto: true, allowBrowserDialog: false },
+      );
       if (result?.success) {
         if (orderId) printedAcceptedOrderIds.add(orderId);
         if (ownerId && orderId) dequeuePendingOrderPrint(ownerId, orderId);
@@ -2237,10 +2244,16 @@ export const PrinterService = {
     } else {
       commands += text(`Pagamento: ${formatPaymentMethodLabel(order.payment_method, order)}`);
     }
-    if (order.change_amount) {
-      formatColumns('Troco', formatCurrencyValue(Number(order.change_amount || 0)), lineWidth).forEach((value) => {
+    if (Number(order.change_amount || 0) > 0) {
+      formatColumns('Troco para', formatCurrencyValue(Number(order.change_amount || 0)), lineWidth).forEach((value) => {
         commands += text(value);
       });
+      const change = Number(order.change_amount || 0) - Number(order.total || 0);
+      if (change > 0) {
+        formatColumns('Troco', formatCurrencyValue(change), lineWidth).forEach((value) => {
+          commands += text(value);
+        });
+      }
     }
 
     commands += appendNfceEscPosCommands(order, lineWidth);

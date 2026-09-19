@@ -27,6 +27,7 @@ const OrderTracking: React.FC = () => {
   const { orderId } = useParams();
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [pixOpen, setPixOpen] = useState(false);
   const [deliveryTracking, setDeliveryTracking] = useState<any>(null);
 
@@ -45,34 +46,29 @@ const OrderTracking: React.FC = () => {
   const formatDateTime = (iso: string) => new Date(iso).toLocaleString('pt-BR');
 
   useEffect(() => {
-    let channel: any;
+    let mounted = true;
     const fetchOrder = async () => {
       if (!orderId) return;
       try {
-        setLoading(true);
-        const { data, error } = await supabase
-          .from('orders')
-          .select('id, order_number, customer_name, customer_phone, order_type, status, acceptance_status, total, payment_method, created_at, estimated_time, user_id')
-          .eq('id', orderId)
-          .maybeSingle();
-        if (!error && data) {
-          setOrder(data as Order);
+        const { data, error } = await supabase.functions.invoke('public-order-tracking', { body: { orderId } });
+        if (error || !data?.ok || !data?.order) {
+          throw new Error(data?.error === 'not_found' ? 'Pedido não encontrado.' : 'Não foi possível carregar o pedido.');
         }
+        if (!mounted) return;
+        setOrder(data.order as Order);
+        setLoadError('');
+      } catch (error) {
+        if (!mounted) return;
+        setLoadError(error instanceof Error ? error.message : 'Não foi possível carregar o pedido.');
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
     };
-    fetchOrder();
-    if (orderId) {
-      channel = supabase
-        .channel(`order-tracking-${orderId}`)
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders', filter: `id=eq.${orderId}` }, (payload: any) => {
-          setOrder(payload.new as Order);
-        })
-        .subscribe();
-    }
+    void fetchOrder();
+    const timer = window.setInterval(() => void fetchOrder(), 5000);
     return () => {
-      if (channel) supabase.removeChannel(channel);
+      mounted = false;
+      window.clearInterval(timer);
     };
   }, [orderId]);
 
@@ -108,7 +104,7 @@ const OrderTracking: React.FC = () => {
         <div className="text-center">
           <AlertTriangle className="w-10 h-10 text-red-500 mx-auto mb-3" />
           <h1 className="text-2xl font-bold mb-2">Pedido não encontrado</h1>
-          <p className="text-muted-foreground">Verifique o link e tente novamente.</p>
+          <p className="text-muted-foreground">{loadError || 'Verifique o link e tente novamente.'}</p>
           <div className="mt-4">
             <Link to="/menu-digital">
               <Button variant="outline">Voltar ao Cardápio</Button>

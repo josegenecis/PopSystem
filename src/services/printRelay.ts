@@ -30,19 +30,24 @@ export const createPrintAgentToken = async (params: { restaurantUserId: string; 
   return { token }
 }
 
-export const enqueuePrintJob = async (params: { restaurantUserId: string; jobType: string; payload: any }) => {
-  const { data, error } = await supabase
-    .from('print_jobs' as any)
-    .insert({
-      restaurant_user_id: params.restaurantUserId,
-      status: 'queued',
-      job_type: params.jobType,
-      payload: params.payload,
-    } as any)
+export const enqueuePrintJob = async (params: { restaurantUserId: string; jobType: string; payload: any; idempotencyKey?: string }) => {
+  const row = {
+    restaurant_user_id: params.restaurantUserId,
+    status: 'queued',
+    job_type: params.jobType,
+    payload: params.payload,
+    idempotency_key: params.idempotencyKey || null,
+  } as any
+  const query = params.idempotencyKey
+    ? supabase.from('print_jobs' as any).upsert(row, {
+        onConflict: 'restaurant_user_id,idempotency_key',
+        ignoreDuplicates: true,
+      })
+    : supabase.from('print_jobs' as any).insert(row)
+  const { data, error } = await query
     .select('id')
     .maybeSingle()
 
   if (error) throw error
   return { id: data?.id as string | undefined }
 }
-

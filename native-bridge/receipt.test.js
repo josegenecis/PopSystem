@@ -51,6 +51,18 @@ test('uses the restaurant identity and prints the complete operational order', (
   assert.match(receipt, /Sistema PopSystem/)
 })
 
+test('prints the cash amount and calculated change', () => {
+  const receipt = readable(buildEscposReceipt({
+    items: [],
+    total: 46,
+    payment_method: 'DINHEIRO',
+    change_amount: 50,
+  }))
+
+  assert.match(receipt, /Troco para:\s+R\$ 50,00/)
+  assert.match(receipt, /Troco:\s+R\$ 4,00/)
+})
+
 test('uses a commercial hierarchy without widening the receipt body', () => {
   const receipt = buildEscposReceipt({
     store: { restaurant_name: 'The place Acai' },

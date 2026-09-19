@@ -70,9 +70,69 @@ test('Finalizar Pedido habilita com PIX padrão selecionado', async ({ page, bas
       body: JSON.stringify({ id: fakeOrderId }),
     });
   });
+  await page.route('**/functions/v1/public-order-tracking', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      ok: true,
+      order: {
+        id: fakeOrderId,
+        order_number: 'PEDIDO-TESTE',
+        customer_name: 'Cliente Teste',
+        customer_phone: '11999999999',
+        order_type: 'delivery',
+        status: 'pending',
+        acceptance_status: 'pending_acceptance',
+        total: 10,
+        payment_method: 'dinheiro',
+        created_at: '2026-09-19T12:00:00.000Z',
+        estimated_time: '30-45 min',
+        user_id: userId,
+      },
+    }),
+  }));
 
   await finishButton.click();
   await expect(page).toHaveURL(new RegExp(`/track/${fakeOrderId}$`));
+  await expect(page.getByRole('heading', { name: 'Acompanhar Pedido' })).toBeVisible();
+  await expect(page.getByText('PEDIDO-TESTE')).toBeVisible();
   expect(submittedOrders).toBe(1);
   expect(pageErrors).toEqual([]);
+});
+
+test('MenuApp renderiza o acompanhamento após navegação interna', async ({ page, baseURL }) => {
+  const userId = process.env.MENU_TEST_USER_ID;
+  test.skip(!userId, 'Defina MENU_TEST_USER_ID para executar este teste.');
+  const fakeOrderId = '00000000-0000-4000-8000-000000000003';
+
+  await page.route('**/functions/v1/public-order-tracking', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      ok: true,
+      order: {
+        id: fakeOrderId,
+        order_number: 'PEDIDO-ROTA',
+        customer_name: 'Cliente Rota',
+        order_type: 'delivery',
+        status: 'pending',
+        acceptance_status: 'pending_acceptance',
+        total: 15,
+        payment_method: 'dinheiro',
+        created_at: '2026-09-19T12:00:00.000Z',
+        user_id: userId,
+      },
+    }),
+  }));
+
+  await page.goto(`${baseURL}/menu/${userId}`, { waitUntil: 'domcontentloaded' });
+  await page.getByRole('heading', { name: 'Cardápio' }).waitFor({ state: 'visible' });
+  await page.evaluate((orderId) => {
+    window.history.pushState({}, '', `/track/${orderId}`);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  }, fakeOrderId);
+
+  await expect(page).toHaveURL(new RegExp(`/track/${fakeOrderId}$`));
+  await expect(page.getByRole('heading', { name: 'Acompanhar Pedido' })).toBeVisible();
+  await expect(page.getByText('PEDIDO-ROTA')).toBeVisible();
 });

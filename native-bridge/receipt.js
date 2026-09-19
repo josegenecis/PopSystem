@@ -73,13 +73,18 @@ const appendColumns = (target, left, right, width) => {
   for (const line of formatColumns(left, right, width)) target.push(`${line}\n`)
 }
 
-const resolveStoreName = (data) => normalizeLine(
-  data?.store?.restaurant_name
-    || data?.store?.name
-    || data?.receipt?.header
-    || data?.print_header
-    || 'POPSYSTEM',
-)
+const isLegacyStoreName = (value) => /^bora\s*cum[eê]\s*hub$/i.test(normalizeLine(value))
+
+const resolveStoreName = (data) => {
+  const candidates = [
+    data?.store?.restaurant_name,
+    data?.store?.name,
+    data?.receipt?.header,
+    data?.print_header,
+  ]
+  const currentName = candidates.find((value) => normalizeLine(value) && !isLegacyStoreName(value))
+  return normalizeLine(currentName || 'POPSYSTEM')
+}
 
 export function buildReceiptLogoHtml(data = {}) {
   const logoUrl = String(

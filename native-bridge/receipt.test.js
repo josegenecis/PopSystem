@@ -106,6 +106,18 @@ test('uses PopSystem instead of the removed legacy brand when identity is missin
   assert.doesNotMatch(receipt, /BORA CUME/i)
 })
 
+test('rejects the removed legacy brand received from an old print configuration', () => {
+  const receipt = readable(buildEscposReceipt({
+    receipt: { header: 'BORA CUME HUB' },
+    print_header: 'BORA CUME HUB',
+    items: [],
+    total: 0,
+  }))
+
+  assert.match(receipt, /POPSYSTEM/)
+  assert.doesNotMatch(receipt, /BORA CUME/i)
+})
+
 test('renders only a safe establishment logo before the text receipt', () => {
   const html = buildReceiptLogoHtml({
     store: { logo_url: 'https://cdn.example.com/logo.png?size=large&theme=light' },

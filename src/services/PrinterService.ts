@@ -55,10 +55,11 @@ export class PrinterService {
         if (response.ok) {
           const data = await response.json();
           if (data.success && Array.isArray(data.printers)) {
-            data.printers.forEach((p: any) => {
+            const printers = data.printers as Array<{ name: string }>;
+            printers.forEach((printer) => {
               devices.push({
-                id: p.name, // Usar nome como ID para impressoras do sistema
-                name: `${p.name} (Agente)`,
+                id: printer.name, // Usar nome como ID para impressoras do sistema
+                name: `${printer.name} (Agente)`,
                 type: 'agent',
                 connected: false,
                 agentUrl: AGENT_URL
@@ -195,7 +196,7 @@ export class PrinterService {
       // Header
       escposData += '\x1B\x61\x01'; // Center align
       escposData += '\x1B\x45\x01'; // Bold on
-      escposData += 'BORA CUME HUB\n';
+      escposData += `${orderData.store?.name || 'POPSYSTEM'}\n`;
       escposData += '\x1B\x45\x00'; // Bold off
       escposData += '--------------------------------\n';
       escposData += '\x1B\x61\x00'; // Left align

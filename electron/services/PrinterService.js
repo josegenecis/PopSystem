@@ -486,7 +486,7 @@ class PrinterService extends EventEmitter {
     printer.bold(true);
     printer.setTextSize(1, 1);
     
-    const storeName = data.store?.name || 'BORA CUME HUB';
+    const storeName = data.store?.name || 'POPSYSTEM';
     printer.println(storeName);
     
     if (data.store?.description) {
@@ -795,7 +795,7 @@ class PrinterService extends EventEmitter {
     try {
       const testData = {
         store: {
-          name: 'BORA CUME HUB - TESTE',
+          name: 'POPSYSTEM - TESTE',
           address: 'Rua Teste, 123',
           phone: '(11) 99999-9999'
         },

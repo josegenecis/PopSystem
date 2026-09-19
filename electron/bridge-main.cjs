@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, dialog, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
-const { spawn, exec } = require('child_process')
+const { spawn, exec, execFile } = require('child_process')
 
 app.setName('Pop Connect')
 app.setPath('userData', path.join(app.getPath('appData'), 'Pop Connect'))
@@ -284,6 +284,43 @@ process.on('unhandledRejection', (error) => showStartupError('unhandledRejection
 const nativeBridgePath = (...segments) => app.isPackaged
   ? path.join(process.resourcesPath, 'native-bridge', ...segments)
   : path.join(__dirname, '..', 'native-bridge', ...segments)
+
+const execFileText = (file, args) => new Promise((resolve) => {
+  execFile(file, args, { encoding: 'utf8' }, (error, stdout) => {
+    resolve(error ? '' : String(stdout || '').trim())
+  })
+})
+
+const cleanupOrphanedBridge = async () => {
+  if (process.platform !== 'darwin') return
+  const output = await execFileText('/usr/sbin/lsof', [
+    '-nP',
+    `-iTCP:${POP_CONNECT_PORT}`,
+    '-sTCP:LISTEN',
+    '-t',
+  ])
+  const pids = [...new Set(output.split(/\s+/).map(Number).filter(Number.isInteger))]
+  const stopped = []
+  for (const pid of pids) {
+    if (pid === process.pid) continue
+    const command = await execFileText('/bin/ps', ['-p', String(pid), '-o', 'command='])
+    const isPopConnectBridge = command.includes('/Pop Connect.app/Contents/MacOS/Pop Connect')
+      && command.includes('/native-bridge/server.js')
+    if (!isPopConnectBridge) continue
+    try {
+      process.kill(pid, 'SIGTERM')
+      stopped.push(pid)
+    } catch {}
+  }
+  if (!stopped.length) return
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const alive = stopped.some((pid) => {
+      try { process.kill(pid, 0); return true } catch { return false }
+    })
+    if (!alive) return
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+}
 
 const stopBridge = () => {
   const child = bridgeProc
@@ -704,12 +741,13 @@ ipcMain.handle('bridge:setOpenPwaAtLogin', async (_event, payload) => {
 
 ipcMain.handle('bridge:getUpdateStatus', async () => ({ ok: true, ...updateStatus }))
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) return
   try {
     createWindow()
     createTray()
     const cfg = readConfig()
+    await cleanupOrphanedBridge()
     startBridge(cfg?.token || '')
     setLoginStartup(cfg?.autoStartEnabled !== false)
     if (process.argv.includes(LOGIN_START_ARG) && cfg?.openPwaAtLogin !== false) {
@@ -727,6 +765,10 @@ app.on('second-instance', () => {
   if (win.isMinimized()) win.restore()
   win.show()
   win.focus()
+})
+
+app.on('before-quit', () => {
+  stopBridge()
 })
 
 app.on('window-all-closed', () => {

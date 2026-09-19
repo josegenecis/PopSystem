@@ -17,6 +17,36 @@ let scaleBuffer = ''
 let latestScaleReading = null
 let renderRequestSequence = 0
 const pendingRenderRequests = new Map()
+let shuttingDown = false
+
+async function shutdown() {
+  if (shuttingDown) return
+  shuttingDown = true
+  for (const pending of pendingRenderRequests.values()) {
+    clearTimeout(pending.timeout)
+    pending.resolve(null)
+  }
+  pendingRenderRequests.clear()
+  await closeScale().catch(() => {})
+  await new Promise((resolve) => {
+    const timeout = setTimeout(resolve, 600)
+    try {
+      for (const client of wss.clients) client.terminate()
+      wss.close(() => {
+        clearTimeout(timeout)
+        resolve()
+      })
+    } catch {
+      clearTimeout(timeout)
+      resolve()
+    }
+  })
+  process.exit(0)
+}
+
+process.once('disconnect', shutdown)
+process.once('SIGTERM', shutdown)
+process.once('SIGINT', shutdown)
 
 process.on('message', (message) => {
   if (message?.type !== 'render_receipt_result' || !message?.requestId) return

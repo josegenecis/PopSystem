@@ -19,6 +19,7 @@ import { getOrderItemDetailGroups } from '@/lib/orderDetails';
 import { useToast } from '@/hooks/use-toast';
 import { isConfiguredCartItem } from '@/hooks/useSimpleCart';
 import { resolveDeliveryFee } from '@/lib/deliveryPricing';
+import { createMarketingContent, trackMarketingEvent } from '@/lib/marketingTracking';
 
 interface CartItem {
   product: {
@@ -590,14 +591,18 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
     setStep('checkout');
     if (checkoutTrackedRef.current) return;
     checkoutTrackedRef.current = true;
-    trackMarketingEvent('InitiateCheckout', {
-      content_type: 'product',
-      content_ids: cart.map((item) => String(item.product.id)),
-      contents: getMarketingContents(),
-      num_items: cart.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0),
-      value: finalTotal,
-      currency: 'BRL',
-    }, { scope: userId });
+    try {
+      trackMarketingEvent('InitiateCheckout', {
+        content_type: 'product',
+        content_ids: cart.map((item) => String(item.product.id)),
+        contents: getMarketingContents(),
+        num_items: cart.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0),
+        value: finalTotal,
+        currency: 'BRL',
+      }, { scope: userId });
+    } catch (error) {
+      console.warn('[checkout] Falha não crítica ao registrar início do checkout:', error);
+    }
   };
 
   useEffect(() => {
@@ -1085,21 +1090,26 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
       return;
     }
     submittingRef.current = true;
-    if (!paymentTrackedRef.current) {
-      paymentTrackedRef.current = true;
-      trackMarketingEvent('AddPaymentInfo', {
-        content_type: 'product',
-        content_ids: cart.map((item) => String(item.product.id)),
-        contents: getMarketingContents(),
-        num_items: cart.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0),
-        value: finalTotal,
-        currency: 'BRL',
-        payment_method: paymentMethod,
-      }, { scope: userId });
-    }
     setIsLoading(true);
 
     try {
+      if (!paymentTrackedRef.current) {
+        paymentTrackedRef.current = true;
+        try {
+          trackMarketingEvent('AddPaymentInfo', {
+            content_type: 'product',
+            content_ids: cart.map((item) => String(item.product.id)),
+            contents: getMarketingContents(),
+            num_items: cart.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0),
+            value: finalTotal,
+            currency: 'BRL',
+            payment_method: paymentMethod,
+          }, { scope: userId });
+        } catch (error) {
+          console.warn('[checkout] Falha não crítica ao registrar pagamento:', error);
+        }
+      }
+
       const phoneDigits = String(customerPhone || '').replace(/\D/g, '');
       const neighborhood = isDeliveryMode
         ? String(customerNeighborhood || '').trim() || String(selectedZone?.name || '').trim() || String(quoteZone?.name || '').trim() || ''

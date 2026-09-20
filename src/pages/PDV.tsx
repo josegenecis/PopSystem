@@ -876,7 +876,7 @@ const PDV = () => {
       row('Crédito:', formatBRL(summary.credit)),
       row('Débito:', formatBRL(summary.debit)),
       row('Voucher/Refeição:', formatBRL(summary.voucher)),
-      ...(summary.genericCard > 0 ? [row('Cartão:', formatBRL(summary.genericCard))] : []),
+      ...(summary.genericCard > 0 ? [row('Cartão delivery:', formatBRL(summary.genericCard))] : []),
       row('Contas a Receber:', formatBRL(summary.receivable)),
       '',
       row('TOTAL RECEBIDO:', formatBRL(summary.totalReceived)),

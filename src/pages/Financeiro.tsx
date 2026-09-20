@@ -873,7 +873,7 @@ const Financeiro = () => {
       row('Crédito:', formatCurrency(paymentTotals.credito || 0)),
       row('Débito:', formatCurrency(paymentTotals.debito || 0)),
       row('Voucher/Refeição:', formatCurrency(paymentTotals.voucher || 0)),
-      ...(Number(paymentTotals.cartao || 0) > 0 ? [row('Cartão:', formatCurrency(paymentTotals.cartao || 0))] : []),
+      ...(Number(paymentTotals.cartao || 0) > 0 ? [row('Cartão delivery:', formatCurrency(paymentTotals.cartao || 0))] : []),
       row('Contas a Receber:', formatCurrency(paymentTotals.receber || 0)),
       ...(Number(paymentTotals.outros || 0) > 0 ? [row('Outros:', formatCurrency(paymentTotals.outros || 0))] : []),
       '',

@@ -32,6 +32,7 @@ const SidebarLinks = () => {
     { to: '/produtos', icon: ShoppingBag, label: 'Produtos' },
     { to: '/cardapio', icon: QrCode, label: 'Cardápio Digital' },
     { to: '/estoque', icon: Package, label: 'Estoque' },
+    { to: '/compras', icon: ShoppingBag, label: 'Compras e Fornecedores' },
     { to: '/cozinha', icon: ChefHat, label: 'Cozinha (KDS)' },
     { to: '/marketing?tab=whatsapp', icon: Megaphone, label: 'Envio em massa' },
     { to: '/financeiro', icon: CreditCard, label: 'Financeiro' },

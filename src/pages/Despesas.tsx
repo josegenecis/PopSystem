@@ -975,6 +975,8 @@ export default function Despesas() {
 
   const totalForCategoryShare = Math.max(getTotalExpenses(), 1);
   const smartInvoiceTotal = smartInvoiceItems.reduce((sum, item) => sum + Number(item.total_price || 0), 0);
+  const smartInvoiceDeclaredTotal = Number(smartInvoiceImport?.total_amount || 0);
+  const smartInvoiceDifference = Number((smartInvoiceDeclaredTotal - smartInvoiceTotal).toFixed(2));
   const filteredPurchaseInvoices = purchaseInvoices.filter((purchase) => purchaseStatusFilter === 'all' || purchase.status === purchaseStatusFilter);
   const reversedExpenses = expenses
     .filter((expense) => expense.is_active === false && expense.status !== 'cancelled')
@@ -1103,6 +1105,12 @@ export default function Despesas() {
 
           {smartInvoiceItems.length > 0 && (
             <div className="space-y-4">
+              <div className={`grid gap-3 rounded-2xl border p-4 text-sm md:grid-cols-4 ${Math.abs(smartInvoiceDifference) > 0.01 ? 'border-amber-300 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}>
+                <div><span className="block text-xs text-slate-500">Total declarado</span><strong>{formatCurrency(smartInvoiceDeclaredTotal)}</strong></div>
+                <div><span className="block text-xs text-slate-500">Soma dos itens</span><strong>{formatCurrency(smartInvoiceTotal)}</strong></div>
+                <div><span className="block text-xs text-slate-500">Diferença</span><strong className={Math.abs(smartInvoiceDifference) > 0.01 ? 'text-amber-800' : 'text-emerald-800'}>{formatCurrency(smartInvoiceDifference)}</strong></div>
+                <div className="flex items-center gap-2">{Math.abs(smartInvoiceDifference) > 0.01 ? <><AlertTriangle className="h-5 w-5 text-amber-700" /><span className="font-semibold text-amber-800">Revise antes de lançar</span></> : <><PackageCheck className="h-5 w-5 text-emerald-700" /><span className="font-semibold text-emerald-800">Totais conferidos</span></>}</div>
+              </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
                   <div>
@@ -1178,6 +1186,7 @@ export default function Despesas() {
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px]">
                       <Badge variant={item.confidence >= 0.8 ? 'default' : 'secondary'} className="text-[10px]">IA {Math.round(Number(item.confidence || 0) * 100)}%</Badge>
+                      <Badge variant="outline" className="text-[10px]">Unidade: {item.unit_source === 'invoice' || item.unit_source === 'xml' ? 'documento' : item.unit_source === 'catalog' ? 'catálogo' : item.unit_source === 'inferred' ? 'inferida e validada' : item.unit_source === 'confirmed' ? 'confirmada' : 'revisar'}</Badge>
                       <span className="rounded bg-slate-100 px-2 py-1 text-slate-600">1 {String(item.unit || 'un').toUpperCase()} = {Number(item.conversion_factor || 1)} {String(item.stock_unit || item.unit || 'un').toUpperCase()}</span>
                       {invoiceItemNeedsUnitConfirmation(item) && <span className="flex items-center gap-1 font-semibold text-amber-700"><AlertTriangle className="h-3 w-3" />Confirmar unidade</span>}
                       {item.similar_to && <span className="font-semibold text-emerald-700">Catálogo: {item.similar_to} ({Math.round(Number(item.match_confidence || 0) * 100)}%)</span>}

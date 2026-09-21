@@ -46,6 +46,7 @@ const BairrosEntrega = lazy(() => import('@/pages/BairrosEntrega'));
 const Entregadores = lazy(() => import('@/pages/Entregadores'));
 const Equipe = lazy(() => import('@/pages/Equipe'));
 const Ingredientes = lazy(() => import('@/pages/Ingredientes'));
+const Procurement = lazy(() => import('@/pages/Procurement'));
 const InteligenciaCMV = lazy(() => import('@/pages/InteligenciaCMV'));
 const Fiscal = lazy(() => import('@/pages/Fiscal'));
 const Financeiro = lazy(() => import('@/pages/Financeiro'));
@@ -218,6 +219,7 @@ function AppContent() {
           <Route path="/produtos" element={<OperatorRoute area="products"><FeatureRoute feature="products"><Products /></FeatureRoute></OperatorRoute>} />
           <Route path="/precos" element={<OperatorRoute area="products"><FeatureRoute feature="products"><Pricing /></FeatureRoute></OperatorRoute>} />
           <Route path="/estoque" element={<OperatorRoute area="stock"><FeatureRoute feature="stock"><Ingredientes /></FeatureRoute></OperatorRoute>} />
+          <Route path="/compras" element={<OperatorRoute area="stock"><FeatureRoute feature="stock"><Procurement /></FeatureRoute></OperatorRoute>} />
           <Route path="/inteligencia/cmv" element={<OperatorRoute area="stock"><FeatureRoute feature="cmv"><InteligenciaCMV /></FeatureRoute></OperatorRoute>} />
           <Route path="/inteligencia/curva-abc" element={<OperatorRoute area="stock"><FeatureRoute feature="cmv"><InteligenciaCMV /></FeatureRoute></OperatorRoute>} />
           <Route path="/pedidos" element={<OperatorRoute area="orders"><FeatureRoute feature="orders"><Orders /></FeatureRoute></OperatorRoute>} />

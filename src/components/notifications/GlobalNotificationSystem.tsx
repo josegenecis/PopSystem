@@ -381,6 +381,38 @@ const GlobalNotificationSystem: React.FC = () => {
   }, [user, isStandaloneOrderingScreen, toast]);
 
   useEffect(() => {
+    if (!user?.id || isStandaloneOrderingScreen) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const storageKey = `procurement-alert-shown:${user.id}:${today}`;
+    if (localStorage.getItem(storageKey) === 'true') return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { data, error } = await (supabase as any).rpc('get_procurement_alerts', { p_store_user_id: user.id });
+        if (error || cancelled || !data) return;
+        const purchaseCount = Number(data.suggestion_count || 0);
+        const expiryCount = Number(data.expiring_count || 0);
+        const overdueCount = Number(data.overdue_order_count || 0);
+        const pendingInvoices = Number(data.pending_invoice_count || 0);
+        const priceIncreaseCount = Number(data.price_increase_count || 0);
+        if (purchaseCount + expiryCount + overdueCount + pendingInvoices + priceIncreaseCount <= 0) return;
+        const details = [
+          purchaseCount > 0 && `${purchaseCount} item(ns) para comprar`,
+          expiryCount > 0 && `${expiryCount} lote(s) vencendo`,
+          overdueCount > 0 && `${overdueCount} pedido(s) atrasado(s)`,
+          pendingInvoices > 0 && `${pendingInvoices} nota(s) aguardando conferência`,
+          priceIncreaseCount > 0 && `${priceIncreaseCount} aumento(s) de preço acima de 5%`,
+        ].filter(Boolean).join(' · ');
+        toast({ title: 'Atenção na Central de Compras', description: details, duration: 9000 });
+        localStorage.setItem(storageKey, 'true');
+      } catch (error) {
+        console.warn('procurement_alert_failed', error);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id, isStandaloneOrderingScreen, toast]);
+
+  useEffect(() => {
     if (isOnOrdersPage) {
       setIsVisible(false);
     } else if (visibleOrders.length > 0) {

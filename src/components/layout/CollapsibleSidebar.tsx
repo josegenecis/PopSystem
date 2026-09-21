@@ -144,6 +144,7 @@ const CollapsibleSidebar = () => {
       label: 'Estoque',
       items: [
         { to: '/estoque', label: 'Produtos e Estoque', feature: 'stock', area: 'stock' },
+        { to: '/compras', label: 'Compras e Fornecedores', feature: 'stock', area: 'stock' },
       ]
     },
     {

@@ -1207,6 +1207,14 @@ Deno.serve(async (req) => {
         {
             type: "function",
             function: {
+                name: "get_procurement_overview",
+                description: "Consulta alertas profissionais de compras: itens a repor, lotes vencendo, pedidos atrasados, notas aguardando conferência, fornecedores e pedidos de compra recentes.",
+                parameters: { type: "object", properties: {} }
+            }
+        },
+        {
+            type: "function",
+            function: {
                 name: "create_expense",
                 description: "Registra uma despesa.",
                 parameters: {
@@ -1316,6 +1324,7 @@ Deno.serve(async (req) => {
         if (financialMutationTools.has(name)) return canManageFinancial;
         if (name === 'list_expenses') return canViewFinancial;
         if (name === 'get_purchase_suggestions') return canViewStock;
+        if (name === 'get_procurement_overview') return canViewStock;
         if (name === 'get_team_summary') return operatorIsAdmin || operatorPermissions.payroll_view === true || operatorPermissions.payroll_manage === true || operatorPermissions.timeclock_manage === true;
         return true;
     });
@@ -1347,7 +1356,7 @@ Regras:
 - Se o usuário pedir "vá nos produtos/categoria X e liste todos", use list_products com category: "X". Não transforme categoria em busca por nome.
 - Para alterações de cardápio, preserve todos os campos que o usuário não pediu para mudar. Se houver mais de um produto possível, pare e peça uma confirmação objetiva com as opções encontradas.
 - Se o usuário pedir para listar ou alterar preços de grupos de complementos já existentes, use list_variation_group e adjust_variation_group_prices.
-- Se o usuário perguntar o que precisa comprar, o que está acabando, lista de reposição ou cobertura do estoque, use get_purchase_suggestions e responda com os dados reais, incluindo quantidade e unidade de compra.
+- Se o usuário perguntar o que precisa comprar, o que está acabando, lista de reposição ou cobertura do estoque, use get_purchase_suggestions. Para validade, fornecedor, pedidos atrasados ou situação geral das compras, use get_procurement_overview.
 - Se o usuário pedir uma imagem nova sem anexar uma foto, use generate_product_image ou generate_missing_product_images. Quando houver foto anexada no cadastro, preserve e salve a foto original pela ferramenta de criação.
 - Se o usuário disser "pode fazer", "sim", "isso", "continue", "pode aplicar" ou algo parecido, entenda como autorização para executar a última solicitação acionável do histórico. Não pergunte "o que você quer que eu faça?" se existir uma ação pendente no histórico.
 - Quando o pedido for acionável, execute. Evite apenas sugerir passos.
@@ -1375,7 +1384,7 @@ Regras:
 - Se o usuário pedir para listar produtos de uma categoria, use list_products com category. Ex.: "vai nos produtos Extras e lista todos" significa category="Extras", não search="Extras".
 - Ao editar cardápio, seja conservador: localize o produto correto, preserve os campos não mencionados e peça confirmação se o nome estiver ambíguo.
 - Se o usuário pedir para listar ou reajustar preços de um grupo de complementos/adicionais já existente, use list_variation_group e adjust_variation_group_prices.
-- Se o usuário perguntar o que precisa comprar, o que está acabando, lista de reposição ou cobertura do estoque, use get_purchase_suggestions e responda com os dados reais, incluindo quantidade e unidade de compra.
+- Se o usuário perguntar o que precisa comprar, o que está acabando, lista de reposição ou cobertura do estoque, use get_purchase_suggestions. Para validade, fornecedor, pedidos atrasados ou situação geral das compras, use get_procurement_overview.
 - Se o usuário enviar uma imagem de comprovante/recibo, extraia as informações e lance a despesa usando create_expense. Categorize automaticamente da melhor forma.
 - Se o usuário pedir para criar imagem de produto sem anexar uma foto, ou para gerar imagens faltantes, use generate_product_image / generate_missing_product_images. Quando houver foto anexada no cadastro, preserve e salve a foto original pela ferramenta de criação.
 - Se o usuário pedir imagens para produtos sem imagem, execute generate_missing_product_images com process_all=true e limit=100. Não peça para o usuário mandar "continue" quando ainda houver produtos pendentes; a ferramenta deve tentar o lote completo na mesma solicitação.
@@ -2591,7 +2600,7 @@ Regras:
                 else if (fnName === "get_purchase_suggestions") {
                     const historyDays = Math.min(180, Math.max(7, Number(args.history_days || 30)));
                     const coverDays = Math.min(60, Math.max(1, Number(args.cover_days || 7)));
-                    const { data, error } = await supabase.rpc('get_inventory_purchase_suggestions', {
+                    const { data, error } = await supabase.rpc('get_procurement_purchase_suggestions', {
                         p_store_user_id: userId,
                         p_history_days: historyDays,
                         p_cover_days: coverDays,
@@ -2608,6 +2617,16 @@ Regras:
                             : 'O estoque está coberto pelos critérios atuais. Itens sem estoque mínimo e sem histórico de consumo não geram sugestão.',
                         suggestions,
                     };
+                }
+
+                else if (fnName === "get_procurement_overview") {
+                    const [{ data: alerts, error: alertError }, { data: orders, error: orderError }, { data: suppliers, error: supplierError }] = await Promise.all([
+                        supabase.rpc('get_procurement_alerts', { p_store_user_id: userId }),
+                        supabase.from('procurement_orders').select('id,order_number,status,expected_date,total_amount,created_at,supplier:procurement_suppliers(name)').eq('user_id', userId).order('created_at', { ascending: false }).limit(20),
+                        supabase.from('procurement_suppliers').select('id,name,whatsapp,average_lead_time_days,minimum_order_amount,active').eq('user_id', userId).eq('active', true).order('name').limit(100),
+                    ]);
+                    if (alertError || orderError || supplierError) throw alertError || orderError || supplierError;
+                    result = { success: true, alerts: alerts || {}, recent_orders: orders || [], suppliers: suppliers || [] };
                 }
 
                 else if (fnName === "create_expense") {

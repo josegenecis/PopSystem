@@ -1,6 +1,13 @@
-const CACHE_VERSION = 'popsystem-shell-v8';
+const CACHE_VERSION = 'popsystem-shell-v9';
+const ASSET_CACHE_VERSION = 'popsystem-assets-v9';
 const IMAGE_CACHE_VERSION = 'popsystem-images-v1';
 const APP_SHELL = ['/', '/offline.html', '/manifest.json', '/manifest-totem.json', '/manifest-motoboy.json', '/icon-192x192.png', '/icon-512x512.png'];
+
+const fetchWithTimeout = (request, timeoutMs = 15000) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(request, { signal: controller.signal }).finally(() => clearTimeout(timeoutId));
+};
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_VERSION).then((cache) => cache.addAll(APP_SHELL)).then(() => self.skipWaiting()));
@@ -9,7 +16,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((key) => ![CACHE_VERSION, IMAGE_CACHE_VERSION].includes(key)).map((key) => caches.delete(key))))
+      .then((keys) => Promise.all(keys.filter((key) => ![CACHE_VERSION, ASSET_CACHE_VERSION, IMAGE_CACHE_VERSION].includes(key)).map((key) => caches.delete(key))))
       .then(() => self.clients.claim())
   );
 });
@@ -64,9 +71,18 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (url.pathname.startsWith('/assets/')) {
-    // Bundles have hashes in their names. Never turn a missing/obsolete bundle
-    // into a persistent cached failure after a production deployment.
-    event.respondWith(fetch(request).catch(() => caches.match(request)));
+    // Os bundles do Vite possuem hash no nome: uma versao em cache nunca fica
+    // obsoleta. Isso evita baixar novamente cada tela ao navegar pelo PWA.
+    event.respondWith(
+      caches.open(ASSET_CACHE_VERSION).then(async (cache) => {
+        const cached = await cache.match(request);
+        if (cached) return cached;
+
+        const response = await fetchWithTimeout(request);
+        if (response.ok) await cache.put(request, response.clone());
+        return response;
+      })
+    );
     return;
   }
 

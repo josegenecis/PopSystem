@@ -609,6 +609,45 @@ export default function Despesas() {
     reader.readAsDataURL(file);
   });
 
+  const optimizeInvoiceImage = async (file: File) => {
+    if (!file.type.startsWith('image/') || typeof createImageBitmap !== 'function') return file;
+    let image: ImageBitmap;
+    try {
+      image = await createImageBitmap(file);
+    } catch {
+      return file;
+    }
+    try {
+      const maxDimension = 2400;
+      const scale = Math.min(1, maxDimension / Math.max(image.width, image.height));
+      if (scale === 1 && file.size <= 2.5 * 1024 * 1024) return file;
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(image.width * scale));
+      canvas.height = Math.max(1, Math.round(image.height * scale));
+      const context = canvas.getContext('2d');
+      if (!context) return file;
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.88));
+      if (!blob || blob.size >= file.size) return file;
+      return new File([blob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg', lastModified: file.lastModified });
+    } finally {
+      image.close();
+    }
+  };
+
+  const readFunctionError = async (error: unknown, fallback: string) => {
+    try {
+      const response = (error as { context?: Response } | null)?.context;
+      if (response?.clone) {
+        const payload = await response.clone().json();
+        if (payload?.error) return String(payload.error);
+      }
+    } catch {
+      // A resposta pode já ter sido consumida pela biblioteca.
+    }
+    return friendlyErrorMessage(error, fallback);
+  };
+
   const handleSmartInvoiceFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -648,18 +687,19 @@ export default function Despesas() {
 
     setSmartInvoiceLoading(true);
     try {
-      const fileBase64 = await fileToBase64(smartInvoiceFile);
+      const uploadFile = await optimizeInvoiceImage(smartInvoiceFile);
+      const fileBase64 = await fileToBase64(uploadFile);
       const { data, error } = await supabase.functions.invoke('smart-invoice-import', {
         body: {
           operation: 'analyze',
           fileBase64,
-          mimeType: smartInvoiceFile.type || (smartInvoiceFile.name.toLowerCase().endsWith('.xml') ? 'application/xml' : 'application/octet-stream'),
-          fileName: smartInvoiceFile.name,
-          fileSize: smartInvoiceFile.size,
+          mimeType: uploadFile.type || (uploadFile.name.toLowerCase().endsWith('.xml') ? 'application/xml' : 'application/octet-stream'),
+          fileName: uploadFile.name,
+          fileSize: uploadFile.size,
           userId: user?.id,
         }
       });
-      if (error) throw error;
+      if (error) throw new Error(await readFunctionError(error, 'A IA não conseguiu processar essa nota.'));
       if ((data as any)?.error) throw new Error(String((data as any).error));
 
       const analyzedImport = (data as any).import as SmartInvoiceImport;

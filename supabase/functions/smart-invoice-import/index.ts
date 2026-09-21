@@ -70,6 +70,21 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
+async function fetchWithDeadline(url: string, init: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("A leitura da nota demorou mais de 45 segundos. Tente uma foto mais próxima e bem iluminada.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function nfePaymentMethod(code: string) {
   const methods: Record<string, string> = {
     "01": "dinheiro", "03": "credito", "04": "debito", "15": "boleto",
@@ -384,7 +399,9 @@ async function analyzeInvoice(supabase: any, userId: string, body: any) {
   const geminiKey = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_API_KEY");
   const geminiModel = Deno.env.get("GEMINI_VISION_MODEL") || Deno.env.get("GEMINI_MODEL") || "gemini-1.5-flash";
   const openAiKey = Deno.env.get("OPENAI_API_KEY");
-  const openAiModel = Deno.env.get("OPENAI_VISION_MODEL") || Deno.env.get("OPENAI_MODEL") || "gpt-4o-mini";
+  // Não herdar OPENAI_MODEL: ele atende o agente geral e pode ser um modelo de
+  // raciocínio mais lento. A leitura de cupom precisa de visão e baixa latência.
+  const openAiModel = Deno.env.get("OPENAI_VISION_MODEL") || "gpt-4.1-mini";
   const isXml = mimeType.includes("xml") || fileName.toLowerCase().endsWith(".xml");
   if (!isXml && !geminiKey && !openAiKey) throw new Error("Configure GEMINI_API_KEY ou OPENAI_API_KEY para processar notas com IA.");
 
@@ -482,7 +499,7 @@ async function analyzeInvoice(supabase: any, userId: string, body: any) {
     const content = mimeType.includes("pdf")
       ? [{ type: "input_file", filename: fileName, file_data: `data:${mimeType};base64,${fileBase64}` }, { type: "input_text", text: userPrompt }]
       : [{ type: "input_text", text: userPrompt }, { type: "input_image", image_url: `data:${mimeType};base64,${fileBase64}`, detail: "high" }];
-    const response = await fetch("https://api.openai.com/v1/responses", {
+    const response = await fetchWithDeadline("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${openAiKey}`,
@@ -492,9 +509,12 @@ async function analyzeInvoice(supabase: any, userId: string, body: any) {
         model: openAiModel,
         instructions: system,
         temperature: 0.1,
+        max_output_tokens: 6000,
+        store: false,
+        text: { format: { type: "json_object" } },
         input: [{ role: "user", content }],
       }),
-    });
+    }, 45_000);
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data?.error?.message || "Erro ao processar a nota com OpenAI.");
     const outputText = data?.output_text || (data?.output || [])

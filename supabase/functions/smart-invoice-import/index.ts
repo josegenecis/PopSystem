@@ -724,9 +724,8 @@ async function commitInvoice(supabase: any, userId: string, body: any) {
       control_stock: merged.control_stock !== false,
       conversion_factor: Math.max(0.000001, numberValue(merged.conversion_factor, 1)),
       unit_source: String(merged.unit_source || "confirmed"),
-      unit_confirmed: merged.control_stock === false
-        ? true
-        : merged.unit_confirmed === true || (merged.unit_confirmed === undefined && recognizedUnit(merged.unit)),
+      // O clique em "Lançar nota" confirma as unidades que o operador revisou na tela.
+      unit_confirmed: true,
       create_sale_product: merged.create_sale_product === true
         || (!merged.product_id && looksLikeSaleProduct(merged)),
     };

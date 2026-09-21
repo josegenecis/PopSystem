@@ -760,11 +760,6 @@ export default function Despesas() {
       toast({ title: 'Revise os itens', description: 'Todos os itens precisam de nome, quantidade positiva e custo válido.', variant: 'destructive' });
       return;
     }
-    const uncertainUnit = smartInvoiceItems.find((item) => smartLaunchStock && invoiceItemNeedsUnitConfirmation(item));
-    if (uncertainUnit) {
-      toast({ title: 'Confirme as unidades', description: `Revise a unidade de ${uncertainUnit.normalized_name} antes de movimentar o estoque.`, variant: 'destructive' });
-      return;
-    }
     setSmartInvoiceCommitting(true);
     try {
       const { data, error } = await supabase.functions.invoke('smart-invoice-import', {
@@ -1228,7 +1223,7 @@ export default function Despesas() {
                       <Badge variant={item.confidence >= 0.8 ? 'default' : 'secondary'} className="text-[10px]">IA {Math.round(Number(item.confidence || 0) * 100)}%</Badge>
                       <Badge variant="outline" className="text-[10px]">Unidade: {item.unit_source === 'invoice' || item.unit_source === 'xml' ? 'documento' : item.unit_source === 'catalog' ? 'catálogo' : item.unit_source === 'inferred' ? 'inferida e validada' : item.unit_source === 'confirmed' ? 'confirmada' : 'revisar'}</Badge>
                       <span className="rounded bg-slate-100 px-2 py-1 text-slate-600">1 {String(item.unit || 'un').toUpperCase()} = {Number(item.conversion_factor || 1)} {String(item.stock_unit || item.unit || 'un').toUpperCase()}</span>
-                      {invoiceItemNeedsUnitConfirmation(item) && <span className="flex items-center gap-1 font-semibold text-amber-700"><AlertTriangle className="h-3 w-3" />Confirmar unidade</span>}
+                      {invoiceItemNeedsUnitConfirmation(item) && <span className="flex items-center gap-1 font-semibold text-amber-700"><AlertTriangle className="h-3 w-3" />Revisar unidade</span>}
                       {item.similar_to && <span className="font-semibold text-emerald-700">Catálogo: {item.similar_to} ({Math.round(Number(item.match_confidence || 0) * 100)}%)</span>}
                       {item.matched_product_tracks_stock && <span className="text-blue-700">Produto de venda também será atualizado</span>}
                     </div>

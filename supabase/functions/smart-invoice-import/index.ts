@@ -431,7 +431,7 @@ async function analyzeInvoice(supabase: any, userId: string, body: any) {
     "Catalogo atual de insumos do restaurante:",
     JSON.stringify(knownCatalog).slice(0, 18000),
     "",
-    "Responda neste formato:",
+    "Responda somente em JSON valido neste formato:",
     `{
   "supplier_name": "Fornecedor",
   "supplier_document": "CNPJ/CPF se houver",

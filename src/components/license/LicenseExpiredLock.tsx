@@ -20,6 +20,7 @@ const PUBLIC_PREFIXES = [
   '/landing',
   '/auth/callback',
   '/subscription',
+  '/representante',
   '/menu',
   '/menu-digital',
   '/checklist',

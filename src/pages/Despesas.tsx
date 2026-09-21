@@ -1124,94 +1124,67 @@ export default function Despesas() {
                 <div><p className="font-semibold text-emerald-950">Produtos encontrados</p><p className="text-xs text-slate-500">Somente os itens marcados movimentam estoque; todos continuam no total financeiro.</p></div>
                 <div className="flex gap-2"><Button type="button" size="sm" variant="outline" onClick={() => setSmartInvoiceItems((items) => items.map((item) => ({ ...item, control_stock: true })))}>Selecionar todos</Button><Button type="button" size="sm" variant="outline" onClick={() => setSmartInvoiceItems((items) => items.map((item) => ({ ...item, control_stock: false })))}>Desmarcar todos</Button></div>
               </div>
-              <div className="overflow-x-auto rounded-2xl border bg-white">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Item</TableHead>
-                      <TableHead>Categoria</TableHead>
-                      <TableHead>Subcategoria</TableHead>
-                      <TableHead>Qtd</TableHead>
-                      <TableHead>Un. compra</TableHead>
-                      <TableHead>Conversão</TableHead>
-                      <TableHead>Un. estoque</TableHead>
-                      <TableHead>Custo un.</TableHead>
-                      <TableHead>Total</TableHead>
-                      <TableHead>Estoque</TableHead>
-                      <TableHead>Conf.</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {smartInvoiceItems.map((item, index) => (
-                      <TableRow key={item.id || index}>
-                        <TableCell className="min-w-[220px]">
-                          <Input
-                            value={item.normalized_name}
-                            onChange={(event) => updateSmartInvoiceItem(index, { normalized_name: event.target.value })}
-                            className="h-9"
-                          />
-                          <div className="mt-1 text-xs text-slate-500">{item.description}</div>
-                          {item.similar_to && <div className="text-xs font-semibold text-emerald-700">Encontrado no catálogo: {item.similar_to} ({Math.round(Number(item.match_confidence || 0) * 100)}%)</div>}
-                          {item.matched_product_tracks_stock && <div className="text-xs text-blue-700">Produto de venda com estoque será atualizado.</div>}
-                        </TableCell>
-                        <TableCell className="min-w-[160px]">
-                          <Input value={item.category} onChange={(event) => updateSmartInvoiceItem(index, { category: event.target.value })} className="h-9" />
-                        </TableCell>
-                        <TableCell className="min-w-[160px]">
-                          <Input value={item.subcategory || ''} onChange={(event) => updateSmartInvoiceItem(index, { subcategory: event.target.value })} className="h-9" />
-                        </TableCell>
-                        <TableCell className="min-w-[110px]">
-                          <Input
-                            type="number"
-                            step="0.001"
-                            value={item.quantity}
-                            onChange={(event) => updateSmartInvoiceItem(index, { quantity: Number(event.target.value || 0) })}
-                            className="h-9"
-                          />
-                        </TableCell>
-                        <TableCell className="min-w-[100px]">
-                          <Select value={item.unit || 'un'} onValueChange={(value) => updateSmartInvoiceItem(index, { unit: value, unit_confirmed: true, unit_source: 'confirmed' })}>
-                            <SelectTrigger className="h-9">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {PURCHASE_UNITS.map(unit => <SelectItem key={unit} value={unit}>{unit.toUpperCase()}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                          {invoiceItemNeedsUnitConfirmation(item) && <div className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-amber-700"><AlertTriangle className="h-3 w-3" />Confirmar unidade</div>}
-                        </TableCell>
-                        <TableCell className="min-w-[125px]">
-                          <Input type="number" min="0.000001" step="0.001" value={item.conversion_factor || 1} onChange={(event) => updateSmartInvoiceItem(index, { conversion_factor: Number(event.target.value || 1), unit_confirmed: true, unit_source: 'confirmed' })} className="h-9" />
-                          <div className="mt-1 text-[11px] text-slate-500">1 {String(item.unit || 'un').toUpperCase()} = {Number(item.conversion_factor || 1)} {String(item.stock_unit || item.unit || 'un').toUpperCase()}</div>
-                        </TableCell>
-                        <TableCell className="min-w-[110px]">
-                          <Select value={item.stock_unit || item.unit || 'un'} onValueChange={(value) => updateSmartInvoiceItem(index, { stock_unit: value, unit_confirmed: true, unit_source: 'confirmed' })}>
-                            <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-                            <SelectContent>{PURCHASE_UNITS.map(unit => <SelectItem key={unit} value={unit}>{unit.toUpperCase()}</SelectItem>)}</SelectContent>
-                          </Select>
-                        </TableCell>
-                        <TableCell className="min-w-[120px]">
-                          <Input
-                            type="number"
-                            step="0.01"
-                            value={item.unit_price}
-                            onChange={(event) => updateSmartInvoiceItem(index, { unit_price: Number(event.target.value || 0) })}
-                            className="h-9"
-                          />
-                        </TableCell>
-                        <TableCell className="font-semibold">{formatCurrency(Number(item.total_price || 0))}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2"><Checkbox checked={item.control_stock} onCheckedChange={(checked) => updateSmartInvoiceItem(index, { control_stock: checked === true })} /><span className="text-xs">Movimentar</span></div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={item.confidence >= 0.8 ? 'default' : 'secondary'}>
-                            {Math.round(Number(item.confidence || 0) * 100)}%
-                          </Badge>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+              <div className="space-y-2 rounded-2xl border bg-slate-50/70 p-2">
+                {smartInvoiceItems.map((item, index) => (
+                  <div key={item.id || index} className="rounded-xl border bg-white p-3 shadow-sm">
+                    <div className="grid grid-cols-2 gap-2 md:grid-cols-6 xl:grid-cols-12">
+                      <div className="col-span-2 md:col-span-3 xl:col-span-3">
+                        <Label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Item</Label>
+                        <Input value={item.normalized_name} onChange={(event) => updateSmartInvoiceItem(index, { normalized_name: event.target.value })} className="mt-1 h-8 px-2 text-xs font-semibold" />
+                        <p className="mt-1 truncate text-[10px] text-slate-500" title={item.description}>{item.description}</p>
+                      </div>
+                      <div className="col-span-1 md:col-span-1 xl:col-span-1">
+                        <Label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Categoria</Label>
+                        <Input value={item.category} onChange={(event) => updateSmartInvoiceItem(index, { category: event.target.value })} className="mt-1 h-8 px-2 text-xs" />
+                      </div>
+                      <div className="col-span-1 md:col-span-1 xl:col-span-1">
+                        <Label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Subcategoria</Label>
+                        <Input value={item.subcategory || ''} onChange={(event) => updateSmartInvoiceItem(index, { subcategory: event.target.value })} className="mt-1 h-8 px-2 text-xs" />
+                      </div>
+                      <div className="col-span-1 md:col-span-1 xl:col-span-1">
+                        <Label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Qtd.</Label>
+                        <Input type="number" step="0.001" value={item.quantity} onChange={(event) => updateSmartInvoiceItem(index, { quantity: Number(event.target.value || 0) })} className="mt-1 h-8 px-2 text-xs" />
+                      </div>
+                      <div className="col-span-1 xl:col-span-1">
+                        <Label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Compra</Label>
+                        <Select value={item.unit || 'un'} onValueChange={(value) => updateSmartInvoiceItem(index, { unit: value, unit_confirmed: true, unit_source: 'confirmed' })}>
+                          <SelectTrigger className="mt-1 h-8 px-2 text-xs"><SelectValue /></SelectTrigger>
+                          <SelectContent>{PURCHASE_UNITS.map(unit => <SelectItem key={unit} value={unit}>{unit.toUpperCase()}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </div>
+                      <div className="col-span-1 xl:col-span-1">
+                        <Label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Converte</Label>
+                        <Input type="number" min="0.000001" step="0.001" value={item.conversion_factor || 1} onChange={(event) => updateSmartInvoiceItem(index, { conversion_factor: Number(event.target.value || 1), unit_confirmed: true, unit_source: 'confirmed' })} className="mt-1 h-8 px-2 text-xs" />
+                      </div>
+                      <div className="col-span-1 xl:col-span-1">
+                        <Label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Estoque</Label>
+                        <Select value={item.stock_unit || item.unit || 'un'} onValueChange={(value) => updateSmartInvoiceItem(index, { stock_unit: value, unit_confirmed: true, unit_source: 'confirmed' })}>
+                          <SelectTrigger className="mt-1 h-8 px-2 text-xs"><SelectValue /></SelectTrigger>
+                          <SelectContent>{PURCHASE_UNITS.map(unit => <SelectItem key={unit} value={unit}>{unit.toUpperCase()}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </div>
+                      <div className="col-span-1 xl:col-span-1">
+                        <Label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Custo un.</Label>
+                        <Input type="number" step="0.01" value={item.unit_price} onChange={(event) => updateSmartInvoiceItem(index, { unit_price: Number(event.target.value || 0) })} className="mt-1 h-8 px-2 text-xs" />
+                      </div>
+                      <div className="col-span-1 xl:col-span-1">
+                        <Label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Total</Label>
+                        <div className="mt-1 flex h-8 items-center rounded-md bg-slate-100 px-2 text-xs font-bold">{formatCurrency(Number(item.total_price || 0))}</div>
+                      </div>
+                      <div className="col-span-1 xl:col-span-1">
+                        <Label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Entrada</Label>
+                        <div className="mt-1 flex h-8 items-center gap-2"><Checkbox checked={item.control_stock} onCheckedChange={(checked) => updateSmartInvoiceItem(index, { control_stock: checked === true })} /><span className="text-[11px]">Movimentar</span></div>
+                      </div>
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px]">
+                      <Badge variant={item.confidence >= 0.8 ? 'default' : 'secondary'} className="text-[10px]">IA {Math.round(Number(item.confidence || 0) * 100)}%</Badge>
+                      <span className="rounded bg-slate-100 px-2 py-1 text-slate-600">1 {String(item.unit || 'un').toUpperCase()} = {Number(item.conversion_factor || 1)} {String(item.stock_unit || item.unit || 'un').toUpperCase()}</span>
+                      {invoiceItemNeedsUnitConfirmation(item) && <span className="flex items-center gap-1 font-semibold text-amber-700"><AlertTriangle className="h-3 w-3" />Confirmar unidade</span>}
+                      {item.similar_to && <span className="font-semibold text-emerald-700">Catálogo: {item.similar_to} ({Math.round(Number(item.match_confidence || 0) * 100)}%)</span>}
+                      {item.matched_product_tracks_stock && <span className="text-blue-700">Produto de venda também será atualizado</span>}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}

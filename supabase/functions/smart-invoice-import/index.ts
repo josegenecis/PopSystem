@@ -3,6 +3,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { geminiGenerateContent, safeParseJson } from "../_shared/gemini.ts";
 import { findBestCatalogMatch } from "../_shared/catalogMatching.ts";
+import { reconcilePurchaseUnits, type PurchaseUnit } from "../_shared/purchaseUnits.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -507,23 +508,34 @@ async function analyzeInvoice(supabase: any, userId: string, body: any) {
   const parsedItems = parsed.items.map((item: any) => {
     const total = numberValue(item.total_price);
     const quantity = Math.max(0.001, numberValue(item.quantity, 1));
+    const inventoryKind = inferInventoryKind(item);
+    const units = reconcilePurchaseUnits({
+      description: item.description,
+      normalized_name: item.normalized_name,
+      unit: normalizeUnit(item.unit) as PurchaseUnit,
+      stock_unit: normalizeUnit(item.stock_unit || item.unit) as PurchaseUnit,
+      conversion_factor: Math.max(0.000001, numberValue(item.conversion_factor, 1)),
+      unit_source: String(item.unit_source || (recognizedUnit(item.unit) ? "invoice" : "unknown")),
+      unit_confirmed: item.unit_confirmed === true && recognizedUnit(item.unit),
+      inventory_kind: inventoryKind,
+    });
     return {
       description: String(item.description || item.normalized_name || "Item").trim(),
       normalized_name: cleanName(item.normalized_name || item.description || "Item"),
       category: String(item.category || "Insumos").trim(),
       subcategory: String(item.subcategory || "").trim(),
       quantity,
-      unit: normalizeUnit(item.unit),
-      stock_unit: normalizeUnit(item.stock_unit || item.unit),
+      unit: units.unit,
+      stock_unit: units.stock_unit,
       unit_price: numberValue(item.unit_price, total > 0 ? total / quantity : 0),
       total_price: total || numberValue(item.unit_price) * quantity,
       confidence: Math.max(0, Math.min(1, numberValue(item.confidence, 0.7))),
       similar_to: String(item.similar_to || "").trim() || null,
       control_stock: item.control_stock !== false,
-      conversion_factor: Math.max(0.000001, numberValue(item.conversion_factor, 1)),
-      unit_source: String(item.unit_source || (recognizedUnit(item.unit) ? "invoice" : "unknown")),
-      unit_confirmed: item.unit_confirmed === true && recognizedUnit(item.unit),
-      inventory_kind: inferInventoryKind(item),
+      conversion_factor: units.conversion_factor,
+      unit_source: units.unit_source,
+      unit_confirmed: units.unit_confirmed,
+      inventory_kind: inventoryKind,
       similar_ingredient: String(item.similar_ingredient || "").trim() || null,
       similar_product: String(item.similar_product || "").trim() || null,
     };

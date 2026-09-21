@@ -1193,6 +1193,20 @@ Deno.serve(async (req) => {
         {
             type: "function",
             function: {
+                name: "get_purchase_suggestions",
+                description: "Consulta a lista real de compras sugeridas pelo estoque. Usa saldo atual, estoque mínimo e consumo recente para informar o que comprar e em qual quantidade/unidade de compra. Use quando perguntarem o que está faltando, o que comprar, lista de reposição, estoque baixo ou cobertura de estoque.",
+                parameters: {
+                    type: "object",
+                    properties: {
+                        history_days: { type: "integer", description: "Janela de consumo em dias. Padrão 30, mínimo 7 e máximo 180." },
+                        cover_days: { type: "integer", description: "Quantidade de dias futuros que a compra deve cobrir. Padrão 7." }
+                    }
+                }
+            }
+        },
+        {
+            type: "function",
+            function: {
                 name: "create_expense",
                 description: "Registra uma despesa.",
                 parameters: {
@@ -1293,6 +1307,7 @@ Deno.serve(async (req) => {
       operatorPermissions.settings_manage === true;
     const canManageFinancial = operatorIsAdmin || operatorPermissions.financial_view === true;
     const canViewFinancial = canManageFinancial;
+    const canViewStock = operatorIsAdmin || operatorPermissions.stock_manage === true;
 
     const scopedTools = tools.filter((tool: any) => {
         const name = String(tool?.function?.name || '');
@@ -1300,6 +1315,7 @@ Deno.serve(async (req) => {
         if (deliveryMutationTools.has(name)) return canManageDelivery;
         if (financialMutationTools.has(name)) return canManageFinancial;
         if (name === 'list_expenses') return canViewFinancial;
+        if (name === 'get_purchase_suggestions') return canViewStock;
         if (name === 'get_team_summary') return operatorIsAdmin || operatorPermissions.payroll_view === true || operatorPermissions.payroll_manage === true || operatorPermissions.timeclock_manage === true;
         return true;
     });
@@ -1331,6 +1347,7 @@ Regras:
 - Se o usuário pedir "vá nos produtos/categoria X e liste todos", use list_products com category: "X". Não transforme categoria em busca por nome.
 - Para alterações de cardápio, preserve todos os campos que o usuário não pediu para mudar. Se houver mais de um produto possível, pare e peça uma confirmação objetiva com as opções encontradas.
 - Se o usuário pedir para listar ou alterar preços de grupos de complementos já existentes, use list_variation_group e adjust_variation_group_prices.
+- Se o usuário perguntar o que precisa comprar, o que está acabando, lista de reposição ou cobertura do estoque, use get_purchase_suggestions e responda com os dados reais, incluindo quantidade e unidade de compra.
 - Se o usuário pedir uma imagem nova sem anexar uma foto, use generate_product_image ou generate_missing_product_images. Quando houver foto anexada no cadastro, preserve e salve a foto original pela ferramenta de criação.
 - Se o usuário disser "pode fazer", "sim", "isso", "continue", "pode aplicar" ou algo parecido, entenda como autorização para executar a última solicitação acionável do histórico. Não pergunte "o que você quer que eu faça?" se existir uma ação pendente no histórico.
 - Quando o pedido for acionável, execute. Evite apenas sugerir passos.
@@ -1358,6 +1375,7 @@ Regras:
 - Se o usuário pedir para listar produtos de uma categoria, use list_products com category. Ex.: "vai nos produtos Extras e lista todos" significa category="Extras", não search="Extras".
 - Ao editar cardápio, seja conservador: localize o produto correto, preserve os campos não mencionados e peça confirmação se o nome estiver ambíguo.
 - Se o usuário pedir para listar ou reajustar preços de um grupo de complementos/adicionais já existente, use list_variation_group e adjust_variation_group_prices.
+- Se o usuário perguntar o que precisa comprar, o que está acabando, lista de reposição ou cobertura do estoque, use get_purchase_suggestions e responda com os dados reais, incluindo quantidade e unidade de compra.
 - Se o usuário enviar uma imagem de comprovante/recibo, extraia as informações e lance a despesa usando create_expense. Categorize automaticamente da melhor forma.
 - Se o usuário pedir para criar imagem de produto sem anexar uma foto, ou para gerar imagens faltantes, use generate_product_image / generate_missing_product_images. Quando houver foto anexada no cadastro, preserve e salve a foto original pela ferramenta de criação.
 - Se o usuário pedir imagens para produtos sem imagem, execute generate_missing_product_images com process_all=true e limit=100. Não peça para o usuário mandar "continue" quando ainda houver produtos pendentes; a ferramenta deve tentar o lote completo na mesma solicitação.
@@ -2567,6 +2585,28 @@ Regras:
                         matched_category: matchedCategory?.name || null,
                         count: products?.length || 0,
                         products: products
+                    };
+                }
+
+                else if (fnName === "get_purchase_suggestions") {
+                    const historyDays = Math.min(180, Math.max(7, Number(args.history_days || 30)));
+                    const coverDays = Math.min(60, Math.max(1, Number(args.cover_days || 7)));
+                    const { data, error } = await supabase.rpc('get_inventory_purchase_suggestions', {
+                        p_store_user_id: userId,
+                        p_history_days: historyDays,
+                        p_cover_days: coverDays,
+                    });
+                    if (error) throw error;
+                    const suggestions = Array.isArray(data) ? data : [];
+                    result = {
+                        success: true,
+                        count: suggestions.length,
+                        history_days: historyDays,
+                        cover_days: coverDays,
+                        message: suggestions.length > 0
+                            ? `Há ${suggestions.length} item(ns) com reposição sugerida.`
+                            : 'O estoque está coberto pelos critérios atuais. Itens sem estoque mínimo e sem histórico de consumo não geram sugestão.',
+                        suggestions,
                     };
                 }
 

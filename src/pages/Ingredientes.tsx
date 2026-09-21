@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
-import { Plus, Edit, Search, Package, ShoppingBag, ArrowDownToLine, ArrowUpFromLine, ClipboardCheck } from 'lucide-react';
+import { Plus, Edit, Search, Package, ShoppingBag, ArrowDownToLine, ArrowUpFromLine, ClipboardCheck, RefreshCw, ShoppingCart } from 'lucide-react';
 import { CurrencyInput } from '@/components/ui/currency-input';
 import { useNavigate } from 'react-router-dom';
 
@@ -47,6 +47,26 @@ interface ProductStock {
   updated_at?: string | null;
 }
 
+interface PurchaseSuggestion {
+  item_type: 'ingredient' | 'product';
+  item_id: string;
+  name: string;
+  current_stock: number;
+  minimum_stock: number;
+  stock_unit: string;
+  purchase_unit: string;
+  purchase_conversion: number;
+  consumed_in_period: number;
+  average_daily_consumption: number;
+  target_stock: number;
+  suggested_stock_quantity: number;
+  suggested_purchase_quantity: number;
+  days_remaining: number | null;
+  reason: string;
+  history_days: number;
+  cover_days: number;
+}
+
 const UNITS = [
   { value: 'kg', label: 'Quilograma (kg)' },
   { value: 'g', label: 'Grama (g)' },
@@ -63,6 +83,8 @@ export default function Ingredientes() {
   const [filteredIngredients, setFilteredIngredients] = useState<Ingredient[]>([]);
   const [products, setProducts] = useState<ProductStock[]>([]);
   const [filteredProducts, setFilteredProducts] = useState<ProductStock[]>([]);
+  const [purchaseSuggestions, setPurchaseSuggestions] = useState<PurchaseSuggestion[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStockStatus, setFilterStockStatus] = useState('all'); // all, low_stock
@@ -92,9 +114,39 @@ export default function Ingredientes() {
 
   useEffect(() => {
     if (user) {
-      loadIngredients();
+      void Promise.all([loadIngredients(), loadPurchaseSuggestions()]);
     }
   }, [user]);
+
+  const loadPurchaseSuggestions = async () => {
+    if (!user?.id) return;
+    setSuggestionsLoading(true);
+    try {
+      const { data, error } = await (supabase as any).rpc('get_inventory_purchase_suggestions', {
+        p_store_user_id: user.id,
+        p_history_days: 30,
+        p_cover_days: 7,
+      });
+      if (error) throw error;
+      setPurchaseSuggestions(Array.isArray(data) ? data.map((item: any) => ({
+        ...item,
+        current_stock: Number(item.current_stock || 0),
+        minimum_stock: Number(item.minimum_stock || 0),
+        purchase_conversion: Number(item.purchase_conversion || 1),
+        consumed_in_period: Number(item.consumed_in_period || 0),
+        average_daily_consumption: Number(item.average_daily_consumption || 0),
+        target_stock: Number(item.target_stock || 0),
+        suggested_stock_quantity: Number(item.suggested_stock_quantity || 0),
+        suggested_purchase_quantity: Number(item.suggested_purchase_quantity || 0),
+        days_remaining: item.days_remaining == null ? null : Number(item.days_remaining),
+      })) : []);
+    } catch (error) {
+      console.error('Error loading purchase suggestions:', error);
+      setPurchaseSuggestions([]);
+    } finally {
+      setSuggestionsLoading(false);
+    }
+  };
 
   const filterIngredients = () => {
     let filtered = ingredients;
@@ -278,7 +330,7 @@ export default function Ingredientes() {
       }
 
       setIsFormOpen(false);
-      loadIngredients();
+      void Promise.all([loadIngredients(), loadPurchaseSuggestions()]);
     } catch (error: any) {
       console.error('Error saving ingredient:', error);
       toast({
@@ -384,7 +436,7 @@ export default function Ingredientes() {
       });
       setStockEntryOpen(false);
       setStockEntryTarget(null);
-      await loadIngredients();
+      await Promise.all([loadIngredients(), loadPurchaseSuggestions()]);
     } catch (error: any) {
       toast({
         title: 'Erro ao lançar estoque',
@@ -437,7 +489,7 @@ export default function Ingredientes() {
       if (error) throw error;
       toast({ title: isWithdrawal ? 'Retirada registrada' : 'Contagem registrada', description: 'O saldo e o histórico foram atualizados.' });
       setStockOperationOpen(false);
-      await loadIngredients();
+      await Promise.all([loadIngredients(), loadPurchaseSuggestions()]);
     } catch (error: any) {
       toast({ title: 'Erro ao atualizar estoque', description: error?.message || 'Não foi possível registrar a operação.', variant: 'destructive' });
     }
@@ -483,6 +535,56 @@ export default function Ingredientes() {
           </Button>
         </div>
       </div>
+
+      <Card className="overflow-hidden border-emerald-200">
+        <CardHeader className="bg-gradient-to-r from-emerald-950 to-emerald-800 text-white">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <CardTitle className="flex items-center gap-2"><ShoppingCart className="h-5 w-5" />Sugestão de compras</CardTitle>
+              <CardDescription className="mt-1 text-emerald-100">
+                Reposição calculada pelo saldo, estoque mínimo e consumo dos últimos 30 dias para cobrir os próximos 7 dias.
+              </CardDescription>
+            </div>
+            <Button type="button" size="sm" variant="secondary" disabled={suggestionsLoading} onClick={() => void loadPurchaseSuggestions()}>
+              <RefreshCw className={`mr-2 h-4 w-4 ${suggestionsLoading ? 'animate-spin' : ''}`} />Atualizar
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="p-4">
+          {suggestionsLoading ? (
+            <div className="py-6 text-center text-sm text-slate-500">Calculando necessidade de reposição...</div>
+          ) : purchaseSuggestions.length === 0 ? (
+            <div className="rounded-xl border border-dashed p-5 text-center text-sm text-slate-600">
+              O estoque está coberto. Para sugestões mais precisas, defina o estoque mínimo de cada insumo; o consumo real será aprendido automaticamente pelas vendas.
+            </div>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {purchaseSuggestions.map((suggestion) => (
+                <div key={`${suggestion.item_type}-${suggestion.item_id}`} className="rounded-xl border bg-white p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-emerald-950">{suggestion.name}</p>
+                      <p className="mt-1 text-xs text-slate-500">{suggestion.reason}</p>
+                    </div>
+                    <Badge variant={suggestion.current_stock <= 0 ? 'destructive' : 'secondary'}>
+                      {suggestion.item_type === 'product' ? 'Produto' : 'Insumo'}
+                    </Badge>
+                  </div>
+                  <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
+                    <div><span className="block text-slate-500">Saldo</span><strong>{suggestion.current_stock.toLocaleString('pt-BR')} {suggestion.stock_unit.toUpperCase()}</strong></div>
+                    <div><span className="block text-slate-500">Mínimo</span><strong>{suggestion.minimum_stock.toLocaleString('pt-BR')} {suggestion.stock_unit.toUpperCase()}</strong></div>
+                    <div><span className="block text-slate-500">Cobertura</span><strong>{suggestion.days_remaining == null ? 'Sem consumo' : `${suggestion.days_remaining.toLocaleString('pt-BR')} dias`}</strong></div>
+                  </div>
+                  <div className="mt-4 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
+                    Comprar <strong>{suggestion.suggested_purchase_quantity.toLocaleString('pt-BR')} {suggestion.purchase_unit.toUpperCase()}</strong>
+                    <span className="ml-1 text-xs text-emerald-700">({suggestion.suggested_stock_quantity.toLocaleString('pt-BR')} {suggestion.stock_unit.toUpperCase()} no estoque)</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Filters */}
       <Card>

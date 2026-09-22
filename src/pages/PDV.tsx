@@ -49,6 +49,7 @@ import {
 } from '@/utils/tableOrderFlow';
 import { getOpenTableCount } from '@/services/openTables';
 import { getCashSessionDeadline } from '@/utils/cashSession';
+import { summarizeCashCloseRevenue } from '@/lib/finance/cashClose';
 import FiscalRecipientsManager, { type FiscalCustomer } from '@/components/fiscal/FiscalRecipientsManager';
 import { pwaScaleService } from '@/services/ScaleService';
 import { bridgeReadScaleWeight } from '@/services/bridgePrinterClient';
@@ -282,6 +283,7 @@ interface CashCloseSummary {
   grossRevenue: number;
   discounts: number;
   deliveryFee: number;
+  surcharge: number;
   netRevenue: number;
   credit: number;
   debit: number;
@@ -740,9 +742,7 @@ const PDV = () => {
     const movementList = Array.isArray(moves) ? moves : [];
     const sales = orderList.filter((order) => String(order?.status || '').toLowerCase() !== 'cancelled');
     const cancelledCount = orderList.length - sales.length;
-    const grossRevenue = sales.reduce((sum, order) => sum + Number(order?.total || 0), 0);
-    const discounts = sales.reduce((sum, order) => sum + Number(order?.discount || 0), 0);
-    const deliveryFee = sales.reduce((sum, order) => sum + Number(order?.delivery_fee || 0), 0);
+    const { grossRevenue, discounts, deliveryFee, surcharge, netRevenue } = summarizeCashCloseRevenue(sales);
 
     let pix = 0;
     let cash = 0;
@@ -778,7 +778,6 @@ const PDV = () => {
       .reduce((sum, movement) => sum + Number(movement?.amount || 0), 0);
     const initial = Number(session.initial_amount || 0);
     const expectedCash = initial + cash + inAmount - outAmount;
-    const netRevenue = grossRevenue - discounts + deliveryFee;
     const customerKeys = new Set(sales.map((order) => normalizeCustomerKey(order)).filter(Boolean));
     const deliveryOrders = sales.filter((order) => classifyOrderChannel(order) === 'delivery');
     const counterOrders = sales.filter((order) => classifyOrderChannel(order) === 'counter');
@@ -791,13 +790,14 @@ const PDV = () => {
       card: credit + debit + genericCard,
       cash,
       receivable,
-      total: grossRevenue,
+      total: netRevenue,
       inAmount,
       outAmount,
       initial,
       grossRevenue,
       discounts,
       deliveryFee,
+      surcharge,
       netRevenue,
       credit,
       debit,
@@ -861,11 +861,12 @@ const PDV = () => {
       row('Pedidos Cancelados:', String(summary.cancelledCount)),
       row('Clientes Atendidos:', String(summary.customersServed)),
       '',
-      row('Faturamento Bruto:', formatBRL(summary.grossRevenue)),
-      row('Descontos:', formatBRL(summary.discounts)),
-      row('Taxa Entrega:', formatBRL(summary.deliveryFee)),
+      row('Subtotal Produtos:', formatBRL(summary.grossRevenue)),
+      row('(-) Descontos:', formatBRL(summary.discounts)),
+      row('(+) Taxa Entrega:', formatBRL(summary.deliveryFee)),
+      ...(summary.surcharge > 0 ? [row('(+) Acrescimos:', formatBRL(summary.surcharge))] : []),
       '',
-      row('FATURAMENTO LÍQUIDO:', formatBRL(summary.netRevenue)),
+      row('TOTAL VENDIDO:', formatBRL(summary.netRevenue)),
       '',
       divider,
       centerText('FORMAS DE PAGAMENTO'),

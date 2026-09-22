@@ -75,6 +75,7 @@ import { friendlyErrorMessage } from '@/lib/friendly-error';
 import { Checkbox } from '@/components/ui/checkbox';
 import { getOpenTableCount } from '@/services/openTables';
 import { cn } from '@/lib/utils';
+import { summarizeCashCloseRevenue } from '@/lib/finance/cashClose';
 
 type PaymentMethod = 'pix' | 'pix_online' | 'pix_entrega' | 'dinheiro' | 'cartao' | 'cartao_online';
 type PaymentMethodFilter = '' | 'all' | PaymentMethod;
@@ -780,10 +781,7 @@ const Financeiro = () => {
     const fiscalRow = (fiscal && typeof fiscal === 'object' ? fiscal : {}) as Record<string, unknown>;
     const sales = orderList.filter((order) => String(order?.status || '').toLowerCase() !== 'cancelled');
     const cancelledCount = orderList.length - sales.length;
-    const grossRevenue = sales.reduce((sum, order) => sum + Number(order?.total || 0), 0);
-    const discounts = sales.reduce((sum, order) => sum + Number(order?.discount || 0), 0);
-    const deliveryFee = sales.reduce((sum, order) => sum + Number(order?.delivery_fee || 0), 0);
-    const netRevenue = grossRevenue - discounts + deliveryFee;
+    const { grossRevenue, discounts, deliveryFee, surcharge, netRevenue } = summarizeCashCloseRevenue(sales);
 
     const paymentTotals = sales.reduce<Record<string, number>>((acc, order) => {
       const splitLines = getOrderPaymentLines(order);
@@ -859,10 +857,11 @@ const Financeiro = () => {
       row('Pedidos Cancelados:', String(cancelledCount)),
       row('Clientes Atendidos:', String(customerKeys.size)),
       '',
-      row('Faturamento Bruto:', formatCurrency(grossRevenue)),
-      row('Descontos:', formatCurrency(discounts)),
-      row('Taxa Entrega:', formatCurrency(deliveryFee)),
-      row('FATURAMENTO LÍQUIDO:', formatCurrency(netRevenue)),
+      row('Subtotal Produtos:', formatCurrency(grossRevenue)),
+      row('(-) Descontos:', formatCurrency(discounts)),
+      row('(+) Taxa Entrega:', formatCurrency(deliveryFee)),
+      ...(surcharge > 0 ? [row('(+) Acrescimos:', formatCurrency(surcharge))] : []),
+      row('TOTAL VENDIDO:', formatCurrency(netRevenue)),
       '',
       divider,
       centerText('FORMAS DE PAGAMENTO'),

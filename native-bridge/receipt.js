@@ -237,10 +237,13 @@ export function buildEscposReceipt(data = {}) {
   appendColumns(output, 'TOTAL:', `R$ ${money(data.total)}`, width / 2)
   output.push(`${bodySize}${ESC}\x45\x00`)
   if (data.payment_method) appendWrapped(output, `Pagamento: ${data.payment_method}`, width)
-  const changeFor = Number(data.change_amount ?? data.change_for ?? 0)
+  const changeFor = Number(data.cash_received ?? data.change_amount ?? data.change_for ?? 0)
   if (Number.isFinite(changeFor) && changeFor > 0) {
     appendColumns(output, 'Troco para:', `R$ ${money(changeFor)}`, width)
-    const change = Math.max(0, changeFor - Number(data.total || 0))
+    const explicitChange = Number(data.change_value ?? data.cash_change)
+    const change = Number.isFinite(explicitChange)
+      ? Math.max(0, explicitChange)
+      : Math.max(0, changeFor - Number(data.total || 0))
     if (change > 0) appendColumns(output, 'Troco:', `R$ ${money(change)}`, width)
   }
 

@@ -6,6 +6,7 @@ import { bridgeOpenCashDrawer, bridgePrintReceipt, bridgePrintReport } from '@/s
 import { discoverBridgeWebsocketUrl } from '@/services/bridgeDiscovery';
 import { loadPrinterConfig } from '@/services/printerConfig';
 import { dequeuePendingOrderPrint, enqueuePendingOrderPrint } from '@/services/orderPrintQueue';
+import { resolveCashReceiptAmounts } from '@/lib/payments/cashChange';
 
 // ESC/POS Commands
 const ESC = '\x1B';
@@ -817,6 +818,7 @@ function buildOrderHtml(order: any, config: any, store?: any) {
   const storePhone = escapeHtml(store?.phone || '');
   const storeCnpj = escapeHtml(store?.cnpj || '');
   const customerAddressLine = escapeHtml(resolveCustomerAddressLine(order));
+  const cashReceipt = resolveCashReceiptAmounts(order);
 
   return `
       <!DOCTYPE html>
@@ -1022,7 +1024,7 @@ function buildOrderHtml(order: any, config: any, store?: any) {
               ${splitLines.map((line) => `<div>${line.label}: ${formatCurrencyValue(line.amount)}</div>`).join('')}
             `;
           })()}
-          ${Number(order.change_amount || 0) > 0 ? `<div>Troco para: ${formatCurrencyValue(Number(order.change_amount || 0))}</div>${Number(order.change_amount || 0) > Number(order.total || 0) ? `<div>Troco: ${formatCurrencyValue(Number(order.change_amount || 0) - Number(order.total || 0))}</div>` : ''}` : ''}
+          ${cashReceipt.cashReceived > 0 ? `<div>Troco para: ${formatCurrencyValue(cashReceipt.cashReceived)}</div>${cashReceipt.change > 0 ? `<div>Troco: ${formatCurrencyValue(cashReceipt.change)}</div>` : ''}` : ''}
 
           ${buildNfceHtmlBlock(order)}
           
@@ -1487,6 +1489,7 @@ async function printElectron(order: any, config: any, options: PrintOrderOptions
   const deviceId = target.deviceId;
   const protocol = target.protocol || 'epson';
 
+  const cashReceipt = resolveCashReceiptAmounts(order);
   const normalized = {
     store: order.store || null,
     order_number: order.order_number,
@@ -1516,7 +1519,8 @@ async function printElectron(order: any, config: any, options: PrintOrderOptions
     discount: Number(order.discount || 0),
     delivery_fee: Number(order.delivery_fee || 0),
     payment_method: formatPaymentMethodLabel(order.payment_method, order),
-    change_amount: Number(order.change_amount || 0),
+    change_amount: cashReceipt.cashReceived,
+    change_value: cashReceipt.change,
     nfce: normalizeNfcePrintData(order),
   };
 
@@ -1624,6 +1628,7 @@ function normalizeEscPosText(value: unknown) {
 
 function buildPopConnectReceiptPayload(order: any, config: NormalizedPrintConfig) {
   const items = Array.isArray(order.items) ? order.items : [];
+  const cashReceipt = resolveCashReceiptAmounts(order);
   const itemSubtotal = items.reduce((sum: number, item: any) => {
     const quantity = Number(item.quantity || 1);
     return sum + Number(item.subtotal ?? item.total ?? (Number(item.price || item.unit_price || 0) * quantity));
@@ -1678,7 +1683,8 @@ function buildPopConnectReceiptPayload(order: any, config: NormalizedPrintConfig
     discount: Number(order.discount || 0),
     delivery_fee: Number(order.delivery_fee || 0),
     payment_method: normalizeEscPosText(formatPaymentMethodLabel(order.payment_method, order)),
-    change_amount: Number(order.change_amount || 0),
+    change_amount: cashReceipt.cashReceived,
+    change_value: cashReceipt.change,
     nfce: normalizeNfcePrintData(order),
   };
 }
@@ -2108,6 +2114,7 @@ export const PrinterService = {
     const encoder = new TextEncoder();
     let commands = '';
     const lineWidth = config.paper_width === '58mm' ? 32 : 48;
+    const cashReceipt = resolveCashReceiptAmounts(order);
 
     // Helpers
     const text = (str: string) => str + '\n';
@@ -2244,13 +2251,12 @@ export const PrinterService = {
     } else {
       commands += text(`Pagamento: ${formatPaymentMethodLabel(order.payment_method, order)}`);
     }
-    if (Number(order.change_amount || 0) > 0) {
-      formatColumns('Troco para', formatCurrencyValue(Number(order.change_amount || 0)), lineWidth).forEach((value) => {
+    if (cashReceipt.cashReceived > 0) {
+      formatColumns('Troco para', formatCurrencyValue(cashReceipt.cashReceived), lineWidth).forEach((value) => {
         commands += text(value);
       });
-      const change = Number(order.change_amount || 0) - Number(order.total || 0);
-      if (change > 0) {
-        formatColumns('Troco', formatCurrencyValue(change), lineWidth).forEach((value) => {
+      if (cashReceipt.change > 0) {
+        formatColumns('Troco', formatCurrencyValue(cashReceipt.change), lineWidth).forEach((value) => {
           commands += text(value);
         });
       }

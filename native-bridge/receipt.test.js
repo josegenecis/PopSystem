@@ -63,6 +63,19 @@ test('prints the cash amount and calculated change', () => {
   assert.match(receipt, /Troco:\s+R\$ 4,00/)
 })
 
+test('prints the explicit received amount and change sent by the PDV', () => {
+  const receipt = readable(buildEscposReceipt({
+    items: [],
+    total: 30,
+    payment_method: 'DINHEIRO',
+    change_amount: 100,
+    change_value: 70,
+  }))
+
+  assert.match(receipt, /Troco para:\s+R\$ 100,00/)
+  assert.match(receipt, /Troco:\s+R\$ 70,00/)
+})
+
 test('uses a commercial hierarchy without widening the receipt body', () => {
   const receipt = buildEscposReceipt({
     store: { restaurant_name: 'The place Acai' },

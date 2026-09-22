@@ -2839,7 +2839,7 @@ const PDV = () => {
         discount: parseBRL(discountAmount),
         delivery_fee: getDeliveryFee(),
         payment_method: primaryPaymentMethod,
-        change_amount: cashPaymentPortion > 0 ? getCashChangeValue() : null,
+        change_amount: cashPaymentPortion > 0 ? cashReceivedValue : null,
         status: isCounterPdvSale ? 'completed' : (paymentMethod === 'pix' ? 'pending' : 'preparing'),
         acceptance_status: isCounterPdvSale ? 'accepted' : (paymentMethod === 'pix' ? 'awaiting_pix_payment' : 'accepted'),
         order_number: orderNumber,

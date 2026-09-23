@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { supabase } from '@/integrations/supabase/client';
-import type { AttendanceOccurrence, AttendanceRules, CommissionRule, CommissionRuleType, EmployeeFormValue, TeamEmployee, TeamProductOption, TimeEntry, WorkSchedule } from '@/lib/team/types';
+import type { AttendanceOccurrence, AttendanceRules, CommissionRule, CommissionRuleType, EmployeeApp, EmployeeFormValue, TeamEmployee, TeamProductOption, TeamTableOption, TimeEntry, WorkSchedule } from '@/lib/team/types';
 import { onlyDigits } from '@/lib/team/fieldMasks';
 
 const db = supabase as any;
@@ -24,9 +24,16 @@ export async function loadTeamEmployees(restaurantId: string, includeSensitive =
   const rolesByEmployee = new Map<string, string[]>();
   const permissionsByEmployee = new Map<string, string[]>();
   const appsByEmployee = new Map<string, string[]>();
+  const appConfigurationsByEmployee = new Map<string, Partial<Record<EmployeeApp, Record<string, unknown>>>>();
   for (const item of rows<any>(rolesResult)) rolesByEmployee.set(item.employee_id, [...(rolesByEmployee.get(item.employee_id) || []), item.role_code]);
   for (const item of rows<any>(permissionsResult)) if (item.allowed) permissionsByEmployee.set(item.employee_id, [...(permissionsByEmployee.get(item.employee_id) || []), item.permission_code]);
-  for (const item of rows<any>(appsResult)) if (item.enabled) appsByEmployee.set(item.employee_id, [...(appsByEmployee.get(item.employee_id) || []), item.app_code]);
+  for (const item of rows<any>(appsResult)) {
+    if (item.enabled) appsByEmployee.set(item.employee_id, [...(appsByEmployee.get(item.employee_id) || []), item.app_code]);
+    appConfigurationsByEmployee.set(item.employee_id, {
+      ...(appConfigurationsByEmployee.get(item.employee_id) || {}),
+      [item.app_code]: item.configuration && typeof item.configuration === 'object' ? item.configuration : {},
+    });
+  }
 
   return rows<any>(employeesResult).map((employee) => ({
     ...employee,
@@ -42,7 +49,22 @@ export async function loadTeamEmployees(restaurantId: string, includeSensitive =
     roles: rolesByEmployee.get(employee.id) || [],
     permissions: permissionsByEmployee.get(employee.id) || [],
     apps: appsByEmployee.get(employee.id) || [],
+    app_configurations: appConfigurationsByEmployee.get(employee.id) || {},
   })) as TeamEmployee[];
+}
+
+export async function loadTeamTables(restaurantId: string): Promise<TeamTableOption[]> {
+  const { data, error } = await db
+    .from('tables')
+    .select('id,table_number,location')
+    .eq('user_id', restaurantId)
+    .order('table_number');
+  if (error) throw error;
+  return rows<any>({ data }).map((table) => ({
+    id: String(table.id),
+    number: Number(table.table_number),
+    location: table.location ? String(table.location) : null,
+  }));
 }
 
 export async function saveTeamEmployee(restaurantId: string, form: EmployeeFormValue) {
@@ -87,6 +109,10 @@ export async function saveTeamEmployee(restaurantId: string, form: EmployeeFormV
     p_waiter_password: form.waiter_password || null,
     p_driver_password: form.driver_password || null,
     p_app_configuration: {
+      waiter: {
+        table_access_mode: form.waiter_table_access_mode,
+        table_ids: form.waiter_table_access_mode === 'assigned' ? form.waiter_table_ids : [],
+      },
       driver: {
         vehicle_type: form.driver_vehicle_type,
         vehicle_plate: form.driver_vehicle_plate,

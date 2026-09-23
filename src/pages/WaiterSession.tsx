@@ -55,6 +55,7 @@ import { StoneIntegrationPanel } from '@/components/waiter-web/StoneIntegrationP
 import { stoneProvider } from '@/services/payments/stoneProvider';
 import { enqueueOfflinePayment, syncOfflinePayments } from '@/services/payments/offlinePaymentQueue';
 import { formatElapsedSince } from '@/utils/elapsedTime';
+import { formatSaleQuantity } from '@/utils/saleQuantity';
 import { useWaiterViewportLock } from '@/hooks/useWaiterViewportLock';
 import {
   ArrowLeft,
@@ -72,6 +73,7 @@ import {
   Search,
   Send,
   Settings,
+  Scale,
   Split,
   Users,
 } from 'lucide-react';
@@ -112,6 +114,11 @@ const parsePaymentAmount = (value: string) => {
 
 const buildOptionLabel = (groupName: string, optionName: string) => `${groupName}: ${optionName}`;
 
+const parseDecimalInput = (value: string) => {
+  const parsed = Number(String(value || '').trim().replace(',', '.'));
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
 const paymentMethodLabel: Record<PaymentMethod, string> = {
   cash: 'Dinheiro',
   pix: 'PIX',
@@ -149,6 +156,7 @@ const WaiterSessionPage = () => {
   const [selectedProductId, setSelectedProductId] = useState('');
   const [selectedOptions, setSelectedOptions] = useState<Record<string, ProductOption[]>>({});
   const [quantity, setQuantity] = useState('1');
+  const [weightInputUnit, setWeightInputUnit] = useState<'g' | 'kg'>('g');
   const [itemNotes, setItemNotes] = useState('');
   const [productSearch, setProductSearch] = useState('');
   const [selectedCategoryId, setSelectedCategoryId] = useState('all');
@@ -205,6 +213,10 @@ const WaiterSessionPage = () => {
     if (!editingItemId || !session) return null;
     return session.accounts.flatMap((account) => account.items).find((item) => item.id === editingItemId) || null;
   }, [editingItemId, session]);
+  const movingItem = useMemo(() => {
+    if (!moveItemId || !session) return null;
+    return session.accounts.flatMap((account) => account.items).find((item) => item.id === moveItemId) || null;
+  }, [moveItemId, session]);
   const selectedProduct = selectedProductId ? catalogProducts.find((product) => product.id === selectedProductId) || null : null;
 
   const filteredCategories = useMemo(() => {
@@ -415,7 +427,9 @@ const WaiterSessionPage = () => {
     setEditingItemId(item?.id || '');
     setSelectedProductId(product?.id || '');
     setSelectedOptions(product && item ? buildSelectedOptionsFromItem(product, item.options) : {});
-    setQuantity(String(item?.quantity || 1));
+    const isWeighted = product?.weightBased || item?.saleUnit === 'kg';
+    setWeightInputUnit('g');
+    setQuantity(isWeighted && item ? String(Math.round(item.quantity * 1000)) : String(item?.quantity || 1));
     setItemNotes(item?.notes || '');
     setProductSearch('');
     setSelectedCategoryId(product?.categoryId || 'all');
@@ -426,7 +440,8 @@ const WaiterSessionPage = () => {
   const selectProductForDialog = (product: Product) => {
     setSelectedProductId(product.id);
     setSelectedOptions({});
-    setQuantity('1');
+    setWeightInputUnit('g');
+    setQuantity(product.weightBased ? '300' : '1');
     setItemNotes('');
     setProductDescriptionExpanded(false);
     setProductDialogStep('configure');
@@ -440,6 +455,7 @@ const WaiterSessionPage = () => {
     setSelectedProductId('');
     setSelectedOptions({});
     setQuantity('1');
+    setWeightInputUnit('g');
     setItemNotes('');
     setProductSearch('');
     setSelectedCategoryId('all');
@@ -451,6 +467,7 @@ const WaiterSessionPage = () => {
     setSelectedProductId('');
     setSelectedOptions({});
     setQuantity('1');
+    setWeightInputUnit('g');
     setItemNotes('');
     setProductDialogStep('browse');
     setProductDescriptionExpanded(false);
@@ -557,8 +574,22 @@ const WaiterSessionPage = () => {
 
     setSubmitting(true);
     try {
+      const typedQuantity = parseDecimalInput(quantity);
+      const normalizedQuantity = selectedProduct.weightBased
+        ? weightInputUnit === 'g'
+          ? typedQuantity / 1000
+          : typedQuantity
+        : Math.max(1, Math.floor(typedQuantity));
+      if (!Number.isFinite(normalizedQuantity) || normalizedQuantity <= 0) {
+        toast({
+          title: selectedProduct.weightBased ? 'Informe um peso válido' : 'Informe uma quantidade válida',
+          variant: 'destructive',
+        });
+        return;
+      }
+
       const payload = {
-        quantity: Math.max(1, Number(quantity || 1)),
+        quantity: selectedProduct.weightBased ? Number(normalizedQuantity.toFixed(3)) : normalizedQuantity,
         notes: itemNotes,
         selectedOptions: Object.values(selectedOptions).flat(),
       };
@@ -913,7 +944,9 @@ const WaiterSessionPage = () => {
       const response = await moveWaiterItem({
         itemId: moveItemId,
         targetAccountId: moveTargetAccountId,
-        quantity: Math.max(1, Number(moveQuantity || 1)),
+        quantity: movingItem?.saleUnit === 'kg'
+          ? Math.max(0.001, parseDecimalInput(moveQuantity))
+          : Math.max(1, Math.floor(parseDecimalInput(moveQuantity))),
       });
       applySession(response.session);
       setMoveItemId('');
@@ -1328,7 +1361,7 @@ const WaiterSessionPage = () => {
                                       <div className="space-y-1">
                                         <div className="flex flex-wrap items-center gap-2">
                                           <span className="text-[13px] font-semibold text-[#082F23] sm:text-sm">
-                                            {item.quantity}x {item.productName}
+                                            {formatSaleQuantity(item.quantity, item.saleUnit)} {item.productName}
                                           </span>
                                           <WaiterStatusBadge status={item.status} />
                                         </div>
@@ -1361,7 +1394,7 @@ const WaiterSessionPage = () => {
                                           onClick={() => {
                                             setMoveItemId(item.id);
                                             setMoveTargetAccountId('');
-                                            setMoveQuantity(String(item.quantity));
+                                            setMoveQuantity(item.saleUnit === 'kg' ? item.quantity.toFixed(3).replace('.', ',') : String(item.quantity));
                                           }}
                                           disabled={session.accounts.length < 2}
                                         >
@@ -1716,7 +1749,9 @@ const WaiterSessionPage = () => {
                                   </div>
                                   <div className="min-w-0 flex-1">
                                     <div className="truncate text-[13px] font-semibold text-[#082F23]">{product.name}</div>
-                                    <div className="mt-0.5 text-[11px] font-medium text-slate-500">{formatMoney(product.price)}</div>
+                                    <div className="mt-0.5 text-[11px] font-medium text-slate-500">
+                                      {formatMoney(product.price)}{product.weightBased ? '/kg' : ''}
+                                    </div>
                                   </div>
                                 </button>
 
@@ -1771,7 +1806,9 @@ const WaiterSessionPage = () => {
                           </div>
                         ) : null}
                       </div>
-                      <div className="flex-none whitespace-nowrap text-lg font-semibold text-[#082F23]">{formatMoney(selectedProduct.price)}</div>
+                      <div className="flex-none whitespace-nowrap text-lg font-semibold text-[#082F23]">
+                        {formatMoney(selectedProduct.price)}{selectedProduct.weightBased ? '/kg' : ''}
+                      </div>
                     </div>
                   </div>
 
@@ -1824,14 +1861,81 @@ const WaiterSessionPage = () => {
                       ) : null}
 
                       <div className="rounded-[22px] bg-white p-3 shadow-sm">
-                        <Label htmlFor="itemQuantity">Quantidade</Label>
-                        <Input
-                          id="itemQuantity"
-                          inputMode="numeric"
-                          value={quantity}
-                          onChange={(event) => setQuantity(event.target.value.replace(/\D/g, '').slice(0, 2))}
-                          className="mt-2 h-10 rounded-2xl"
-                        />
+                        {selectedProduct.weightBased ? (
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <Label htmlFor="itemQuantity" className="flex items-center gap-2">
+                                <Scale className="h-4 w-4 text-[#FF6400]" />
+                                Peso
+                              </Label>
+                              <div className="flex rounded-xl border border-[#DCE6D8] bg-[#F7FAF5] p-1">
+                                {(['g', 'kg'] as const).map((unit) => (
+                                  <button
+                                    key={unit}
+                                    type="button"
+                                    aria-pressed={weightInputUnit === unit}
+                                    onClick={() => {
+                                      const current = parseDecimalInput(quantity);
+                                      setQuantity(unit === 'kg' && weightInputUnit === 'g'
+                                        ? (current / 1000).toString().replace('.', ',')
+                                        : unit === 'g' && weightInputUnit === 'kg'
+                                          ? String(Math.round(current * 1000))
+                                          : quantity);
+                                      setWeightInputUnit(unit);
+                                    }}
+                                    className={`rounded-lg px-3 py-1 text-xs font-semibold ${weightInputUnit === unit ? 'bg-[#082F23] text-white' : 'text-slate-500'}`}
+                                  >
+                                    {unit}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            <Input
+                              id="itemQuantity"
+                              inputMode="decimal"
+                              value={quantity}
+                              onChange={(event) => setQuantity(event.target.value.replace(/[^\d,.]/g, '').slice(0, 8))}
+                              className="h-10 rounded-2xl"
+                              placeholder={weightInputUnit === 'g' ? 'Ex.: 300' : 'Ex.: 1,000'}
+                            />
+                            <div className="grid grid-cols-5 gap-1.5">
+                              {[100, 200, 300, 500, 1000].map((grams) => (
+                                <Button
+                                  key={grams}
+                                  type="button"
+                                  variant="outline"
+                                  className="h-8 rounded-xl px-1 text-[10px]"
+                                  onClick={() => {
+                                    setWeightInputUnit(grams === 1000 ? 'kg' : 'g');
+                                    setQuantity(grams === 1000 ? '1' : String(grams));
+                                  }}
+                                >
+                                  {grams === 1000 ? '1 kg' : `${grams} g`}
+                                </Button>
+                              ))}
+                            </div>
+                            <div className="rounded-xl bg-[#F5FBED] px-3 py-2 text-xs font-medium text-[#245B2B]">
+                              {(() => {
+                                const typed = parseDecimalInput(quantity);
+                                const kg = weightInputUnit === 'g' ? typed / 1000 : typed;
+                                return kg > 0
+                                  ? `${formatSaleQuantity(kg, 'kg')} × ${formatMoney(selectedProduct.price)}/kg = ${formatMoney(kg * selectedProduct.price)}`
+                                  : 'Informe o peso para calcular o valor.';
+                              })()}
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <Label htmlFor="itemQuantity">Quantidade</Label>
+                            <Input
+                              id="itemQuantity"
+                              inputMode="numeric"
+                              value={quantity}
+                              onChange={(event) => setQuantity(event.target.value.replace(/\D/g, '').slice(0, 2))}
+                              className="mt-2 h-10 rounded-2xl"
+                            />
+                          </>
+                        )}
                       </div>
 
                       <div className="rounded-[22px] bg-white p-3 shadow-sm">
@@ -2109,11 +2213,15 @@ const WaiterSessionPage = () => {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Quantidade a mover</Label>
+              <Label>{movingItem?.saleUnit === 'kg' ? 'Peso a mover (kg)' : 'Quantidade a mover'}</Label>
               <Input
-                inputMode="numeric"
+                inputMode={movingItem?.saleUnit === 'kg' ? 'decimal' : 'numeric'}
                 value={moveQuantity}
-                onChange={(event) => setMoveQuantity(event.target.value.replace(/\D/g, '').slice(0, 2))}
+                onChange={(event) => setMoveQuantity(
+                  movingItem?.saleUnit === 'kg'
+                    ? event.target.value.replace(/[^\d,.]/g, '').slice(0, 8)
+                    : event.target.value.replace(/\D/g, '').slice(0, 2),
+                )}
                 className="h-12 rounded-2xl"
               />
             </div>

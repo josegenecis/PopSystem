@@ -12,10 +12,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { buildPayrollPreview, calculateAttendance } from '@/lib/team/attendanceEngine';
-import type { AttendanceRules, AttendanceSummary, CommissionRule, EmployeeFormValue, PayrollPreviewRow, TeamEmployee, TeamProductOption, WorkSchedule } from '@/lib/team/types';
+import type { AttendanceRules, AttendanceSummary, CommissionRule, EmployeeFormValue, PayrollPreviewRow, TeamEmployee, TeamProductOption, TeamTableOption, WorkSchedule } from '@/lib/team/types';
 import ControlePonto from '@/pages/ControlePonto';
 import { getLocalOperatorSession, isAdminOperator } from '@/services/operatorAuth';
-import { defaultAttendanceRules, generatePayrollPayables, loadAttendanceData, loadCommissionConfiguration, loadMonthlyFinancialInputs, loadSchedules, loadTeamAlerts, loadTeamEmployees, registerAdvance, registerCommission, registerPayrollAdjustment, saveCommissionRule, savePayrollPreview, savePayrollSettings, saveSchedule, saveTeamEmployee, setClosingStatus, updateEmployeeStatus } from '@/services/teamService';
+import { defaultAttendanceRules, generatePayrollPayables, loadAttendanceData, loadCommissionConfiguration, loadMonthlyFinancialInputs, loadSchedules, loadTeamAlerts, loadTeamEmployees, loadTeamTables, registerAdvance, registerCommission, registerPayrollAdjustment, saveCommissionRule, savePayrollPreview, savePayrollSettings, saveSchedule, saveTeamEmployee, setClosingStatus, updateEmployeeStatus } from '@/services/teamService';
 
 const validTabs = ['overview', 'collaborators', 'schedules', 'timeclock', 'payroll', 'commissions', 'settings'];
 const currentCompetence = () => new Date().toLocaleDateString('sv-SE', { year: 'numeric', month: '2-digit' });
@@ -37,6 +37,7 @@ export default function Equipe() {
   const queryTab = searchParams.get('tab') || 'overview';
   const activeTab = validTabs.includes(queryTab) ? queryTab : 'overview';
   const [employees, setEmployees] = useState<TeamEmployee[]>([]);
+  const [tableOptions, setTableOptions] = useState<TeamTableOption[]>([]);
   const [schedules, setSchedules] = useState<WorkSchedule[]>([]);
   const [attendance, setAttendance] = useState<AttendanceSummary[]>([]);
   const [rules, setRules] = useState<AttendanceRules>(defaultAttendanceRules);
@@ -76,7 +77,7 @@ export default function Equipe() {
     setLoading(true);
     try {
       const period = monthPeriod(competence);
-      const [employeeRows, scheduleRows, attendanceData, financialData, alertRows, commissionData] = await Promise.all([
+      const [employeeRows, scheduleRows, attendanceData, financialData, alertRows, commissionData, tables] = await Promise.all([
         loadTeamEmployees(user.id, canViewSensitive),
         loadSchedules(user.id),
         loadAttendanceData(user.id, period.startDate, period.endDate),
@@ -91,8 +92,10 @@ export default function Equipe() {
             }),
         loadTeamAlerts(user.id),
         canManageCommissions ? loadCommissionConfiguration(user.id) : Promise.resolve({ rules: [], products: [] }),
+        loadTeamTables(user.id),
       ]);
       setEmployees(employeeRows);
+      setTableOptions(tables);
       setSchedules(scheduleRows);
       setRules(attendanceData.rules);
       setFinancial(financialData);
@@ -307,7 +310,7 @@ export default function Equipe() {
         </TabsContent>
         {canManageEmployees && (
           <TabsContent value="collaborators">
-            <TeamCollaborators employees={employees} loading={loading} saving={busy} canViewSensitive={canViewSensitive} onSave={saveEmployee} onStatusChange={toggleStatus} />
+            <TeamCollaborators employees={employees} tableOptions={tableOptions} loading={loading} saving={busy} canViewSensitive={canViewSensitive} onSave={saveEmployee} onStatusChange={toggleStatus} />
           </TabsContent>
         )}
         {canManageSchedules && (

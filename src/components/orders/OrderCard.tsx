@@ -8,10 +8,12 @@ import { Eye, Phone, MapPin, Clock, User, Package } from 'lucide-react';
 import OrderStatusBadge from './OrderStatusBadge';
 import type { OrderStatusType } from './OrderStatusBadge';
 import { formatPaymentMethodLabel } from '@/lib/orderDetails';
+import { formatSaleQuantity } from '@/utils/saleQuantity';
 
 interface OrderItem {
   product_name: string;
   quantity: number;
+  sale_unit?: 'un' | 'kg';
   price: number;
   subtotal: number;
   options?: string[];
@@ -138,7 +140,7 @@ const OrderCard: React.FC<OrderCardProps> = ({ order, onStatusChange, onViewDeta
             {order.items.slice(0, 3).map((item, index) => (
               <div key={index} className="text-xs bg-gray-50 p-2 rounded">
                 <div className="flex justify-between items-start">
-                  <span className="font-medium">{item.quantity}x {item.product_name}</span>
+                  <span className="font-medium">{formatSaleQuantity(item.quantity, item.sale_unit)} {item.product_name}</span>
                   <span className="text-muted-foreground">{formatCurrency(item.subtotal)}</span>
                 </div>
                 {item.options && item.options.length > 0 && (

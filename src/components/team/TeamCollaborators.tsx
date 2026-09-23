@@ -7,11 +7,11 @@ import { Card, CardContent } from '@/components/ui/card';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import type { EmployeeFormValue, TeamEmployee } from '@/lib/team/types';
+import type { EmployeeFormValue, TeamEmployee, TeamTableOption } from '@/lib/team/types';
 import { EmployeeDialog } from './EmployeeDialog';
 import { ROLE_OPTIONS, STATUS_LABELS } from './teamOptions';
 
-export function TeamCollaborators({ employees, loading, saving, canViewSensitive, onSave, onStatusChange }: { employees: TeamEmployee[]; loading: boolean; saving: boolean; canViewSensitive: boolean; onSave: (form: EmployeeFormValue) => Promise<boolean>; onStatusChange: (employee: TeamEmployee) => Promise<void> }) {
+export function TeamCollaborators({ employees, tableOptions, loading, saving, canViewSensitive, onSave, onStatusChange }: { employees: TeamEmployee[]; tableOptions: TeamTableOption[]; loading: boolean; saving: boolean; canViewSensitive: boolean; onSave: (form: EmployeeFormValue) => Promise<boolean>; onStatusChange: (employee: TeamEmployee) => Promise<void> }) {
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<TeamEmployee | null>(null);
   const [open, setOpen] = useState(false);
@@ -136,7 +136,7 @@ export function TeamCollaborators({ employees, loading, saving, canViewSensitive
           </div>
         </CardContent>
       </Card>
-      <EmployeeDialog open={open} employee={selected} saving={saving} canViewSensitive={canViewSensitive} onOpenChange={setOpen} onSave={save} />
+      <EmployeeDialog open={open} employee={selected} tableOptions={tableOptions} saving={saving} canViewSensitive={canViewSensitive} onOpenChange={setOpen} onSave={save} />
     </div>
   );
 }

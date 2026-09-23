@@ -9,6 +9,13 @@ type TableOrderMode = 'marked_items' | 'all_items' | 'account_only'
 
 const minutesSince = (value: string) => Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 60000))
 const normalizeAmount = (value: unknown) => Number(value || 0)
+const normalizeItemQuantity = (value: unknown, saleUnit: 'un' | 'kg') => {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric) || numeric <= 0) return saleUnit === 'kg' ? 0.001 : 1
+  return saleUnit === 'kg'
+    ? Math.max(0.001, Math.round(numeric * 1000) / 1000)
+    : Math.max(1, Math.floor(numeric))
+}
 const isEffectivelyZero = (value: number) => Math.abs(value) <= EPSILON
 const toNumberOrNull = (value: unknown) => {
   const numeric = Number(value)
@@ -26,6 +33,71 @@ const calculateDistanceMeters = (fromLat?: number | null, fromLng?: number | nul
   const endLat = toRadians(Number(toLat))
   const a = Math.sin(dLat / 2) ** 2 + Math.cos(startLat) * Math.cos(endLat) * Math.sin(dLng / 2) ** 2
   return earthRadiusMeters * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+const allowedTableIdsFor = (waiterSession: any) => waiterSession.profile.tableAccessMode === 'assigned'
+  ? new Set((waiterSession.profile.allowedTableIds || []).map(String))
+  : null
+
+const filterTablesForWaiter = <T extends { id: string }>(rows: T[], waiterSession: any) => {
+  const allowedIds = allowedTableIdsFor(waiterSession)
+  return allowedIds ? rows.filter((row) => allowedIds.has(String(row.id))) : rows
+}
+
+async function enforceWaiterTableAccess(supabase: any, waiterSession: any, action: string, body: any) {
+  const allowedIds = allowedTableIdsFor(waiterSession)
+  if (!allowedIds) return null
+  if (action === 'create_table') return fail('Seu acesso esta limitado as mesas definidas pelo administrador.', 403)
+
+  const tableIds = new Set<string>()
+  for (const key of ['tableId', 'targetTableId']) {
+    const value = String(body?.[key] || '').trim()
+    if (value) tableIds.add(value)
+  }
+
+  const sessionIds = new Set<string>()
+  const sessionId = String(body?.sessionId || '').trim()
+  if (sessionId) sessionIds.add(sessionId)
+
+  const accountIds = ['accountId', 'sourceAccountId', 'targetAccountId']
+    .map((key) => String(body?.[key] || '').trim())
+    .filter(Boolean)
+  if (accountIds.length) {
+    const { data, error } = await supabase
+      .from('table_accounts')
+      .select('id,session_id,table_id')
+      .in('id', [...new Set(accountIds)])
+    if (error) throw error
+    for (const row of data ?? []) {
+      if (row.session_id) sessionIds.add(String(row.session_id))
+      else if (row.table_id) tableIds.add(String(row.table_id))
+    }
+  }
+
+  const itemId = String(body?.itemId || '').trim()
+  if (itemId) {
+    const { data, error } = await supabase
+      .from('order_items')
+      .select('session_id')
+      .eq('id', itemId)
+      .maybeSingle()
+    if (error) throw error
+    if (data?.session_id) sessionIds.add(String(data.session_id))
+  }
+
+  if (sessionIds.size) {
+    const { data, error } = await supabase
+      .from('table_sessions')
+      .select('id,table_id')
+      .in('id', [...sessionIds])
+    if (error) throw error
+    for (const row of data ?? []) if (row.table_id) tableIds.add(String(row.table_id))
+  }
+
+  if ([...tableIds].some((tableId) => !allowedIds.has(tableId))) {
+    return fail('Esta mesa nao esta liberada para o seu usuario.', 403)
+  }
+  return null
 }
 
 async function getTableOrderFlowSettings(supabase: any, restaurantId: string) {
@@ -380,7 +452,8 @@ const buildOptionsMap = (rows: any[]) => {
 
 const buildItemTotal = (row: any, options: any[]) => {
   const unitPrice = normalizeAmount(row.unit_price)
-  const quantity = Math.max(1, Number(row.quantity || 1))
+  const saleUnit = row.sale_unit === 'kg' ? 'kg' : 'un'
+  const quantity = normalizeItemQuantity(row.quantity, saleUnit)
   const optionsTotal = options.reduce((sum, option) => sum + normalizeAmount(option.price) * Math.max(1, Number(option.quantity || 1)), 0)
   return unitPrice * quantity + optionsTotal
 }
@@ -717,7 +790,7 @@ async function getSessionSnapshot(supabase: any, sessionId: string) {
 
 function buildSessionMetrics(snapshot: Awaited<ReturnType<typeof getSessionSnapshot>>) {
   const optionsMap = buildOptionsMap(snapshot.optionRows)
-  const commandsById = new Map(snapshot.commandRows.map((row: any) => [row.id, row]))
+  const commandsById = new Map<string, any>(snapshot.commandRows.map((row: any) => [row.id, row]))
   const ordersById = new Map<string, any>()
   const ordersByAccount = new Map<string, any[]>()
   const itemsByAccount = new Map<string, any[]>()
@@ -755,7 +828,8 @@ function buildSessionMetrics(snapshot: Awaited<ReturnType<typeof getSessionSnaps
       orderStatus: order?.status ?? null,
       productId: row.product_id,
       productName: row.product_name,
-      quantity: Math.max(1, Number(row.quantity || 1)),
+      quantity: normalizeItemQuantity(row.quantity, row.sale_unit === 'kg' ? 'kg' : 'un'),
+      saleUnit: row.sale_unit === 'kg' ? 'kg' : 'un',
       unitPrice: normalizeAmount(row.unit_price),
       totalPrice: buildItemTotal(row, options),
       notes: row.notes || '',
@@ -994,7 +1068,8 @@ async function sendAccountDraftItemsToKitchen(
     return {
       product_id: row.product_id,
       product_name: row.product_name,
-      quantity: Math.max(1, Number(row.quantity || 1)),
+      quantity: normalizeItemQuantity(row.quantity, row.sale_unit === 'kg' ? 'kg' : 'un'),
+      sale_unit: row.sale_unit === 'kg' ? 'kg' : 'un',
       price: normalizeAmount(row.unit_price),
       subtotal: buildItemTotal(row, options),
       options: options.map((option: any) => option.optionName),
@@ -1167,10 +1242,14 @@ async function refreshSessionStatus(supabase: any, sessionId: string) {
   }
 }
 
-async function buildSessionResponse(supabase: any, restaurantId: string, sessionId: string) {
+async function buildSessionResponse(supabase: any, waiterSession: any, sessionId: string) {
+  const restaurantId = waiterSession.profile.restaurantId
   const snapshot = await getSessionSnapshot(supabase, sessionId)
   const metrics = buildSessionMetrics(snapshot)
-  const tableChoices = await listTransferTables(supabase, restaurantId, sessionId)
+  const tableChoices = filterTablesForWaiter(
+    await listTransferTables(supabase, restaurantId, sessionId),
+    waiterSession,
+  )
   const serviceChargeSettings = await getServiceChargeSettings(supabase, restaurantId)
 
   return {
@@ -1197,7 +1276,7 @@ async function buildSessionResponse(supabase: any, restaurantId: string, session
   }
 }
 
-async function listRestaurantTables(supabase: any, restaurantId: string) {
+async function listRestaurantTables(supabase: any, restaurantId: string, waiterSession: any) {
   const { data: tableRows, error: tableError } = await supabase
     .from('tables')
     .select('*')
@@ -1302,7 +1381,7 @@ async function listRestaurantTables(supabase: any, restaurantId: string) {
     legacyAccountCountByTable.set(row.table_id, (legacyAccountCountByTable.get(row.table_id) ?? 0) + 1)
   })
 
-  return (tableRows ?? []).map((row: any) => {
+  return filterTablesForWaiter((tableRows ?? []).map((row: any) => {
     const session = latestSessionByTable.get(row.id)
 
     if (!session) {
@@ -1373,7 +1452,7 @@ async function listRestaurantTables(supabase: any, restaurantId: string) {
       readyItemsCount,
       notes: '',
     }
-  })
+  }), waiterSession)
 }
 
 async function listCatalog(supabase: any, restaurantId: string) {
@@ -1434,6 +1513,8 @@ async function listCatalog(supabase: any, restaurantId: string) {
     price: effectivePrices.get(String(row.id)) ?? normalizeAmount(row.price),
     featured: Boolean(row.featured ?? row.is_featured),
     sendToKds: Boolean(row.send_to_kds ?? true),
+    weightBased: Boolean(row.weight_based),
+    saleUnit: row.weight_based ? 'kg' : 'un',
     variations: buildProductVariationGroups(row.id, specificRows ?? [], linkRows ?? [], globalRows ?? []),
   }))
 
@@ -1658,8 +1739,13 @@ Deno.serve(async (req: Request) => {
     const action = String(body?.action || '')
     const supabase = waiterSession.supabase
 
+    if (!['bootstrap', 'catalog', 'time_clock_status', 'time_clock_punch', 'payment_settings'].includes(action)) {
+      const accessDenied = await enforceWaiterTableAccess(supabase, waiterSession, action, body)
+      if (accessDenied) return accessDenied
+    }
+
     if (action === 'bootstrap') {
-      const tables = await listRestaurantTables(supabase, waiterSession.profile.restaurantId)
+      const tables = await listRestaurantTables(supabase, waiterSession.profile.restaurantId, waiterSession)
       const timeClock = await getTimeClockStatus(supabase, waiterSession)
       return ok({ profile: waiterSession.profile, tables, timeClock })
     }
@@ -1791,7 +1877,7 @@ Deno.serve(async (req: Request) => {
       const sessionId = String(body?.sessionId || '')
       if (!sessionId) return fail('Sessao invalida.', 400)
 
-      const session = await buildSessionResponse(supabase, waiterSession.profile.restaurantId, sessionId)
+      const session = await buildSessionResponse(supabase, waiterSession, sessionId)
       return ok({ session })
     }
 
@@ -1799,7 +1885,7 @@ Deno.serve(async (req: Request) => {
       const sessionId = String(body?.sessionId || '')
       if (!sessionId) return fail('Sessao invalida.', 400)
 
-      const session = await buildSessionResponse(supabase, waiterSession.profile.restaurantId, sessionId)
+      const session = await buildSessionResponse(supabase, waiterSession, sessionId)
       return ok({ session })
     }
 
@@ -1825,7 +1911,7 @@ Deno.serve(async (req: Request) => {
 
       if (tableError) throw tableError
 
-      const session = await buildSessionResponse(supabase, waiterSession.profile.restaurantId, sessionId)
+      const session = await buildSessionResponse(supabase, waiterSession, sessionId)
       return ok({ session })
     }
 
@@ -1900,7 +1986,7 @@ Deno.serve(async (req: Request) => {
 
       await refreshSessionStatus(supabase, sessionId)
 
-      const session = await buildSessionResponse(supabase, waiterSession.profile.restaurantId, sessionId)
+      const session = await buildSessionResponse(supabase, waiterSession, sessionId)
       return ok({ session })
     }
 
@@ -1956,7 +2042,7 @@ Deno.serve(async (req: Request) => {
 
       if (error) throw error
 
-      const session = await buildSessionResponse(supabase, waiterSession.profile.restaurantId, sessionId)
+      const session = await buildSessionResponse(supabase, waiterSession, sessionId)
       return ok({ session })
     }
 
@@ -2011,7 +2097,7 @@ Deno.serve(async (req: Request) => {
 
       if (error) throw error
 
-      const session = await buildSessionResponse(supabase, waiterSession.profile.restaurantId, accountRow.session_id)
+      const session = await buildSessionResponse(supabase, waiterSession, accountRow.session_id)
       return ok({ session })
     }
 
@@ -2048,7 +2134,7 @@ Deno.serve(async (req: Request) => {
       if (deleteError) throw deleteError
 
       await refreshSessionStatus(supabase, accountRow.session_id)
-      const session = await buildSessionResponse(supabase, waiterSession.profile.restaurantId, accountRow.session_id)
+      const session = await buildSessionResponse(supabase, waiterSession, accountRow.session_id)
       return ok({ session })
     }
 
@@ -2106,7 +2192,7 @@ Deno.serve(async (req: Request) => {
       await refreshAccountTotals(supabase, [targetAccountId])
       await refreshSessionStatus(supabase, sourceAccount.session_id)
 
-      const session = await buildSessionResponse(supabase, waiterSession.profile.restaurantId, sourceAccount.session_id)
+      const session = await buildSessionResponse(supabase, waiterSession, sourceAccount.session_id)
       return ok({ session })
     }
 
@@ -2205,14 +2291,14 @@ Deno.serve(async (req: Request) => {
       await refreshSessionStatus(supabase, sourceSessionId)
       await refreshSessionStatus(supabase, targetSessionId)
 
-      const session = await buildSessionResponse(supabase, waiterSession.profile.restaurantId, sourceSessionId)
+      const session = await buildSessionResponse(supabase, waiterSession, sourceSessionId)
       return ok({ session, transferredSessionId: targetSessionId })
     }
 
     if (action === 'move_item') {
       const itemId = String(body?.itemId || '')
       const targetAccountId = String(body?.targetAccountId || '')
-      const moveQuantity = Math.max(1, Number(body?.quantity || 1))
+      const requestedMoveQuantity = Number(body?.quantity || 0)
 
       if (!itemId || !targetAccountId) return fail('Informe o item e a comanda de destino.', 400)
 
@@ -2224,6 +2310,8 @@ Deno.serve(async (req: Request) => {
 
       if (itemError) throw itemError
       if (itemRow.status !== 'draft') return fail('So e possivel mover itens ainda nao enviados.', 400)
+      const itemSaleUnit = itemRow.sale_unit === 'kg' ? 'kg' : 'un'
+      const moveQuantity = normalizeItemQuantity(requestedMoveQuantity, itemSaleUnit)
 
       const { data: accountRows, error: accountError } = await supabase
         .from('table_accounts')
@@ -2245,7 +2333,7 @@ Deno.serve(async (req: Request) => {
 
       if (optionError) throw optionError
 
-      const sourceQuantity = Math.max(1, Number(itemRow.quantity || 1))
+      const sourceQuantity = normalizeItemQuantity(itemRow.quantity, itemSaleUnit)
       const quantityToMove = Math.min(sourceQuantity, moveQuantity)
 
       if (quantityToMove >= sourceQuantity) {
@@ -2264,6 +2352,7 @@ Deno.serve(async (req: Request) => {
             product_id: itemRow.product_id,
             product_name: itemRow.product_name,
             quantity: quantityToMove,
+            sale_unit: itemSaleUnit,
             unit_price: normalizeAmount(itemRow.unit_price),
             notes: itemRow.notes || '',
             status: 'draft',
@@ -2299,7 +2388,7 @@ Deno.serve(async (req: Request) => {
       await refreshAccountTotals(supabase, [itemRow.account_id, targetAccountId])
       await refreshSessionStatus(supabase, itemRow.session_id)
 
-      const session = await buildSessionResponse(supabase, waiterSession.profile.restaurantId, itemRow.session_id)
+      const session = await buildSessionResponse(supabase, waiterSession, itemRow.session_id)
       return ok({ session })
     }
 
@@ -2312,7 +2401,6 @@ Deno.serve(async (req: Request) => {
       const sessionId = String(body?.sessionId || '')
       const accountId = String(body?.accountId || '')
       const productId = String(body?.productId || '')
-      const quantity = Math.max(1, Number(body?.quantity || 1))
       const notes = String(body?.notes || '')
       const selectedOptions = Array.isArray(body?.selectedOptions) ? body.selectedOptions : []
 
@@ -2320,12 +2408,15 @@ Deno.serve(async (req: Request) => {
 
       const { data: productRow, error: productError } = await supabase
         .from('products')
-        .select('id, name, price')
+        .select('id, name, price, weight_based')
         .eq('id', productId)
         .eq('user_id', waiterSession.profile.restaurantId)
         .single()
 
       if (productError) throw productError
+
+      const saleUnit = productRow.weight_based ? 'kg' : 'un'
+      const quantity = normalizeItemQuantity(body?.quantity, saleUnit)
 
       const effectivePrices = await resolveWaiterPrices(
         supabase,
@@ -2342,6 +2433,7 @@ Deno.serve(async (req: Request) => {
           product_id: productRow.id,
           product_name: productRow.name,
           quantity,
+          sale_unit: saleUnit,
           unit_price: unitPrice,
           notes,
           status: 'draft',
@@ -2380,13 +2472,12 @@ Deno.serve(async (req: Request) => {
       await refreshAccountTotal(supabase, accountId)
       await refreshSessionStatus(supabase, sessionId)
 
-      const session = await buildSessionResponse(supabase, waiterSession.profile.restaurantId, sessionId)
+      const session = await buildSessionResponse(supabase, waiterSession, sessionId)
       return ok({ session })
     }
 
     if (action === 'update_draft_item') {
       const itemId = String(body?.itemId || '')
-      const quantity = Math.max(1, Number(body?.quantity || 1))
       const notes = String(body?.notes || '')
       const selectedOptions = Array.isArray(body?.selectedOptions) ? body.selectedOptions : []
 
@@ -2394,12 +2485,14 @@ Deno.serve(async (req: Request) => {
 
       const { data: itemRow, error: itemError } = await supabase
         .from('order_items')
-        .select('id, session_id, account_id, status')
+        .select('id, session_id, account_id, status, sale_unit')
         .eq('id', itemId)
         .single()
 
       if (itemError) throw itemError
       if (itemRow.status !== 'draft') return fail('So e possivel editar itens ainda nao enviados.', 400)
+      const saleUnit = itemRow.sale_unit === 'kg' ? 'kg' : 'un'
+      const quantity = normalizeItemQuantity(body?.quantity, saleUnit)
 
       const { error: updateError } = await supabase
         .from('order_items')
@@ -2436,7 +2529,7 @@ Deno.serve(async (req: Request) => {
       await refreshAccountTotal(supabase, itemRow.account_id)
       await refreshSessionStatus(supabase, itemRow.session_id)
 
-      const session = await buildSessionResponse(supabase, waiterSession.profile.restaurantId, itemRow.session_id)
+      const session = await buildSessionResponse(supabase, waiterSession, itemRow.session_id)
       return ok({ session })
     }
 
@@ -2466,7 +2559,7 @@ Deno.serve(async (req: Request) => {
       await refreshAccountTotal(supabase, accountId)
       await refreshSessionStatus(supabase, sessionId)
 
-      const session = await buildSessionResponse(supabase, waiterSession.profile.restaurantId, sessionId)
+      const session = await buildSessionResponse(supabase, waiterSession, sessionId)
       return ok({ session })
     }
 
@@ -2479,7 +2572,7 @@ Deno.serve(async (req: Request) => {
       if (!sentAccount.sent) return fail('Nenhum item pendente para enviar.', 400)
 
       await refreshSessionStatus(supabase, sessionId)
-      const session = await buildSessionResponse(supabase, waiterSession.profile.restaurantId, sessionId)
+      const session = await buildSessionResponse(supabase, waiterSession, sessionId)
       return ok({ session, kitchenItemCount: sentAccount.kitchenItemCount || 0, itemCount: sentAccount.itemCount || 0 })
     }
 
@@ -2510,7 +2603,7 @@ Deno.serve(async (req: Request) => {
       }
 
       await refreshSessionStatus(supabase, sessionId)
-      const session = await buildSessionResponse(supabase, waiterSession.profile.restaurantId, sessionId)
+      const session = await buildSessionResponse(supabase, waiterSession, sessionId)
       return ok({ session, sentAccounts: accountIds.length, kitchenItemCount, itemCount })
     }
 
@@ -2682,7 +2775,7 @@ Deno.serve(async (req: Request) => {
       }
 
       await refreshSessionStatus(supabase, sessionId)
-      const session = await buildSessionResponse(supabase, waiterSession.profile.restaurantId, sessionId)
+      const session = await buildSessionResponse(supabase, waiterSession, sessionId)
       return ok({ session })
     }
 

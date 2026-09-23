@@ -7,6 +7,7 @@ import { discoverBridgeWebsocketUrl } from '@/services/bridgeDiscovery';
 import { loadPrinterConfig } from '@/services/printerConfig';
 import { dequeuePendingOrderPrint, enqueuePendingOrderPrint } from '@/services/orderPrintQueue';
 import { resolveCashReceiptAmounts } from '@/lib/payments/cashChange';
+import { formatSaleQuantity } from '@/utils/saleQuantity';
 
 // ESC/POS Commands
 const ESC = '\x1B';
@@ -955,9 +956,9 @@ function buildOrderHtml(order: any, config: any, store?: any) {
           <div class="section-title" style="margin-bottom: 5px;">ITENS:</div>
           ${(order.items || []).map((item: any) => `
             <div class="item-row">
-              <div class="item-title bold">${item.quantity}x ${escapeHtml(item.product_name || item.name || 'Produto')}</div>
+              <div class="item-title bold">${formatSaleQuantity(item.quantity, item.sale_unit)} ${escapeHtml(item.product_name || item.name || 'Produto')}</div>
               <div class="item-meta">
-                <span class="item-meta-left">${formatCurrencyValue(Number(item.price || item.unit_price || 0))} x ${Number(item.quantity || 1)}</span>
+                <span class="item-meta-left">${formatCurrencyValue(Number(item.price || item.unit_price || 0))} x ${formatSaleQuantity(item.quantity, item.sale_unit)}</span>
                 <span class="item-meta-right">${formatCurrencyValue(Number(item.total || item.subtotal || item.price * item.quantity || 0))}</span>
               </div>
               ${(() => {
@@ -1243,7 +1244,7 @@ function buildKitchenTicketHtml(order: any, config: any) {
           <div class="section-title" style="margin-bottom: 5px;">ITENS:</div>
           ${(order.items || []).map((item: any) => `
             <div class="item-row">
-              <div class="item-title">${Number(item.quantity || 1)}x ${escapeHtml(item.product_name || item.name || 'Produto')}</div>
+              <div class="item-title">${formatSaleQuantity(item.quantity, item.sale_unit)} ${escapeHtml(item.product_name || item.name || 'Produto')}</div>
               ${(() => {
                 const detailGroups = getOrderItemDetailGroups(item);
                 const ingredientLines = Array.isArray(item.receiptDescriptionLines) ? item.receiptDescriptionLines : [];
@@ -1332,7 +1333,7 @@ function buildKitchenEscPosCommands(order: any, lineWidth: number) {
   for (const item of Array.isArray(order.items) ? order.items : []) {
     const quantity = Number(item.quantity || 1);
     const productName = item.product_name || item.name || 'Produto';
-    wrapTextLine(`${quantity}x ${productName}`, lineWidth).forEach((value) => {
+    wrapTextLine(`${formatSaleQuantity(quantity, item.sale_unit)} ${productName}`, lineWidth).forEach((value) => {
       commands += text(value);
     });
 
@@ -2173,12 +2174,12 @@ export const PrinterService = {
       const unitPrice = Number(item.price || item.unit_price || 0);
       const itemTotal = Number(item.total || item.subtotal || unitPrice * quantity || 0);
 
-      wrapTextLine(`${quantity}x ${productName}`, lineWidth).forEach((value) => {
+      wrapTextLine(`${formatSaleQuantity(quantity, item.sale_unit)} ${productName}`, lineWidth).forEach((value) => {
         commands += text(value);
       });
       // Preço e total alinhar à direita é chato em ESC/POS puro sem tabelas, vou deixar simples
       formatColumns(
-        `${formatCurrencyValue(unitPrice)} x ${quantity}`,
+        `${formatCurrencyValue(unitPrice)} x ${formatSaleQuantity(quantity, item.sale_unit)}`,
         formatCurrencyValue(itemTotal),
         lineWidth
       ).forEach((value) => {

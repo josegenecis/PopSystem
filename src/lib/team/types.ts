@@ -60,6 +60,13 @@ export interface TeamEmployee {
   roles: EmployeeRole[];
   permissions: string[];
   apps: EmployeeApp[];
+  app_configurations: Partial<Record<EmployeeApp, Record<string, unknown>>>;
+}
+
+export interface TeamTableOption {
+  id: string;
+  number: number;
+  location: string | null;
 }
 
 export interface EmployeeFormValue {
@@ -92,6 +99,8 @@ export interface EmployeeFormValue {
   apps: EmployeeApp[];
   pin: string;
   waiter_password: string;
+  waiter_table_access_mode: 'all' | 'assigned';
+  waiter_table_ids: string[];
   driver_password: string;
   driver_vehicle_type: string;
   driver_vehicle_plate: string;

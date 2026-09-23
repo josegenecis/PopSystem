@@ -4,6 +4,7 @@ import {
   createServiceClient,
   fail,
   getWaiterSession,
+  getWaiterTableAccess,
   hasWaiterAppAccess,
   hashToken,
   normalizeCpf,
@@ -29,7 +30,7 @@ Deno.serve(async (req: Request) => {
       const supabase = createServiceClient()
       const { data, error } = await supabase
         .from('waiters')
-        .select('id, user_id, name, role, permissions, active, password, cpf, faceio_facial_id, local_face_enrolled_at, local_face_profile')
+        .select('id, employee_id, user_id, name, role, permissions, active, password, cpf, faceio_facial_id, local_face_enrolled_at, local_face_profile')
         .eq('cpf', cpf)
         .eq('active', true)
         .maybeSingle()
@@ -50,6 +51,8 @@ Deno.serve(async (req: Request) => {
       if (String(data.password || '') !== password) {
         return fail('CPF ou senha invalidos.', 401)
       }
+
+      const tableAccess = await getWaiterTableAccess(supabase, data)
 
       const token = buildSessionToken()
       const tokenHash = await hashToken(token)
@@ -79,6 +82,8 @@ Deno.serve(async (req: Request) => {
             cpf: data.cpf || cpf,
             role: data.role || 'cashier',
             permissions,
+            tableAccessMode: tableAccess.mode,
+            allowedTableIds: tableAccess.tableIds,
             faceioFacialId: data.faceio_facial_id || null,
             localFaceEnrolledAt: data.local_face_enrolled_at || null,
             localFaceProfile: data.local_face_profile || null,

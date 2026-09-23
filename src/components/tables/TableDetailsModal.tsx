@@ -25,6 +25,7 @@ import { useCheckoutSettings } from '@/hooks/useCheckoutSettings';
 import AdminPinDialog from '@/components/security/AdminPinDialog';
 import { verifyAdminPin } from '@/services/adminPin';
 import { getLocalOperatorSession, isAdminOperator } from '@/services/operatorAuth';
+import { formatSaleQuantity } from '@/utils/saleQuantity';
 
 interface Table {
   id: string;
@@ -41,6 +42,7 @@ interface OrderItem {
   product_name: string;
   price: number;
   quantity: number;
+  sale_unit?: 'un' | 'kg';
   subtotal: number;
   options?: string[];
   notes?: string;
@@ -224,7 +226,7 @@ const TableDetailsModal: React.FC<TableDetailsModalProps> = ({
         if (sessionId) {
           const { data: relationalItems, error: itemError } = await (supabase
             .from('order_items') as any)
-            .select('id, product_id, product_name, quantity, unit_price, notes, status')
+            .select('id, product_id, product_name, quantity, sale_unit, unit_price, notes, status')
             .eq('account_id', accountData.id)
             .neq('status', 'cancelled')
             .order('created_at', { ascending: true });
@@ -249,7 +251,10 @@ const TableDetailsModal: React.FC<TableDetailsModalProps> = ({
 
           parsedItems = (relationalItems || []).map((item: any) => {
             const options = optionsByItem.get(item.id) || [];
-            const quantity = Math.max(1, Number(item.quantity || 1));
+            const saleUnit = item.sale_unit === 'kg' ? 'kg' : 'un';
+            const quantity = saleUnit === 'kg'
+              ? Math.max(0.001, Number(item.quantity || 0.001))
+              : Math.max(1, Number(item.quantity || 1));
             const unitPrice = Number(item.unit_price || 0);
             const optionTotal = options.reduce(
               (sum: number, option: any) => sum + Number(option.price || 0) * Math.max(1, Number(option.quantity || 1)),
@@ -262,6 +267,7 @@ const TableDetailsModal: React.FC<TableDetailsModalProps> = ({
               product_name: item.product_name,
               price: unitPrice,
               quantity,
+              sale_unit: saleUnit,
               subtotal: Number(((unitPrice + optionTotal) * quantity).toFixed(2)),
               options: options.map((option: any) => String(option.option_name || '')).filter(Boolean),
               notes: item.notes || '',
@@ -444,7 +450,7 @@ const TableDetailsModal: React.FC<TableDetailsModalProps> = ({
         <h4>ITENS:</h4>
         ${currentOrder.items.map(item => `
           <div style="margin-bottom: 8px;">
-            <div><strong>${item.quantity}x ${item.product_name}</strong></div>
+            <div><strong>${formatSaleQuantity(item.quantity, item.sale_unit)} ${item.product_name}</strong></div>
             ${item.options ? item.options.map(opt => `<div style="margin-left: 10px;">• ${opt}</div>`).join('') : ''}
             ${item.notes ? `<div style="margin-left: 10px; font-style: italic;">Obs: ${item.notes}</div>` : ''}
             <div style="text-align: right;">${formatBRL(item.subtotal)}</div>
@@ -1286,7 +1292,7 @@ const TableDetailsModal: React.FC<TableDetailsModalProps> = ({
                       <div className="flex justify-between items-start gap-3">
                         <div className="flex-1">
                           <p className="font-medium">
-                            {item.quantity}x {item.product_name}
+                            {formatSaleQuantity(item.quantity, item.sale_unit)} {item.product_name}
                           </p>
                           {item.options && item.options.length > 0 && (
                             <div className="mt-1 ml-4">

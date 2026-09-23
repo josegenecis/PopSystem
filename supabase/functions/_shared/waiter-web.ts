@@ -45,6 +45,7 @@ export const buildSessionToken = () => `${crypto.randomUUID()}${crypto.randomUUI
 
 type WaiterSessionWaiterRow = {
   id: string
+  employee_id: string | null
   name: string
   role: string | null
   permissions: Record<string, boolean> | null
@@ -53,6 +54,42 @@ type WaiterSessionWaiterRow = {
   faceio_facial_id: string | null
   local_face_enrolled_at: string | null
   local_face_profile: Record<string, unknown> | null
+}
+
+export type WaiterTableAccess = {
+  mode: 'all' | 'assigned'
+  tableIds: string[]
+}
+
+export async function getWaiterTableAccess(supabase: any, waiter: Pick<WaiterSessionWaiterRow, 'id' | 'employee_id' | 'role' | 'permissions'>): Promise<WaiterTableAccess> {
+  const permissions = (waiter.permissions as Record<string, unknown>) || {}
+  if (String(waiter.role || '').toLowerCase() === 'admin' || permissions.admin === true) {
+    return { mode: 'all', tableIds: [] }
+  }
+
+  const employeeId = String(waiter.employee_id || '').trim()
+  if (!employeeId) return { mode: 'all', tableIds: [] }
+
+  const { data, error } = await supabase
+    .from('employee_app_access')
+    .select('configuration')
+    .eq('employee_id', employeeId)
+    .eq('app_code', 'waiter')
+    .eq('enabled', true)
+    .maybeSingle()
+
+  if (error) throw error
+  if (!data) return { mode: 'all', tableIds: [] }
+
+  const configuration = data.configuration && typeof data.configuration === 'object'
+    ? data.configuration as Record<string, unknown>
+    : {}
+  if (configuration.table_access_mode !== 'assigned') return { mode: 'all', tableIds: [] }
+
+  const tableIds = Array.isArray(configuration.table_ids)
+    ? [...new Set(configuration.table_ids.map(String).filter(Boolean))]
+    : []
+  return { mode: 'assigned', tableIds }
 }
 
 export async function getWaiterSession(req: Request) {
@@ -73,6 +110,7 @@ export async function getWaiterSession(req: Request) {
       expires_at,
       waiter:waiters!waiter_web_sessions_waiter_id_fkey(
         id,
+        employee_id,
         name,
         role,
         permissions,
@@ -113,6 +151,8 @@ export async function getWaiterSession(req: Request) {
     .update({ last_seen_at: new Date().toISOString() })
     .eq('id', data.id)
 
+  const tableAccess = await getWaiterTableAccess(supabase, waiter)
+
   return {
     rawToken,
     sessionId: data.id,
@@ -123,6 +163,8 @@ export async function getWaiterSession(req: Request) {
       cpf: waiter.cpf || '',
       role: waiter.role || 'cashier',
       permissions,
+      tableAccessMode: tableAccess.mode,
+      allowedTableIds: tableAccess.tableIds,
       faceioFacialId: waiter.faceio_facial_id || null,
       localFaceEnrolledAt: waiter.local_face_enrolled_at || null,
       localFaceProfile: waiter.local_face_profile || null,

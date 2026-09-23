@@ -11,7 +11,7 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { formatCpfInput, formatPhoneInput, formatVehiclePlateInput } from '@/lib/team/fieldMasks';
-import type { EmployeeApp, EmployeeFormValue, EmployeeRole, TeamEmployee } from '@/lib/team/types';
+import type { EmployeeApp, EmployeeFormValue, EmployeeRole, TeamEmployee, TeamTableOption } from '@/lib/team/types';
 import { APP_OPTIONS, EMPLOYMENT_TYPE_LABELS, PERMISSION_GROUPS, REMUNERATION_TYPE_LABELS, ROLE_OPTIONS, TIME_CLOCK_PUNCH_PERMISSIONS, WEEKDAYS } from './teamOptions';
 
 const emptyForm: EmployeeFormValue = {
@@ -43,55 +43,67 @@ const emptyForm: EmployeeFormValue = {
   apps: [],
   pin: '',
   waiter_password: '',
+  waiter_table_access_mode: 'all',
+  waiter_table_ids: [],
   driver_password: '',
   driver_vehicle_type: 'Moto',
   driver_vehicle_plate: '',
 };
 
-const employeeToForm = (employee: TeamEmployee): EmployeeFormValue => ({
-  id: employee.id,
-  full_name: employee.full_name,
-  display_name: employee.display_name || '',
-  photo_url: employee.photo_url || '',
-  cpf: employee.cpf || '',
-  phone: employee.phone || '',
-  email: employee.email || '',
-  birth_date: employee.birth_date || '',
-  address: employee.address || '',
-  hire_date: employee.hire_date || '',
-  job_title: employee.job_title || '',
-  department: employee.department || '',
-  unit_name: employee.unit_name || '',
-  employment_status: employee.employment_status,
-  employment_type: employee.employment_type,
-  weekly_hours: employee.weekly_hours,
-  default_day_off: employee.default_day_off,
-  notes: employee.notes || '',
-  salary_base: employee.compensation.salary_base,
-  hourly_rate: employee.compensation.hourly_rate,
-  remuneration_type: employee.compensation.remuneration_type,
-  default_bonus: employee.compensation.default_bonus,
-  pix_key: employee.compensation.pix_key || '',
-  bank_details: String(employee.compensation.bank_details?.description || ''),
-  roles: employee.roles,
-  permissions: employee.apps.includes('time_clock') ? [...new Set([...employee.permissions, ...TIME_CLOCK_PUNCH_PERMISSIONS])] : employee.permissions,
-  apps: employee.apps,
-  pin: '',
-  waiter_password: '',
-  driver_password: '',
-  driver_vehicle_type: 'Moto',
-  driver_vehicle_plate: '',
-});
+const employeeToForm = (employee: TeamEmployee): EmployeeFormValue => {
+  const waiterConfiguration = employee.app_configurations?.waiter || {};
+  const configuredTableIds = Array.isArray(waiterConfiguration.table_ids)
+    ? waiterConfiguration.table_ids.map(String)
+    : [];
+
+  return {
+    id: employee.id,
+    full_name: employee.full_name,
+    display_name: employee.display_name || '',
+    photo_url: employee.photo_url || '',
+    cpf: employee.cpf || '',
+    phone: employee.phone || '',
+    email: employee.email || '',
+    birth_date: employee.birth_date || '',
+    address: employee.address || '',
+    hire_date: employee.hire_date || '',
+    job_title: employee.job_title || '',
+    department: employee.department || '',
+    unit_name: employee.unit_name || '',
+    employment_status: employee.employment_status,
+    employment_type: employee.employment_type,
+    weekly_hours: employee.weekly_hours,
+    default_day_off: employee.default_day_off,
+    notes: employee.notes || '',
+    salary_base: employee.compensation.salary_base,
+    hourly_rate: employee.compensation.hourly_rate,
+    remuneration_type: employee.compensation.remuneration_type,
+    default_bonus: employee.compensation.default_bonus,
+    pix_key: employee.compensation.pix_key || '',
+    bank_details: String(employee.compensation.bank_details?.description || ''),
+    roles: employee.roles,
+    permissions: employee.apps.includes('time_clock') ? [...new Set([...employee.permissions, ...TIME_CLOCK_PUNCH_PERMISSIONS])] : employee.permissions,
+    apps: employee.apps,
+    pin: '',
+    waiter_password: '',
+    waiter_table_access_mode: waiterConfiguration.table_access_mode === 'assigned' ? 'assigned' : 'all',
+    waiter_table_ids: configuredTableIds,
+    driver_password: '',
+    driver_vehicle_type: 'Moto',
+    driver_vehicle_plate: '',
+  };
+};
 
 const operationalApps: EmployeeApp[] = ['popsystem', 'pdv', 'waiter', 'time_clock', 'kds', 'finance', 'stock', 'administration'];
 
-export function EmployeeDialog(props: { open: boolean; employee: TeamEmployee | null; canViewSensitive: boolean; saving: boolean; onOpenChange: (open: boolean) => void; onSave: (value: EmployeeFormValue) => Promise<boolean> }) {
+export function EmployeeDialog(props: { open: boolean; employee: TeamEmployee | null; tableOptions: TeamTableOption[]; canViewSensitive: boolean; saving: boolean; onOpenChange: (open: boolean) => void; onSave: (value: EmployeeFormValue) => Promise<boolean> }) {
   const [form, setForm] = useState<EmployeeFormValue>(emptyForm);
   const [showSecrets, setShowSecrets] = useState(false);
   useEffect(() => {
     if (props.open) setForm(props.employee ? employeeToForm(props.employee) : { ...emptyForm });
   }, [props.employee, props.open]);
   const requiresPin = useMemo(() => form.apps.some((app) => operationalApps.includes(app)), [form.apps]);
+  const hasInvalidWaiterTableAccess = form.apps.includes('waiter') && form.waiter_table_access_mode === 'assigned' && form.waiter_table_ids.length === 0;
   const visiblePermissionGroups = useMemo(() => PERMISSION_GROUPS.filter((group) => group.apps.some((app) => form.apps.includes(app))), [form.apps]);
 
   const update = <K extends keyof EmployeeFormValue>(key: K, value: EmployeeFormValue[K]) => setForm((current) => ({ ...current, [key]: value }));
@@ -105,6 +117,12 @@ export function EmployeeDialog(props: { open: boolean; employee: TeamEmployee | 
       return { ...current, apps, permissions };
     });
   const togglePermission = (permission: string) => update('permissions', form.permissions.includes(permission) ? form.permissions.filter((item) => item !== permission) : [...form.permissions, permission]);
+  const toggleWaiterTable = (tableId: string) => update(
+    'waiter_table_ids',
+    form.waiter_table_ids.includes(tableId)
+      ? form.waiter_table_ids.filter((id) => id !== tableId)
+      : [...form.waiter_table_ids, tableId],
+  );
   const togglePermissionGroup = (items: readonly (readonly [string, string])[]) => {
     const codes = items.map(([code]) => code);
     const allSelected = codes.every((code) => form.permissions.includes(code));
@@ -113,6 +131,7 @@ export function EmployeeDialog(props: { open: boolean; employee: TeamEmployee | 
   const submit = async () => {
     if (form.full_name.trim().length < 2) return;
     if (!form.id && requiresPin && form.pin.trim().length < 4) return;
+    if (hasInvalidWaiterTableAccess) return;
     await props.onSave(form);
   };
 
@@ -289,6 +308,50 @@ export function EmployeeDialog(props: { open: boolean; employee: TeamEmployee | 
                 </Field>
               </div>
             )}
+            {form.apps.includes('waiter') && (
+              <div className="space-y-4 rounded-xl border border-emerald-200 bg-emerald-50/50 p-4">
+                <div>
+                  <Label className="text-emerald-950">Mesas disponíveis no App Garçom</Label>
+                  <p className="mt-1 text-xs text-emerald-800">A restrição também é validada no servidor para impedir acesso por link direto.</p>
+                </div>
+                <Select
+                  value={form.waiter_table_access_mode}
+                  onValueChange={(value: EmployeeFormValue['waiter_table_access_mode']) => update('waiter_table_access_mode', value)}
+                >
+                  <SelectTrigger className="bg-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas as mesas</SelectItem>
+                    <SelectItem value="assigned">Somente mesas selecionadas</SelectItem>
+                  </SelectContent>
+                </Select>
+                {form.waiter_table_access_mode === 'assigned' && (
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap gap-2">
+                      <Button type="button" size="sm" variant="outline" onClick={() => update('waiter_table_ids', props.tableOptions.map((table) => table.id))}>
+                        Selecionar todas
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" onClick={() => update('waiter_table_ids', [])}>
+                        Limpar seleção
+                      </Button>
+                    </div>
+                    <div className="grid max-h-56 gap-2 overflow-y-auto rounded-xl border bg-white p-3 sm:grid-cols-2 md:grid-cols-3">
+                      {props.tableOptions.map((table) => (
+                        <label key={table.id} className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
+                          <Checkbox checked={form.waiter_table_ids.includes(table.id)} onCheckedChange={() => toggleWaiterTable(table.id)} />
+                          <span>Mesa {table.number}{table.location ? ` · ${table.location}` : ''}</span>
+                        </label>
+                      ))}
+                      {!props.tableOptions.length && <p className="text-sm text-slate-500">Nenhuma mesa cadastrada.</p>}
+                    </div>
+                    <p className={hasInvalidWaiterTableAccess ? 'text-xs font-medium text-red-600' : 'text-xs text-slate-500'}>
+                      {hasInvalidWaiterTableAccess ? 'Selecione pelo menos uma mesa.' : `${form.waiter_table_ids.length} mesa(s) selecionada(s).`}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
             {form.apps.includes('time_clock') && (
               <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
                 <strong>Registro de ponto completo habilitado.</strong>
@@ -370,7 +433,7 @@ export function EmployeeDialog(props: { open: boolean; employee: TeamEmployee | 
           <Button variant="outline" onClick={() => props.onOpenChange(false)}>
             Cancelar
           </Button>
-          <Button className="bg-orange-500 hover:bg-orange-600" disabled={props.saving || form.full_name.trim().length < 2 || (!form.id && requiresPin && form.pin.length < 4)} onClick={submit}>
+          <Button className="bg-orange-500 hover:bg-orange-600" disabled={props.saving || hasInvalidWaiterTableAccess || form.full_name.trim().length < 2 || (!form.id && requiresPin && form.pin.length < 4)} onClick={submit}>
             <Save className="mr-2 h-4 w-4" />
             {props.saving ? 'Salvando...' : 'Salvar colaborador'}
           </Button>

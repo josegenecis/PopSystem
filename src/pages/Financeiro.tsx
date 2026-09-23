@@ -47,6 +47,8 @@ import {
   TrendingUp,
   AlertTriangle,
   Printer,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { DatePicker } from '@/components/ui/date-picker';
@@ -187,6 +189,7 @@ const Financeiro = () => {
   const [cashCloseOverview, setCashCloseOverview] = useState<CashCloseOverview | null>(null);
   const [loadingCashCloseOverview, setLoadingCashCloseOverview] = useState(false);
   const [mobileFinanceTab, setMobileFinanceTab] = useState<'caixa' | 'movimentos' | 'relatorios'>('caixa');
+  const [financialValuesVisible, setFinancialValuesVisible] = useState(false);
 
   const [filters, setFilters] = useState(() => {
     const { start, end } = getPeriodRange('30d');
@@ -1270,6 +1273,7 @@ const Financeiro = () => {
       return 'R$ 0,00';
     }
   };
+  const formatProtectedCurrency = (amount: number) => financialValuesVisible ? formatCurrency(amount) : 'R$ ••••••';
 
   const enumerateDays = (from: Date, to: Date) => {
     const out: Date[] = [];
@@ -1622,6 +1626,17 @@ const Financeiro = () => {
             </div>
 
             <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="border-white/20 bg-white/15 text-white hover:bg-white/25"
+                onClick={() => setFinancialValuesVisible((visible) => !visible)}
+                aria-label={financialValuesVisible ? 'Ocultar faturamento e saldo' : 'Mostrar faturamento e saldo'}
+                aria-pressed={financialValuesVisible}
+              >
+                {financialValuesVisible ? <EyeOff className="mr-2 h-4 w-4" /> : <Eye className="mr-2 h-4 w-4" />}
+                {financialValuesVisible ? 'Ocultar valores' : 'Mostrar valores'}
+              </Button>
               {!isCashRoute && (
                 <Button className="border border-white/20 bg-white/15 text-white hover:bg-white/25" variant="outline" onClick={() => navigate('/financeiro/receber')}>
                   <WalletCards className="mr-2 h-4 w-4" />Contas a receber
@@ -1793,7 +1808,7 @@ const Financeiro = () => {
               <div className="grid w-full grid-cols-2 gap-3 xl:grid-cols-4">
                   <div className="min-w-0 rounded-[22px] border border-[#8CC850]/18 bg-gradient-to-br from-white to-[#F5FBED] p-4 dark:border-[#8CC850]/15 dark:from-[#0c1512] dark:to-[#112017]">
                     <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Faturamento</div>
-                    <div className="mt-2 truncate text-[1.35rem] font-bold text-slate-900 dark:text-white 2xl:text-2xl">{formatCurrency(totalIncome)}</div>
+                    <div className="mt-2 truncate text-[1.35rem] font-bold text-slate-900 dark:text-white 2xl:text-2xl">{formatProtectedCurrency(totalIncome)}</div>
                   </div>
                   <div className="min-w-0 rounded-[22px] border border-[#FF6400]/18 bg-gradient-to-br from-white to-[#FFF3EA] p-4 dark:border-[#FF6400]/15 dark:from-[#0c1512] dark:to-[#1e1510]">
                     <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Despesas</div>
@@ -1801,7 +1816,7 @@ const Financeiro = () => {
                   </div>
                   <div className="min-w-0 rounded-[22px] border border-[#003223]/10 bg-gradient-to-br from-white to-[#F5F8F7] p-4 dark:border-white/10 dark:from-[#0c1512] dark:to-[#141b18]">
                     <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Saldo</div>
-                    <div className={`mt-2 truncate text-[1.35rem] font-bold 2xl:text-2xl ${balance >= 0 ? 'text-boracume-green' : 'text-boracume-orange'}`}>{formatCurrency(balance)}</div>
+                    <div className={`mt-2 truncate text-[1.35rem] font-bold 2xl:text-2xl ${balance >= 0 ? 'text-boracume-green' : 'text-boracume-orange'}`}>{formatProtectedCurrency(balance)}</div>
                   </div>
                   <div className="min-w-0 rounded-[22px] border border-violet-200 bg-gradient-to-br from-white to-violet-50 p-4 dark:border-violet-500/20 dark:from-[#0c1512] dark:to-[#171325]">
                     <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Margem</div>
@@ -2032,8 +2047,19 @@ const Financeiro = () => {
                     : 'Abra o caixa e acompanhe vendas, pagamentos e movimentações direto do celular.'}
                 </p>
               </div>
-              <div className={`rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] ${currentSession ? 'bg-[#F5FBED] text-[#245B2B]' : 'bg-[#FFF1E6] text-[#C45E00]'}`}>
-                {currentSession ? 'Aberto' : 'Fechado'}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setFinancialValuesVisible((visible) => !visible)}
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-[#003223]/10 bg-white text-[#003223]"
+                  aria-label={financialValuesVisible ? 'Ocultar faturamento e saldo' : 'Mostrar faturamento e saldo'}
+                  aria-pressed={financialValuesVisible}
+                >
+                  {financialValuesVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                </button>
+                <div className={`rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] ${currentSession ? 'bg-[#F5FBED] text-[#245B2B]' : 'bg-[#FFF1E6] text-[#C45E00]'}`}>
+                  {currentSession ? 'Aberto' : 'Fechado'}
+                </div>
               </div>
             </div>
           </div>
@@ -2148,7 +2174,7 @@ const Financeiro = () => {
             <div className="grid grid-cols-2 gap-2">
               <div className="rounded-[18px] border border-[#8CC850]/20 bg-white/95 p-3 shadow-sm">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Vendas</div>
-                <div className="mt-1.5 text-[1rem] font-bold text-slate-900">{formatCurrency(sessionTotal)}</div>
+                <div className="mt-1.5 text-[1rem] font-bold text-slate-900">{formatProtectedCurrency(sessionTotal)}</div>
               </div>
               <div className="rounded-[18px] border border-[#003223]/10 bg-white/95 p-3 shadow-sm">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Abertura</div>
@@ -2168,7 +2194,7 @@ const Financeiro = () => {
               </div>
               <div className="rounded-[18px] border border-[#003223]/10 bg-white/95 p-3 shadow-sm">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Saldo</div>
-                <div className="mt-1.5 text-[1rem] font-bold text-slate-900">{formatCurrency(sessionTotal + sessionIn - sessionOut)}</div>
+                <div className="mt-1.5 text-[1rem] font-bold text-slate-900">{formatProtectedCurrency(sessionTotal + sessionIn - sessionOut)}</div>
               </div>
             </div>
 

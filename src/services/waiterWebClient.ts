@@ -14,6 +14,8 @@ export type WaiterWebProfile = {
   cpf: string;
   role: string;
   permissions: Record<string, boolean>;
+  tableAccessMode?: 'all' | 'assigned';
+  allowedTableIds?: string[];
   faceioFacialId?: string | null;
   localFaceEnrolledAt?: string | null;
   localFaceProfile?: Record<string, unknown> | null;
@@ -178,6 +180,8 @@ export type Product = {
   price: number;
   featured: boolean;
   sendToKds: boolean;
+  weightBased: boolean;
+  saleUnit: 'un' | 'kg';
   variations: ProductVariationGroup[];
 };
 
@@ -196,6 +200,7 @@ export type OrderItem = {
   productId: string;
   productName: string;
   quantity: number;
+  saleUnit: 'un' | 'kg';
   unitPrice: number;
   totalPrice: number;
   notes: string;
@@ -563,6 +568,8 @@ export async function loginWaiterWeb(cpf: string, password: string) {
     password,
   });
 
+  clearCache(WAITER_BOOTSTRAP_CACHE_KEY);
+  clearCache(WAITER_CATALOG_CACHE_KEY);
   waiterWebSessionStorage.save(response.session);
   return response.session;
 }

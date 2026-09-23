@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Clock, RotateCcw, Package, User, CheckCircle, Truck, Phone, MapPin } from 'lucide-react';
 import { formatElapsedSince } from '@/utils/elapsedTime';
+import { formatSaleQuantity } from '@/utils/saleQuantity';
 
 interface OrderItem {
   id: string;
@@ -12,6 +13,7 @@ interface OrderItem {
   product_name?: string;
   title?: string;
   quantity: number;
+  sale_unit?: 'un' | 'kg';
   notes?: string;
   observation?: string;
   options?: any[];
@@ -223,7 +225,7 @@ const KitchenOrderCard: React.FC<KitchenOrderCardProps> = ({ order, onStatusChan
               <div key={idx} className="flex flex-col gap-1 py-1 border-b border-gray-100 last:border-0">
                 <div className="flex justify-between items-start">
                    <div className="flex gap-2">
-                      <span className="font-black text-lg text-gray-900 min-w-[24px]">{item.quantity}x</span>
+                      <span className="font-black text-lg text-gray-900 min-w-[24px]">{formatSaleQuantity(item.quantity, item.sale_unit)}</span>
                       <span className="font-bold text-gray-800 text-lg leading-tight">{getItemName(item)}</span>
                    </div>
                 </div>

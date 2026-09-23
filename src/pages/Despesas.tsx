@@ -1031,40 +1031,40 @@ export default function Despesas() {
 
   return (
     <div className="container mx-auto space-y-6 p-4 sm:p-6">
-      <PageHero
-        title="Contas a pagar"
-        description="Registre despesas, acompanhe comprovantes e mantenha o histórico de estornos com rastreabilidade."
-        eyebrow="Financeiro"
-        icon={ReceiptText}
-        actions={(
-          <div className="rounded-2xl border border-white/20 bg-white/15 px-5 py-3 backdrop-blur">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/70">Despesas ativas</p>
-            <p className="mt-1 text-xl font-bold">{getTotalExpenses().toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
-          </div>
-        )}
-      />
+      <div className="space-y-3">
+        <PageHero
+          title="Contas a pagar"
+          description="Registre despesas, acompanhe comprovantes e mantenha o histórico de estornos com rastreabilidade."
+          eyebrow="Financeiro"
+          icon={ReceiptText}
+          compact
+          actions={(
+            <div className="rounded-xl border border-white/20 bg-white/15 px-4 py-2 backdrop-blur">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-white/70">Despesas ativas</p>
+              <p className="text-lg font-bold leading-tight">{getTotalExpenses().toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
+            </div>
+          )}
+        />
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <button
-          type="button"
-          onClick={() => smartInvoiceRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-          className="group rounded-2xl border border-emerald-200 bg-emerald-950 p-5 text-left text-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg"
-        >
-          <div className="flex items-start gap-4">
-            <span className="rounded-xl bg-white/10 p-3"><Sparkles className="h-6 w-6 text-orange-400" /></span>
-            <span><strong className="block text-lg">Importar nota, cupom ou XML</strong><span className="mt-1 block text-sm text-emerald-100">A IA lê o documento, classifica os itens e prepara financeiro e estoque.</span></span>
-          </div>
-        </button>
-        <button
-          type="button"
-          onClick={() => manualFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-          className="group rounded-2xl border border-orange-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-orange-300 hover:shadow-lg"
-        >
-          <div className="flex items-start gap-4">
-            <span className="rounded-xl bg-orange-100 p-3"><PencilLine className="h-6 w-6 text-orange-700" /></span>
-            <span><strong className="block text-lg text-emerald-950">Lançar compra manualmente</strong><span className="mt-1 block text-sm text-slate-600">Cadastre só a conta ou inclua os produtos para também dar entrada no estoque.</span></span>
-          </div>
-        </button>
+        <div className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm sm:flex-row">
+          <Button
+            type="button"
+            onClick={() => smartInvoiceRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            className="h-11 flex-1 justify-start rounded-xl bg-emerald-950 px-4 text-white hover:bg-emerald-900"
+          >
+            <Sparkles className="mr-2 h-4 w-4 text-orange-400" />
+            Importar nota, cupom ou XML
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => manualFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            className="h-11 flex-1 justify-start rounded-xl border-orange-200 px-4 text-emerald-950 hover:border-orange-300 hover:bg-orange-50"
+          >
+            <PencilLine className="mr-2 h-4 w-4 text-orange-700" />
+            Lançar compra manualmente
+          </Button>
+        </div>
       </div>
 
       <Card ref={smartInvoiceRef} className="border-emerald-100 bg-gradient-to-br from-emerald-50 via-white to-emerald-50/40">

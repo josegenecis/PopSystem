@@ -667,7 +667,7 @@ const MenuImportModal: React.FC<MenuImportModalProps> = ({ isOpen, onClose, onIm
           const { data, status } = await invokeEdgeFunction('menu-importer', {
             action: 'analyze',
             url: urlInput.trim(),
-          }, { timeoutMs: 120000, authToken: session?.access_token });
+          }, { timeoutMs: 120000 });
 
           if (status !== 200 || !data?.success) {
             const errorMessage = data?.error || 'Não foi possível analisar esse link.';
@@ -1058,7 +1058,7 @@ const MenuImportModal: React.FC<MenuImportModalProps> = ({ isOpen, onClose, onIm
         action: 'apply',
         url: urlInput.trim(),
         replace,
-      }, { timeoutMs: 180000, authToken: session?.access_token });
+      }, { timeoutMs: 180000 });
 
       if (status !== 200 || !data?.success) {
         throw new Error(data?.error || 'Não foi possível importar esse cardápio.');

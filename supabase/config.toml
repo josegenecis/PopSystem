@@ -5,6 +5,11 @@ enabled = true
 verify_jwt = true
 entrypoint = "./functions/data-migration/index.ts"
 
+[functions.menu-importer]
+enabled = true
+verify_jwt = true
+entrypoint = "./functions/menu-importer/index.ts"
+
 [functions.whatsapp-connect]
 enabled = true
 verify_jwt = true

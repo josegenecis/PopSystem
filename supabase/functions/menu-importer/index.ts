@@ -2,6 +2,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { isMiniChefUrl, normalizeMiniChefMenu } from "../_shared/minichef-menu.ts";
+import { resolveStoreUserId } from "../_shared/multi-store.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -14,6 +15,15 @@ function json(data: Record<string, unknown>, status = 200) {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+class RequestError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
 }
 
 const clean = (value: unknown) => String(value || "").replace(/\s+/g, " ").trim();
@@ -243,10 +253,17 @@ async function analyzeUrl(url: string) {
 }
 
 async function assertUser(supabaseUrl: string, anonKey: string, authHeader: string | null) {
-  if (!authHeader) throw new Error("Usuário não autenticado.");
-  const client = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authHeader } } });
-  const { data, error } = await client.auth.getUser();
-  if (error || !data.user?.id) throw new Error("Não consegui confirmar o usuário logado.");
+  const token = String(authHeader || "").replace(/^Bearer\s+/i, "").trim();
+  if (!token) throw new RequestError("Sua sessão expirou. Entre novamente para continuar.", 401);
+  const client = createClient(supabaseUrl, anonKey, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: { persistSession: false },
+  });
+  const { data, error } = await client.auth.getUser(token);
+  if (error || !data.user?.id) {
+    console.warn("[menu-importer] sessão rejeitada", { reason: error?.message || "user_missing" });
+    throw new RequestError("Sua sessão expirou. Entre novamente para continuar.", 401);
+  }
   return data.user.id;
 }
 
@@ -434,7 +451,17 @@ serve(async (req: Request) => {
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SERVICE_ROLE_KEY") || "";
     if (!supabaseUrl || !anonKey || !serviceKey) throw new Error("Configuração do Supabase ausente.");
 
-    const userId = await assertUser(supabaseUrl, anonKey, req.headers.get("Authorization"));
+    const authenticatedUserId = await assertUser(supabaseUrl, anonKey, req.headers.get("Authorization"));
+    const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+    let userId: string;
+    try {
+      userId = await resolveStoreUserId(admin, authenticatedUserId, body?._storeId);
+    } catch (error) {
+      if (error instanceof Error && error.message === "store_access_denied") {
+        throw new RequestError("Você não tem acesso à loja selecionada.", 403);
+      }
+      throw error;
+    }
     const normalized = await analyzeUrl(url);
 
     if (action === "analyze") {
@@ -464,7 +491,6 @@ serve(async (req: Request) => {
     }
 
     if (action === "apply") {
-      const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
       const result = await applyImport(admin, userId, normalized, body?.replace !== false);
       return json({ success: true, status: "completed", platform: normalized.platform, stats: normalized.stats, result });
     }
@@ -472,6 +498,7 @@ serve(async (req: Request) => {
     return json({ success: false, error: "Ação inválida." }, 200);
   } catch (error) {
     console.error("[menu-importer]", error);
-    return json({ success: false, status: "failed", error: error instanceof Error ? error.message : String(error) }, 200);
+    const status = error instanceof RequestError ? error.status : 200;
+    return json({ success: false, status: "failed", error: error instanceof Error ? error.message : String(error) }, status);
   }
 });

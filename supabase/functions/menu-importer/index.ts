@@ -256,7 +256,7 @@ async function must(label: string, promise: PromiseLike<{ data: any; error: any 
   return data;
 }
 
-async function removeCurrent(admin: any, userId: string) {
+async function removeCurrent(admin: any, userId: string, includeStoreData = true) {
   const products = await must("buscar produtos atuais", admin.from("products").select("id").eq("user_id", userId));
   const productIds = (products || []).map((product: any) => product.id);
   if (productIds.length > 0) {
@@ -267,15 +267,17 @@ async function removeCurrent(admin: any, userId: string) {
   await must("apagar produtos", admin.from("products").delete().eq("user_id", userId));
   await must("apagar categorias", admin.from("product_categories").delete().eq("user_id", userId));
   await must("apagar complementos globais", admin.from("global_variations").delete().eq("user_id", userId));
-  await must("apagar bairros de entrega", admin.from("delivery_zones").delete().eq("user_id", userId));
-  await must("apagar configurações de entrega", admin.from("delivery_settings").delete().eq("user_id", userId));
-  await must("apagar banners", admin.from("promotional_banners").delete().eq("user_id", userId));
+  if (includeStoreData) {
+    await must("apagar bairros de entrega", admin.from("delivery_zones").delete().eq("user_id", userId));
+    await must("apagar configurações de entrega", admin.from("delivery_settings").delete().eq("user_id", userId));
+    await must("apagar banners", admin.from("promotional_banners").delete().eq("user_id", userId));
+  }
 }
 
 const variationKey = (variation: any) => `${slugify(variation.name)}|${JSON.stringify(variation.options || [])}`;
 
 async function applyImport(admin: any, userId: string, normalized: any, replace: boolean) {
-  if (replace) await removeCurrent(admin, userId);
+  if (replace) await removeCurrent(admin, userId, normalized.platform !== "minichef");
 
   const existingCategories = replace
     ? []
@@ -289,22 +291,17 @@ async function applyImport(admin: any, userId: string, normalized: any, replace:
   const productIdsBySlug = new Map<string, string>();
   for (const product of existingProducts || []) productIdsBySlug.set(slugify(product.name), product.id);
 
-  const profileUpdate = normalized.platform === "minichef"
-    ? {
-        ...(normalized.restaurant.name ? { restaurant_name: normalized.restaurant.name } : {}),
-        description: "Cardápio importado do MiniChef.",
-        updated_at: new Date().toISOString(),
-      }
-    : {
-        restaurant_name: normalized.restaurant.name || null,
-        phone: normalized.restaurant.phone || null,
-        address: normalized.restaurant.address || null,
-        delivery_fee: normalized.restaurant.delivery_fee || 0,
-        minimum_order: normalized.restaurant.minimum_order || 0,
-        description: `Cardápio importado de ${normalized.platform}.`,
-        updated_at: new Date().toISOString(),
-      };
-  await must("atualizar perfil", admin.from("profiles").update(profileUpdate).eq("id", userId));
+  if (normalized.platform !== "minichef") {
+    await must("atualizar perfil", admin.from("profiles").update({
+      restaurant_name: normalized.restaurant.name || null,
+      phone: normalized.restaurant.phone || null,
+      address: normalized.restaurant.address || null,
+      delivery_fee: normalized.restaurant.delivery_fee || 0,
+      minimum_order: normalized.restaurant.minimum_order || 0,
+      description: `Cardápio importado de ${normalized.platform}.`,
+      updated_at: new Date().toISOString(),
+    }).eq("id", userId));
+  }
 
   const variationIds = new Map<string, string>();
   let categoriesCreated = 0;

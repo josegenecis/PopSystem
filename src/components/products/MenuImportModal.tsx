@@ -133,11 +133,15 @@ const MenuImportModal: React.FC<MenuImportModalProps> = ({ isOpen, onClose, onIm
     }
   };
 
-  const isBrendiUrl = (value: string) => {
+  const structuredMenuPlatform = (value: string) => {
     try {
-      return new URL(value.trim()).host.toLowerCase().includes('brendi.com.br');
+      const url = new URL(value.trim());
+      const host = url.host.toLowerCase();
+      if (host.includes('brendi.com.br')) return 'brendi';
+      if (host === 'app.minichef.online' && /^\/delivery\/[^/]+\/?$/i.test(url.pathname)) return 'minichef';
+      return null;
     } catch {
-      return false;
+      return null;
     }
   };
 
@@ -657,7 +661,8 @@ const MenuImportModal: React.FC<MenuImportModalProps> = ({ isOpen, onClose, onIm
         }
       }
       else if (activeTab === 'link') {
-        if (isBrendiUrl(urlInput)) {
+        const structuredPlatform = structuredMenuPlatform(urlInput);
+        if (structuredPlatform) {
           setLoadingMessage('Analisando cardápio...');
           const { data, status } = await invokeEdgeFunction('menu-importer', {
             action: 'analyze',
@@ -666,7 +671,7 @@ const MenuImportModal: React.FC<MenuImportModalProps> = ({ isOpen, onClose, onIm
 
           if (status !== 200 || !data?.success) {
             const errorMessage = data?.error || 'Não foi possível analisar esse link.';
-            if (isAuthImportError(errorMessage)) {
+            if (structuredPlatform === 'brendi' && isAuthImportError(errorMessage)) {
               categoriesToImport = await importBrendiViaCompatibleFlow(urlInput.trim());
             } else {
               throw new Error(errorMessage);
@@ -1142,7 +1147,7 @@ const MenuImportModal: React.FC<MenuImportModalProps> = ({ isOpen, onClose, onIm
               />
               <div className="flex items-center gap-2 p-3 bg-purple-50 text-purple-800 rounded-md text-xs border border-purple-100">
                 <Wand2 className="w-4 h-4" />
-                <span>Links MenuDino, Brendi, Anota.ai, OlaClick e CardapioWeb são importados automaticamente com produtos, imagens e complementos.</span>
+                <span>Links MiniChef, MenuDino, Brendi, Anota.ai, OlaClick e CardapioWeb são importados automaticamente com produtos, imagens e complementos.</span>
               </div>
               {linkPreview && (
                 <div className="space-y-4 rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">

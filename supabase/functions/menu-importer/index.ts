@@ -1,6 +1,7 @@
 // deno-lint-ignore-file no-explicit-any
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import { isMiniChefUrl, normalizeMiniChefMenu } from "../_shared/minichef-menu.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -86,6 +87,7 @@ function detectPlatform(url: string) {
   try {
     const host = new URL(url).host.toLowerCase();
     if (host.includes("brendi.com.br")) return "brendi";
+    if (isMiniChefUrl(url)) return "minichef";
   } catch {}
   return "unknown";
 }
@@ -227,13 +229,13 @@ function normalizeBrendiMenu(sourceUrl: string, data: any) {
 
 async function analyzeUrl(url: string) {
   const platform = detectPlatform(url);
-  if (platform !== "brendi") {
-    throw new Error("Esse importador automático ainda suporta links Brendi. Para outras plataformas, use a importação por link tradicional.");
+  if (platform === "unknown") {
+    throw new Error("Esse link ainda não é compatível com o importador estruturado. Use a importação por link tradicional.");
   }
   const html = await fetchHtml(url);
-  const data = decodeNuxtPayload(html);
-  if (!data) throw new Error("Não encontrei dados estruturados no cardápio Brendi.");
-  const normalized = normalizeBrendiMenu(url, data);
+  const normalized = platform === "minichef"
+    ? normalizeMiniChefMenu(url, html)
+    : normalizeBrendiMenu(url, decodeNuxtPayload(html));
   if (!normalized.stats.categories || !normalized.stats.products) {
     throw new Error("Não encontrei categorias ou produtos nesse cardápio.");
   }
@@ -287,15 +289,22 @@ async function applyImport(admin: any, userId: string, normalized: any, replace:
   const productIdsBySlug = new Map<string, string>();
   for (const product of existingProducts || []) productIdsBySlug.set(slugify(product.name), product.id);
 
-  await must("atualizar perfil", admin.from("profiles").update({
-    restaurant_name: normalized.restaurant.name || null,
-    phone: normalized.restaurant.phone || null,
-    address: normalized.restaurant.address || null,
-    delivery_fee: normalized.restaurant.delivery_fee || 0,
-    minimum_order: normalized.restaurant.minimum_order || 0,
-    description: `Cardápio importado de ${normalized.platform}.`,
-    updated_at: new Date().toISOString(),
-  }).eq("id", userId));
+  const profileUpdate = normalized.platform === "minichef"
+    ? {
+        ...(normalized.restaurant.name ? { restaurant_name: normalized.restaurant.name } : {}),
+        description: "Cardápio importado do MiniChef.",
+        updated_at: new Date().toISOString(),
+      }
+    : {
+        restaurant_name: normalized.restaurant.name || null,
+        phone: normalized.restaurant.phone || null,
+        address: normalized.restaurant.address || null,
+        delivery_fee: normalized.restaurant.delivery_fee || 0,
+        minimum_order: normalized.restaurant.minimum_order || 0,
+        description: `Cardápio importado de ${normalized.platform}.`,
+        updated_at: new Date().toISOString(),
+      };
+  await must("atualizar perfil", admin.from("profiles").update(profileUpdate).eq("id", userId));
 
   const variationIds = new Map<string, string>();
   let categoriesCreated = 0;
@@ -315,7 +324,7 @@ async function applyImport(admin: any, userId: string, normalized: any, replace:
         active: true,
       }).select("id").single());
       categoryId = created.id;
-      categoryIds.set(key, categoryId);
+      categoryIds.set(key, String(categoryId));
       categoriesCreated++;
     }
 
@@ -343,6 +352,7 @@ async function applyImport(admin: any, userId: string, normalized: any, replace:
         send_to_kds: false,
         display_order: product.display_order,
         track_stock: false,
+        weight_based: product.weight_based === true,
         stock_quantity: 0,
         low_stock_threshold: 5,
       }).select("id").single());
@@ -362,7 +372,7 @@ async function applyImport(admin: any, userId: string, normalized: any, replace:
             description: "",
           }).select("id").single());
           variationId = createdVariation.id;
-          variationIds.set(key, variationId);
+          variationIds.set(key, String(variationId));
           globalVariationsCreated++;
         }
         await must("vincular complemento", admin.from("product_global_variation_links").insert({
@@ -393,7 +403,7 @@ async function applyImport(admin: any, userId: string, normalized: any, replace:
 
   if (replace && normalized.banners?.length) {
     const products = await must("buscar produtos para banners", admin.from("products").select("id,name").eq("user_id", userId));
-    const productBySlug = new Map((products || []).map((product: any) => [slugify(product.name), product]));
+    const productBySlug = new Map<string, any>((products || []).map((product: any) => [slugify(product.name), product]));
     await must("criar banners", admin.from("promotional_banners").insert(
       normalized.banners.map((banner: any, index: number) => {
         const product = productBySlug.get(banner.product_slug);

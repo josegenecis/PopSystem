@@ -19,9 +19,12 @@ interface Product {
 interface HighlightsSectionProps {
   products: Product[];
   onProductClick: (product: Product) => void;
+  title?: string;
+  subtitle?: string;
+  badges?: string[];
 }
 
-const HighlightsSection: React.FC<HighlightsSectionProps> = ({ products, onProductClick }) => {
+const HighlightsSection: React.FC<HighlightsSectionProps> = ({ products, onProductClick, title = 'Mais pedidos', subtitle = 'Os favoritos dos clientes', badges }) => {
   if (!products || products.length === 0) return null;
 
   return (
@@ -29,8 +32,8 @@ const HighlightsSection: React.FC<HighlightsSectionProps> = ({ products, onProdu
       <div className="mb-3 flex items-center gap-1.5 sm:mb-4 sm:gap-2">
         <Sparkles className="h-4 w-4" style={{ color: 'var(--menu-primary, #85C441)' }} />
         <div>
-          <h2 className="text-base font-black sm:text-xl" style={{ color: 'var(--menu-secondary, #063D2E)' }}>Mais pedidos</h2>
-          <p className="text-[10px] text-slate-500 sm:text-xs">Os favoritos dos clientes</p>
+          <h2 className="text-base font-black sm:text-xl" style={{ color: 'var(--menu-secondary, #063D2E)' }}>{title}</h2>
+          <p className="text-[10px] text-slate-500 sm:text-xs">{subtitle}</p>
         </div>
       </div>
       
@@ -70,7 +73,7 @@ const HighlightsSection: React.FC<HighlightsSectionProps> = ({ products, onProdu
                 )}
               </div>
               <div className="absolute left-2 top-2 max-w-[105px] truncate rounded-full bg-[var(--menu-secondary,#063D2E)] px-2 py-1 text-[7px] font-black uppercase tracking-wide text-white shadow-sm sm:left-3 sm:top-3 sm:max-w-none sm:px-2.5 sm:text-[10px]">
-                {index === 0 ? 'Campeão de vendas' : 'Popular'}
+                {badges?.[index] || badges?.[0] || (index === 0 ? 'Campeão de vendas' : 'Popular')}
               </div>
             </div>
 

@@ -73,6 +73,14 @@ const isStoreOpenNow = (openingHours: unknown) => {
   return activeToday || activeYesterday
 }
 
+const isEnabledFutureSchedule = (scheduledValue: unknown, themeConfig: any) => {
+  const config = themeConfig?.orderScheduling
+  if (!config?.enabled) return false
+  const scheduledAt = new Date(String(scheduledValue || '')).getTime()
+  const maximumAdvanceDays = Math.min(30, Math.max(1, Number(config.maximumAdvanceDays) || 7))
+  return Number.isFinite(scheduledAt) && scheduledAt > Date.now() && scheduledAt <= Date.now() + maximumAdvanceDays * 86_400_000
+}
+
 const validAttemptId = (value: unknown) => {
   const id = String(value || '').trim().toLowerCase()
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id) ? id : ''
@@ -135,10 +143,11 @@ Deno.serve(async (req) => {
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('opening_hours')
+      .select('opening_hours, theme_config')
       .eq('id', restaurantUserId)
       .maybeSingle()
-    if (!isStoreOpenNow(profile?.opening_hours)) {
+    const isValidFutureSchedule = isEnabledFutureSchedule(orderPayload?.scheduled_at, profile?.theme_config)
+    if (!isStoreOpenNow(profile?.opening_hours) && !isValidFutureSchedule) {
       return ok({ ok: false, error: 'store_closed', message: 'A loja está fechada no momento.' }, 409)
     }
 

@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { Trash2, Plus, Minus, Navigation, MapPin, Phone, User, CreditCard, Banknote, Smartphone, CheckCircle, Loader2 } from 'lucide-react';
+import { Trash2, Plus, Minus, Navigation, MapPin, Phone, User, CreditCard, Banknote, Smartphone, CheckCircle, Loader2, CalendarClock, Zap } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { useCustomerLookup } from '@/hooks/useCustomerLookup';
 import { SimpleVariationModal } from '@/components/menu/SimpleVariationModal';
@@ -20,6 +20,8 @@ import { useToast } from '@/hooks/use-toast';
 import { isConfiguredCartItem } from '@/hooks/useSimpleCart';
 import { resolveDeliveryFee } from '@/lib/deliveryPricing';
 import { createMarketingContent, trackMarketingEvent } from '@/lib/marketingTracking';
+import { buildOrderScheduleSlots, getScheduledPreparationAt, type OrderSchedulingConfig } from '@/lib/orderScheduling';
+import { isProductAvailableAt } from '@/lib/productAvailability';
 
 interface CartItem {
   product: {
@@ -156,6 +158,8 @@ interface SimpleCartModalProps {
   userId: string;
   isStoreOpen?: boolean;
   storeClosedMessage?: string;
+  schedulingConfig?: OrderSchedulingConfig;
+  openingHours?: unknown;
   onPixPaid?: (orderId: string) => void;
 }
 
@@ -172,6 +176,8 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
   userId,
   isStoreOpen = true,
   storeClosedMessage = 'A loja está fechada no momento.',
+  schedulingConfig,
+  openingHours,
   onPixPaid
 }) => {
   const { toast } = useToast();
@@ -200,6 +206,8 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
   const [paymentMethod, setPaymentMethod] = React.useState('');
   const [changeAmount, setChangeAmount] = React.useState('');
   const [notes, setNotes] = React.useState('');
+  const [fulfillmentTime, setFulfillmentTime] = React.useState<'asap' | 'scheduled'>('asap');
+  const [scheduledAt, setScheduledAt] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(false);
   const submittingRef = React.useRef(false);
   const [pixCheckout, setPixCheckout] = React.useState<null | { correlationID: string; brCode: string; qrCodeImage?: string; paymentLinkUrl?: string; paymentId?: string }>(null);
@@ -230,6 +238,12 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
   const [loyaltyProgress, setLoyaltyProgress] = React.useState<string[]>([]);
   const [isValidatingCoupon, setIsValidatingCoupon] = React.useState(false);
   const [isCheckingLoyalty, setIsCheckingLoyalty] = React.useState(false);
+  const [scheduleClock, setScheduleClock] = React.useState(() => Date.now());
+  const scheduleSlots = React.useMemo(
+    () => schedulingConfig?.enabled ? buildOrderScheduleSlots(openingHours, schedulingConfig, new Date(scheduleClock)) : [],
+    [openingHours, schedulingConfig, scheduleClock],
+  );
+  const canPlaceAtSelectedTime = isStoreOpen || (fulfillmentTime === 'scheduled' && Boolean(scheduledAt));
 
   const [location, setLocation] = React.useState({
     latitude: null as number | null,
@@ -462,12 +476,28 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
   }, [isOpen, userId]);
 
   useEffect(() => {
+    if (!isOpen) return;
+    setScheduleClock(Date.now());
+    const timer = window.setInterval(() => setScheduleClock(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, [isOpen]);
+
+  useEffect(() => {
     if (isOpen) {
       setStep('bag');
       checkoutTrackedRef.current = false;
       paymentTrackedRef.current = false;
+      const mustSchedule = !isStoreOpen && Boolean(schedulingConfig?.enabled);
+      setFulfillmentTime(mustSchedule ? 'scheduled' : 'asap');
+      setScheduledAt('');
     }
-  }, [isOpen]);
+  }, [isOpen, isStoreOpen, schedulingConfig?.enabled]);
+
+  useEffect(() => {
+    if (fulfillmentTime !== 'scheduled') return;
+    if (scheduledAt && scheduleSlots.some((slot) => slot.value === scheduledAt)) return;
+    setScheduledAt(scheduleSlots[0]?.value || '');
+  }, [fulfillmentTime, scheduleSlots, scheduledAt]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -824,6 +854,7 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
       (!isDeliveryMode || customerAddress.trim() !== '') &&
       hasDelivery &&
       isPaymentValid &&
+      canPlaceAtSelectedTime &&
       (paymentMethod !== 'dinheiro' || changeAmount === '' || parseFloat(changeAmount) >= finalTotal)
     );
     
@@ -1081,10 +1112,10 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
   const handlePlaceOrder = async () => {
     if (!isFormValid()) return;
     if (submittingRef.current) return;
-    if (!isStoreOpen) {
+    if (!canPlaceAtSelectedTime) {
       toast({
-        title: 'Loja fechada',
-        description: storeClosedMessage,
+        title: 'Escolha um horário',
+        description: schedulingConfig?.enabled ? 'Selecione um horário disponível para agendar o pedido.' : storeClosedMessage,
         variant: 'destructive'
       });
       return;
@@ -1128,6 +1159,12 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
         customer_longitude: isDeliveryMode ? location.longitude : null,
         customer_location_accuracy: isDeliveryMode && location.accuracy ? Math.round(location.accuracy) : null,
         google_maps_link: isDeliveryMode && location.latitude && location.longitude ? generateGoogleMapsLink(location.latitude, location.longitude) : null,
+        scheduled_at: fulfillmentTime === 'scheduled' ? scheduledAt : null,
+        variations: fulfillmentTime === 'scheduled' ? {
+          source: 'menu',
+          scheduledAt,
+          scheduledPreparationAt: getScheduledPreparationAt(scheduledAt, schedulingConfig?.preparationLeadMinutes || 0),
+        } : { source: 'menu' },
         items: [
           ...cart.map(item => ({
           product_id: item.product.id,
@@ -1185,7 +1222,7 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
           if (suggestedIds.length === 0) return [];
 
           let productsRes = await (supabase.from('products') as any)
-            .select('id,name,description,price,image_url,available,is_available')
+            .select('id,name,description,price,image_url,available,is_available,availability_schedule')
             .eq('user_id', userId)
             .eq('show_in_delivery', true)
             .in('id', suggestedIds);
@@ -1200,7 +1237,8 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
           const byId = new Map((productsRes.data || [])
             .filter((p: any) => {
               const available = p?.is_available !== undefined && p?.is_available !== null ? p.is_available : p?.available;
-              return available !== false;
+              const availabilityDate = baseOrderData.scheduled_at ? new Date(baseOrderData.scheduled_at) : new Date();
+              return available !== false && isProductAvailableAt(p, availabilityDate);
             })
             .map((p: any) => [String(p.id), p]));
 
@@ -1452,6 +1490,60 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
                     </Button>
                   )}
                 </div>
+              </div>
+            )}
+
+            {schedulingConfig?.enabled && (
+              <div className="rounded-2xl border p-4" style={{ backgroundColor: menuBackgroundColor, borderColor: menuAccentBorder }}>
+                <Label className="mb-3 block text-sm font-semibold" style={{ color: menuSecondaryColor }}>Para quando você quer?</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant={fulfillmentTime === 'asap' ? 'default' : 'outline'}
+                    className="h-11 rounded-xl"
+                    disabled={!isStoreOpen}
+                    style={fulfillmentTime === 'asap' ? { backgroundColor: menuPrimaryColor, color: '#fff' } : undefined}
+                    onClick={() => {
+                      setFulfillmentTime('asap');
+                      setScheduledAt('');
+                    }}
+                  >
+                    <Zap className="mr-2 h-4 w-4" /> Agora
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={fulfillmentTime === 'scheduled' ? 'default' : 'outline'}
+                    className="h-11 rounded-xl"
+                    style={fulfillmentTime === 'scheduled' ? { backgroundColor: menuSecondaryColor, color: '#fff' } : undefined}
+                    onClick={() => {
+                      setFulfillmentTime('scheduled');
+                      setScheduledAt((current) => current || scheduleSlots[0]?.value || '');
+                    }}
+                  >
+                    <CalendarClock className="mr-2 h-4 w-4" /> Agendar
+                  </Button>
+                </div>
+
+                {fulfillmentTime === 'scheduled' && (
+                  <div className="mt-3 space-y-2">
+                    <Label htmlFor="scheduled-at">Data e horário</Label>
+                    {scheduleSlots.length > 0 ? (
+                      <Select value={scheduledAt} onValueChange={setScheduledAt}>
+                        <SelectTrigger id="scheduled-at" className="h-12 rounded-xl bg-white">
+                          <SelectValue placeholder="Escolha um horário" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {scheduleSlots.map((slot) => (
+                            <SelectItem key={slot.value} value={slot.value}>{slot.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">Não há horários disponíveis dentro do período configurado.</p>
+                    )}
+                    <p className="text-xs text-gray-500">O restaurante receberá o pedido agora e será avisado no momento de iniciar o preparo.</p>
+                  </div>
+                )}
               </div>
             )}
             
@@ -1846,7 +1938,7 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
              )}
              {autoLoyaltyReward && <p className="text-xs mt-1 text-[#245B2B]">{autoLoyaltyReward.message}</p>}
              {isCheckingLoyalty && !appliedCoupon && !autoLoyaltyReward && !firstOrderPromotion && <p className="text-xs mt-1 text-muted-foreground">Verificando promoções...</p>}
-            {!isStoreOpen && <p className="text-xs text-red-500 mt-1">{storeClosedMessage}</p>}
+            {!isStoreOpen && fulfillmentTime !== 'scheduled' && <p className="text-xs text-red-500 mt-1">{storeClosedMessage}</p>}
           </div>
 
           {/* Resumo */}
@@ -1888,7 +1980,7 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
             </Button>
             <Button 
               onClick={handlePlaceOrder}
-              disabled={!isFormValid() || isLoading || !isStoreOpen}
+              disabled={!isFormValid() || isLoading || !canPlaceAtSelectedTime}
               className="flex-1 rounded-xl font-bold h-12 text-white transition-transform hover:scale-[1.02]"
               style={{ backgroundColor: 'var(--menu-primary, #85C441)' }}
             >
@@ -1903,7 +1995,7 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
             <div className="border-t border-gray-100 p-4 bg-white">
               <Button
                 onClick={handleContinueToCheckout}
-                disabled={!isStoreOpen}
+                disabled={!isStoreOpen && !schedulingConfig?.enabled}
                 className="w-full rounded-xl font-bold h-12 text-white transition-transform hover:scale-[1.02]"
                 style={{ backgroundColor: 'var(--menu-primary, #85C441)' }}
               >

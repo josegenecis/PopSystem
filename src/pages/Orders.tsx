@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Search, Filter, Eye, Check, Clock, Truck, Phone, MapPin, Copy, ExternalLink, QrCode, Printer, GripVertical } from 'lucide-react';
+import { Search, Filter, Eye, Check, Clock, Truck, Phone, MapPin, Copy, ExternalLink, QrCode, Printer, GripVertical, CalendarClock } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -27,6 +27,7 @@ import { formatPaymentMethodLabel } from '@/lib/orderDetails';
 import { IfoodLogo } from '@/components/icons/IfoodLogo';
 import { useConfirmDialog } from '@/contexts/ConfirmDialogContext';
 import PageContentSkeleton from '@/components/ui/page-content-skeleton';
+import { isScheduledOrderReady } from '@/lib/orderScheduling';
 
 interface Order {
   id: string;
@@ -85,6 +86,18 @@ const IfoodOrderBadge = ({ order }: { order: Order }) => {
     <span className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-[#EA1D2C] px-2.5 text-[10px] font-extrabold uppercase tracking-[0.08em] text-white shadow-sm">
       <span>Pedido</span>
       <IfoodLogo className="h-4 w-auto" classNamePath="fill-white" />
+    </span>
+  );
+};
+
+const ScheduledOrderBadge = ({ order }: { order: Order }) => {
+  if (!order.scheduled_at) return null;
+  const scheduled = new Date(order.scheduled_at);
+  if (!Number.isFinite(scheduled.getTime())) return null;
+  return (
+    <span className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full bg-violet-100 px-2.5 text-[10px] font-extrabold uppercase tracking-[0.06em] text-violet-800">
+      <CalendarClock className="h-3.5 w-3.5" />
+      {scheduled.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} {scheduled.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
     </span>
   );
 };
@@ -1156,6 +1169,7 @@ const Orders = () => {
                   <div className="flex flex-wrap items-center gap-2">
                     <div className="text-[14px] font-bold text-slate-900">Pedido {order.order_number}</div>
                     <IfoodOrderBadge order={order} />
+                    <ScheduledOrderBadge order={order} />
                   </div>
                   <div className="mt-0.5 text-[12px] font-medium text-slate-700">{order.customer_name}</div>
                   <div className="mt-1 flex items-center gap-1.5 text-[10px] text-slate-500">
@@ -1256,6 +1270,7 @@ const Orders = () => {
   };
 
   const pendingOrders = filteredOrders.filter(order => order.acceptance_status === 'pending_acceptance' || order.status === 'pending');
+  const actionablePendingOrders = pendingOrders.filter((order) => isScheduledOrderReady(order));
   const activeOrders = filteredOrders.filter(order => order.status === 'accepted' || order.status === 'preparing');
   const completedOrders = filteredOrders.filter(order => order.status === 'ready' || order.status === 'in_delivery');
   const inDeliveryOrders = filteredOrders.filter(order => order.status === 'in_delivery');
@@ -1269,7 +1284,7 @@ const Orders = () => {
   ];
   const mobileBulkActionConfig =
     mobileStatusTab === 'novos'
-      ? { action: 'accept_all' as const, orderIds: pendingOrders.map((order) => order.id), label: 'Aceitar fila' }
+      ? { action: 'accept_all' as const, orderIds: actionablePendingOrders.map((order) => order.id), label: 'Aceitar fila' }
       : mobileStatusTab === 'preparo'
         ? { action: 'ready_all' as const, orderIds: activeOrders.map((order) => order.id), label: 'Marcar prontos' }
         : mobileStatusTab === 'entrega'
@@ -1432,6 +1447,7 @@ const Orders = () => {
                               <div className="flex flex-wrap items-center gap-2">
                                 <div className="font-semibold">Pedido {order.order_number}</div>
                                 <IfoodOrderBadge order={order} />
+                                <ScheduledOrderBadge order={order} />
                               </div>
                               <div className="text-sm text-muted-foreground truncate">{order.customer_name}</div>
                               <div className="text-sm text-muted-foreground">{formatCurrency(order.total)}</div>
@@ -1469,6 +1485,7 @@ const Orders = () => {
                               <div className="flex flex-wrap items-center gap-2">
                                 <div className="font-semibold">Pedido {order.order_number}</div>
                                 <IfoodOrderBadge order={order} />
+                                <ScheduledOrderBadge order={order} />
                               </div>
                               <div className="text-sm text-muted-foreground truncate">{order.customer_name}</div>
                               <div className="text-sm text-muted-foreground">{formatCurrency(order.total)}</div>
@@ -1665,6 +1682,7 @@ const Orders = () => {
                                         <div className="flex flex-wrap items-center gap-1.5">
                                           <div className="font-semibold text-sm truncate">Pedido {order.order_number}</div>
                                           <IfoodOrderBadge order={order} />
+                                          <ScheduledOrderBadge order={order} />
                                         </div>
                                         <div className="text-xs text-muted-foreground truncate">{order.customer_name}</div>
                                       </div>
@@ -1716,7 +1734,7 @@ const Orders = () => {
               </div>
               <div className="w-full sm:w-auto">
                 <OrdersBulkActionButton
-                  orderIds={pendingOrders.map(o => o.id)}
+                  orderIds={actionablePendingOrders.map(o => o.id)}
                   action="accept_all"
                   onBulkAction={handleBulkAction}
                 />
@@ -1736,6 +1754,7 @@ const Orders = () => {
                         <div className="flex flex-wrap items-center gap-3">
                           <h3 className="text-lg font-semibold min-w-0 break-words">Pedido {order.order_number}</h3>
                           <IfoodOrderBadge order={order} />
+                          <ScheduledOrderBadge order={order} />
                           {getOrderStatusBadge(order)}
                           <div className="flex items-center gap-1 min-w-0">
                             {getOrderTypeIcon(order.order_type)}
@@ -1887,6 +1906,7 @@ const Orders = () => {
                         <div className="flex flex-wrap items-center gap-3">
                           <h3 className="text-lg font-semibold min-w-0 break-words">Pedido {order.order_number}</h3>
                           <IfoodOrderBadge order={order} />
+                          <ScheduledOrderBadge order={order} />
                           {getOrderStatusBadge(order)}
                           <div className="flex items-center gap-1 min-w-0">
                             {getOrderTypeIcon(order.order_type)}
@@ -2048,6 +2068,7 @@ const Orders = () => {
                         <div className="flex flex-wrap items-center gap-3">
                           <h3 className="text-lg font-semibold min-w-0 break-words">Pedido {order.order_number}</h3>
                           <IfoodOrderBadge order={order} />
+                          <ScheduledOrderBadge order={order} />
                           {getOrderStatusBadge(order)}
                           <div className="flex items-center gap-1 min-w-0">
                             {getOrderTypeIcon(order.order_type)}

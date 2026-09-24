@@ -236,6 +236,15 @@ export function buildEscposReceipt(data = {}) {
     const displayOrderNumber = normalizeLine(data.order_number).replace(/^PED[-_\s]*/i, '')
     appendWrapped(output, `Pedido #${displayOrderNumber || data.order_number}`, width)
   }
+  if (data.scheduled_at) {
+    const scheduled = new Date(data.scheduled_at)
+    if (Number.isFinite(scheduled.getTime())) {
+      output.push(`${ESC}\x61\x01${ESC}\x45\x01`)
+      appendWrapped(output, '*** PEDIDO AGENDADO ***', width)
+      appendWrapped(output, scheduled.toLocaleString('pt-BR'), width)
+      output.push(`${ESC}\x45\x00${ESC}\x61\x00`)
+    }
+  }
   output.push(`${separator}\n`)
 
   output.push(`${ESC}\x61\x00${ESC}\x45\x01CLIENTE:\n${ESC}\x45\x00`)

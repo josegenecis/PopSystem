@@ -420,6 +420,7 @@ serve(async (req) => {
           change_amount: payload?.change_amount ?? null,
           order_type: payload?.order_type || 'delivery',
           delivery_instructions: payload?.delivery_instructions || null,
+          scheduled_at: payload?.scheduled_at || null,
           waiter_id: payload?.waiter_id || null,
           cash_register_session_id: payload?.cash_register_session_id || null,
           variations: payload?.variations || null,
@@ -526,7 +527,9 @@ serve(async (req) => {
         customer_latitude: payload?.customer_latitude || null,
         customer_longitude: payload?.customer_longitude || null,
         customer_location_accuracy: payload?.customer_location_accuracy || null,
-        google_maps_link: payload?.google_maps_link || null
+        google_maps_link: payload?.google_maps_link || null,
+        scheduled_at: payload?.scheduled_at || null,
+        variations: payload?.variations || null
       }
 
       const { data: created, error: createErr } = await supabase

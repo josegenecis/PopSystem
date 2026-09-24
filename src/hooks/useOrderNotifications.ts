@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { POPSYSTEM_ORDER_SOUND_TYPE, soundNotifications } from '@/utils/soundUtils';
+import { isScheduledOrderReady } from '@/lib/orderScheduling';
 
 const isPdvCounterOrder = (order: any) => {
   const source = String(order?.variations?.source || order?.source || '').toUpperCase();
@@ -60,6 +61,7 @@ export const useOrderNotifications = () => {
         async (payload) => {
           console.log('🔔 Novo pedido recebido (Realtime):', payload);
           if (isPdvCounterOrder((payload as any)?.new)) return;
+          if (!isScheduledOrderReady((payload as any)?.new)) return;
           
           // Force reload of settings to ensure fresh state if needed, or rely on state
           // We rely on state 'enabled' here. 

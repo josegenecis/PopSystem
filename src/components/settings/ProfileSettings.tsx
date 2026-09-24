@@ -8,13 +8,14 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Upload, Save, Copy, Clock3, Smartphone } from 'lucide-react';
+import { Upload, Save, Copy, Clock3, Smartphone, CalendarClock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { CurrencyTextInput } from '@/components/ui/currency-text-input';
 import { formatBRL, parseBRL } from '@/lib/currency';
 import AdjustableImageDialog from '@/components/media/AdjustableImageDialog';
+import { DEFAULT_ORDER_SCHEDULING_CONFIG, getOrderSchedulingConfig, type OrderSchedulingConfig } from '@/lib/orderScheduling';
 
 const weekDays = [
   { key: 'monday', label: 'Segunda' },
@@ -99,6 +100,7 @@ const ProfileSettings = () => {
   const [pendingBannerFile, setPendingBannerFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [weeklySchedule, setWeeklySchedule] = useState<Record<WeekDayKey, DailySchedule>>(createDefaultSchedule());
+  const [orderScheduling, setOrderScheduling] = useState<OrderSchedulingConfig>({ ...DEFAULT_ORDER_SCHEDULING_CONFIG });
   const { toast } = useToast();
   const { user } = useAuth();
 
@@ -149,6 +151,7 @@ const ProfileSettings = () => {
         setBannerImage(data.banner_url || '');
         const themeConfig = (data as any).theme_config && typeof (data as any).theme_config === 'object' ? (data as any).theme_config : {};
         setProfileThemeConfig(themeConfig);
+        setOrderScheduling(getOrderSchedulingConfig(themeConfig));
         setBannerFit(themeConfig.bannerFit === 'contain' ? 'contain' : 'cover');
       }
     } catch (error) {
@@ -306,6 +309,7 @@ const ProfileSettings = () => {
         theme_config: {
           ...profileThemeConfig,
           bannerFit,
+          orderScheduling,
         },
         updated_at: new Date().toISOString()
       };
@@ -641,6 +645,89 @@ const ProfileSettings = () => {
               onChange={(e) => handleInputChange('description', e.target.value)}
               rows={3}
             />
+          </div>
+
+          <div className="rounded-2xl border border-[#8CC850]/25 bg-gradient-to-br from-[#F4FAEC] via-white to-[#FFF8F2] p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex gap-3">
+                <div className="rounded-xl bg-[#8CC850]/15 p-2 text-[#003223]"><CalendarClock className="h-5 w-5" /></div>
+                <div>
+                  <Label htmlFor="order-scheduling" className="text-base font-bold text-[#003223]">Permitir pedidos agendados</Label>
+                  <p className="mt-1 text-sm text-[#003223]/65">O cliente poderá escolher uma data e um horário futuro no fechamento do pedido.</p>
+                </div>
+              </div>
+              <Switch
+                id="order-scheduling"
+                checked={orderScheduling.enabled}
+                onCheckedChange={(enabled) => setOrderScheduling((current) => ({ ...current, enabled }))}
+              />
+            </div>
+
+            {orderScheduling.enabled && (
+              <div className="mt-4 grid gap-4 md:grid-cols-4">
+                <div className="space-y-2">
+                  <Label htmlFor="schedule-lead">Antecedência mínima</Label>
+                  <Select
+                    value={String(orderScheduling.minimumLeadMinutes)}
+                    onValueChange={(value) => setOrderScheduling((current) => ({ ...current, minimumLeadMinutes: Number(value) }))}
+                  >
+                    <SelectTrigger id="schedule-lead"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="30">30 minutos</SelectItem>
+                      <SelectItem value="60">1 hora</SelectItem>
+                      <SelectItem value="120">2 horas</SelectItem>
+                      <SelectItem value="240">4 horas</SelectItem>
+                      <SelectItem value="1440">1 dia</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="schedule-preparation">Avisar para preparar</Label>
+                  <Select
+                    value={String(orderScheduling.preparationLeadMinutes)}
+                    onValueChange={(value) => setOrderScheduling((current) => ({ ...current, preparationLeadMinutes: Number(value) }))}
+                  >
+                    <SelectTrigger id="schedule-preparation"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="0">No horário</SelectItem>
+                      <SelectItem value="15">15 min antes</SelectItem>
+                      <SelectItem value="30">30 min antes</SelectItem>
+                      <SelectItem value="45">45 min antes</SelectItem>
+                      <SelectItem value="60">1 hora antes</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="schedule-interval">Intervalo dos horários</Label>
+                  <Select
+                    value={String(orderScheduling.slotIntervalMinutes)}
+                    onValueChange={(value) => setOrderScheduling((current) => ({ ...current, slotIntervalMinutes: Number(value) }))}
+                  >
+                    <SelectTrigger id="schedule-interval"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="15">15 minutos</SelectItem>
+                      <SelectItem value="30">30 minutos</SelectItem>
+                      <SelectItem value="60">1 hora</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="schedule-days">Agendar até</Label>
+                  <Select
+                    value={String(orderScheduling.maximumAdvanceDays)}
+                    onValueChange={(value) => setOrderScheduling((current) => ({ ...current, maximumAdvanceDays: Number(value) }))}
+                  >
+                    <SelectTrigger id="schedule-days"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="3">3 dias</SelectItem>
+                      <SelectItem value="7">7 dias</SelectItem>
+                      <SelectItem value="14">14 dias</SelectItem>
+                      <SelectItem value="30">30 dias</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

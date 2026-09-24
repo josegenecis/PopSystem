@@ -820,6 +820,9 @@ function buildOrderHtml(order: any, config: any, store?: any) {
   const storeCnpj = escapeHtml(store?.cnpj || '');
   const customerAddressLine = escapeHtml(resolveCustomerAddressLine(order));
   const cashReceipt = resolveCashReceiptAmounts(order);
+  const scheduledLabel = order?.scheduled_at && Number.isFinite(new Date(order.scheduled_at).getTime())
+    ? new Date(order.scheduled_at).toLocaleString('pt-BR')
+    : '';
 
   return `
       <!DOCTYPE html>
@@ -942,6 +945,7 @@ function buildOrderHtml(order: any, config: any, store?: any) {
           
           ${shouldPrintTicketCode(order) ? `<div class="center bold ticket-code">SENHA: ${order.order_number?.slice(-4) || '----'}</div>` : ''}
           <div class="center">Pedido #${order.order_number}</div>
+          ${scheduledLabel ? `<div class="center bold" style="font-size:1.15em;margin-top:5px;">PEDIDO AGENDADO<br/>${escapeHtml(scheduledLabel)}</div>` : ''}
           
           <div class="divider"></div>
           
@@ -1161,6 +1165,9 @@ function buildKitchenTicketHtml(order: any, config: any) {
   const orderTypeLabel = escapeHtml(getOrderTypeLabel(order));
   const orderNumber = escapeHtml(order?.order_number || '----');
   const ticketCode = escapeHtml(order?.order_number?.slice(-4) || '----');
+  const scheduledLabel = order?.scheduled_at && Number.isFinite(new Date(order.scheduled_at).getTime())
+    ? new Date(order.scheduled_at).toLocaleString('pt-BR')
+    : '';
 
   return `
       <!DOCTYPE html>
@@ -1233,6 +1240,7 @@ function buildKitchenTicketHtml(order: any, config: any) {
           ${shouldPrintTicketCode(order) ? `<div class="center bold ticket-code">SENHA: ${ticketCode}</div>` : ''}
           <div class="center">Pedido #${orderNumber}</div>
           <div class="center">${orderTypeLabel}</div>
+          ${scheduledLabel ? `<div class="center bold" style="font-size:1.15em;margin-top:5px;">PEDIDO AGENDADO<br/>${escapeHtml(scheduledLabel)}</div>` : ''}
 
           <div class="divider"></div>
 
@@ -1317,6 +1325,10 @@ function buildKitchenEscPosCommands(order: any, lineWidth: number) {
   bold(true);
   commands += text(`Pedido #${order.order_number || '----'}`);
   commands += text(`Tipo: ${getOrderTypeLabel(order)}`);
+  if (order?.scheduled_at && Number.isFinite(new Date(order.scheduled_at).getTime())) {
+    commands += text('*** PEDIDO AGENDADO ***');
+    commands += text(new Date(order.scheduled_at).toLocaleString('pt-BR'));
+  }
   line();
 
   left();
@@ -1655,6 +1667,7 @@ function buildPopConnectReceiptPayload(order: any, config: NormalizedPrintConfig
       logo_url: normalizeEscPosText(resolveReceiptLogoUrl(order.store, config)),
     },
     order_number: normalizeEscPosText(order.order_number),
+    scheduled_at: order.scheduled_at || null,
     order_id: normalizeEscPosText(order.id),
     print_job_id: normalizeEscPosText(order.__auto_print_job_id || ''),
     ticket_code: shouldPrintTicketCode(order),
@@ -2163,6 +2176,10 @@ export const PrinterService = {
     if (shouldPrintTicketCode(order)) commands += text(`SENHA: ${order.order_number?.slice(-4) || '----'}`);
     bold(true);
     commands += text(`Pedido #${order.order_number}`);
+    if (order?.scheduled_at && Number.isFinite(new Date(order.scheduled_at).getTime())) {
+      commands += text('*** PEDIDO AGENDADO ***');
+      commands += text(new Date(order.scheduled_at).toLocaleString('pt-BR'));
+    }
     line();
 
     // Cliente

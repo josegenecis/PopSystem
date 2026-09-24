@@ -10,6 +10,7 @@ import { useToast } from '@/hooks/use-toast';
 import { POPSYSTEM_ORDER_SOUND_TYPE, soundNotifications } from '@/utils/soundUtils';
 import { updateOrderStatus as updateOrderStatusRemote } from '@/utils/updateOrderStatus';
 import { PrinterService } from '@/utils/printerService';
+import { isScheduledOrderReady } from '@/lib/orderScheduling';
 
 interface PendingOrder {
   id: string;
@@ -19,6 +20,8 @@ interface PendingOrder {
   total: number;
   created_at: string;
   acceptance_status?: string;
+  scheduled_at?: string | null;
+  variations?: any;
 }
 
 // Um pedido antigo pode permanecer pendente por falha operacional ou de
@@ -194,7 +197,7 @@ const GlobalNotificationSystem: React.FC = () => {
 
       const { data, error } = await supabase
         .from('orders')
-        .select('id, order_number, customer_name, order_type, total, created_at, acceptance_status, status, variations')
+        .select('id, order_number, customer_name, order_type, total, created_at, scheduled_at, acceptance_status, status, variations')
         .eq('user_id', user.id)
         .or('acceptance_status.in.(pending_acceptance,awaiting_pix_payment),status.eq.pending')
         .order('created_at', { ascending: false });
@@ -204,7 +207,7 @@ const GlobalNotificationSystem: React.FC = () => {
         return [];
       }
 
-      const list = ((data || []) as PendingOrder[]).filter((order) => !isPdvCounterOrder(order) && !isTableServiceOrder(order));
+      const list = ((data || []) as PendingOrder[]).filter((order) => !isPdvCounterOrder(order) && !isTableServiceOrder(order) && isScheduledOrderReady(order));
       pendingOrdersRef.current = list;
       setPendingOrders(list);
       if (list.length > 0 && !isOnOrdersPageRef.current) {
@@ -231,6 +234,14 @@ const GlobalNotificationSystem: React.FC = () => {
           const newOrder = payload.new as PendingOrder;
           if (isAutoAcceptEnabled()) return;
           if (isPdvCounterOrder(newOrder)) return;
+          if (!isScheduledOrderReady(newOrder)) {
+            toast({
+              title: 'Pedido agendado recebido',
+              description: `Pedido ${newOrder.order_number} foi guardado para o horário escolhido.`,
+              duration: 5000,
+            });
+            return;
+          }
           if (isTableServiceOrder(newOrder)) {
             if (shouldAutoPrintTableServiceOrder(newOrder)) {
               try {
@@ -273,6 +284,10 @@ const GlobalNotificationSystem: React.FC = () => {
             return;
           }
           if (isPdvCounterOrder(updatedOrder)) {
+            setPendingOrders((prev) => prev.filter((order) => order.id !== updatedOrder.id));
+            return;
+          }
+          if (!isScheduledOrderReady(updatedOrder)) {
             setPendingOrders((prev) => prev.filter((order) => order.id !== updatedOrder.id));
             return;
           }

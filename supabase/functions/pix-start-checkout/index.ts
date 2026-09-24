@@ -68,6 +68,14 @@ const weekdayToDayKey: Record<string, string> = {
 }
 const storeTimeZone = getEnv('STORE_TIME_ZONE', 'BORACUME_STORE_TIME_ZONE') || 'America/Sao_Paulo'
 
+const isEnabledFutureSchedule = (scheduledValue: unknown, themeConfig: any) => {
+  const config = themeConfig?.orderScheduling
+  if (!config?.enabled) return false
+  const scheduledAt = new Date(String(scheduledValue || '')).getTime()
+  const maximumAdvanceDays = Math.min(30, Math.max(1, Number(config.maximumAdvanceDays) || 7))
+  return Number.isFinite(scheduledAt) && scheduledAt > Date.now() && scheduledAt <= Date.now() + maximumAdvanceDays * 86_400_000
+}
+
 const parseOpeningHours = (value: unknown) => {
   if (!value) return {}
   if (typeof value === 'string') {
@@ -200,7 +208,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
-      .select('opening_hours')
+      .select('opening_hours, theme_config')
       .eq('id', restaurantUserId)
       .maybeSingle()
 
@@ -209,7 +217,8 @@ Deno.serve(async (req: Request) => {
       return ok({ ok: false, error: 'profile_fetch_error', details: profileError })
     }
 
-    if (!isStoreOpenNow(profile?.opening_hours)) {
+    const isValidFutureSchedule = isEnabledFutureSchedule(orderPayload?.scheduled_at, profile?.theme_config)
+    if (!isStoreOpenNow(profile?.opening_hours) && !isValidFutureSchedule) {
       return ok({ ok: false, error: 'store_closed', message: 'A loja está fechada no momento.' })
     }
 

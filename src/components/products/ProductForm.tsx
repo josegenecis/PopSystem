@@ -27,6 +27,7 @@ import { CurrencyInput } from '@/components/ui/currency-input';
 import { IntegerInput } from '@/components/ui/integer-input';
 import { buildCategoryDescriptionWithMetadata, enrichCategoryWithMetadata } from '@/lib/category-metadata';
 import { invalidateSimpleVariationCaches } from '@/hooks/useSimpleVariations';
+import { DEFAULT_PRODUCT_AVAILABILITY, normalizeProductAvailability, type ProductAvailabilitySchedule } from '@/lib/productAvailability';
 
 // Defining the interface here to ensure consistency
 interface ProductItem {
@@ -54,6 +55,8 @@ interface ProductItem {
   is_highlight?: boolean;
   original_price?: number;
   discount_percentage?: number;
+  is_daily_special?: boolean;
+  availability_schedule?: ProductAvailabilitySchedule | null;
   fiscal_ncm?: string;
   fiscal_cfop?: string;
   fiscal_csosn?: string;
@@ -161,6 +164,8 @@ const ProductForm: React.FC<ProductFormProps> = ({ product, onSave, onCancel }) 
     is_highlight: false,
     original_price: 0,
     discount_percentage: 0,
+    is_daily_special: false,
+    availability_schedule: { ...DEFAULT_PRODUCT_AVAILABILITY },
     fiscal_ncm: '',
     fiscal_cfop: '',
     fiscal_csosn: '',
@@ -842,6 +847,11 @@ const ProductForm: React.FC<ProductFormProps> = ({ product, onSave, onCancel }) 
     if (!isUnsupported('is_highlight')) baseData.is_highlight = formData.is_highlight;
     if (!isUnsupported('original_price')) baseData.original_price = formData.original_price;
     if (!isUnsupported('discount_percentage')) baseData.discount_percentage = formData.discount_percentage;
+    if (!isUnsupported('is_daily_special')) baseData.is_daily_special = Boolean(formData.is_daily_special);
+    if (!isUnsupported('availability_schedule')) {
+      const availability = normalizeProductAvailability(formData.availability_schedule);
+      baseData.availability_schedule = availability.enabled ? availability : null;
+    }
     if (!isUnsupported('fiscal_ncm')) baseData.fiscal_ncm = formData.fiscal_ncm?.replace(/\D/g, '').slice(0, 8) || null;
     if (!isUnsupported('fiscal_cfop')) baseData.fiscal_cfop = formData.fiscal_cfop?.replace(/\D/g, '').slice(0, 4) || null;
     if (!isUnsupported('fiscal_csosn')) baseData.fiscal_csosn = formData.fiscal_csosn?.replace(/\D/g, '').slice(0, 3) || null;
@@ -1615,7 +1625,7 @@ const ProductForm: React.FC<ProductFormProps> = ({ product, onSave, onCancel }) 
     }, 800);
     setAutoSaveTimer(timer);
     return () => clearTimeout(timer);
-  }, [user?.id, loading, createdProductId, formData.name, formData.barcode, formData.price, formData.costing_mode, formData.manual_unit_cost, formData.category_id, formData.category, formData.description, formData.image_url, formData.available, formData.show_in_delivery, formData.receipt_ingredients_enabled, formData.receipt_ingredients, formData.is_highlight, formData.original_price, formData.track_stock, formData.stock_quantity, formData.low_stock_threshold, formData.fiscal_ncm, formData.fiscal_cfop, formData.fiscal_csosn, formData.fiscal_cst_pis, formData.fiscal_cst_cofins, formData.fiscal_origem, formData.fiscal_cest, formData.fiscal_beneficio, formData.fiscal_observacao, formData.fiscal_ibs_cbs_cst, formData.fiscal_cclass_trib, formData.fiscal_reducao_ibs, formData.fiscal_reducao_cbs, formData.fiscal_default_operation_id, stockSchemaSupported]);
+  }, [user?.id, loading, createdProductId, formData.name, formData.barcode, formData.price, formData.costing_mode, formData.manual_unit_cost, formData.category_id, formData.category, formData.description, formData.image_url, formData.available, formData.show_in_delivery, formData.receipt_ingredients_enabled, formData.receipt_ingredients, formData.is_highlight, formData.is_daily_special, formData.availability_schedule, formData.original_price, formData.track_stock, formData.stock_quantity, formData.low_stock_threshold, formData.fiscal_ncm, formData.fiscal_cfop, formData.fiscal_csosn, formData.fiscal_cst_pis, formData.fiscal_cst_cofins, formData.fiscal_origem, formData.fiscal_cest, formData.fiscal_beneficio, formData.fiscal_observacao, formData.fiscal_ibs_cbs_cst, formData.fiscal_cclass_trib, formData.fiscal_reducao_ibs, formData.fiscal_reducao_cbs, formData.fiscal_default_operation_id, stockSchemaSupported]);
 
 
   const onDragEnd = (result: DropResult) => {
@@ -3168,6 +3178,97 @@ const ProductForm: React.FC<ProductFormProps> = ({ product, onSave, onCancel }) 
               disabled={isUnsupported('is_highlight')}
             />
             <Label htmlFor="is_highlight" className="font-medium text-boracume-dark-green">Adicionar aos destaques</Label>
+          </div>
+
+          <div className="col-span-2 rounded-2xl border border-[#8CC850]/25 bg-white/90 p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <Label htmlFor="is_daily_special" className="font-semibold text-boracume-dark-green">Prato do dia</Label>
+                <p className="mt-1 text-xs text-[#003223]/60">Quando estiver disponível, este produto aparece em primeiro lugar no cardápio digital.</p>
+              </div>
+              <Switch
+                id="is_daily_special"
+                checked={Boolean(formData.is_daily_special)}
+                onCheckedChange={(checked) => setFormData((prev) => ({ ...prev, is_daily_special: checked }))}
+                disabled={isUnsupported('is_daily_special')}
+              />
+            </div>
+          </div>
+
+          <div className="col-span-2 rounded-2xl border border-[#FF6400]/20 bg-white/90 p-4">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <Label htmlFor="availability_schedule" className="font-semibold text-boracume-dark-green">Disponibilidade por dia e horário</Label>
+                <p className="mt-1 text-xs text-[#003223]/60">Fora dos períodos escolhidos, o produto não aparece no cardápio digital.</p>
+              </div>
+              <Switch
+                id="availability_schedule"
+                checked={normalizeProductAvailability(formData.availability_schedule).enabled}
+                onCheckedChange={(checked) => setFormData((prev) => ({
+                  ...prev,
+                  availability_schedule: { ...normalizeProductAvailability(prev.availability_schedule), enabled: checked },
+                }))}
+                disabled={isUnsupported('availability_schedule')}
+              />
+            </div>
+
+            {normalizeProductAvailability(formData.availability_schedule).enabled && (
+              <div className="mt-4 space-y-4">
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    ['Dom', 0], ['Seg', 1], ['Ter', 2], ['Qua', 3], ['Qui', 4], ['Sex', 5], ['Sáb', 6],
+                  ].map(([label, day]) => {
+                    const availability = normalizeProductAvailability(formData.availability_schedule);
+                    const selected = availability.days.includes(Number(day));
+                    return (
+                      <Button
+                        key={Number(day)}
+                        type="button"
+                        size="sm"
+                        variant={selected ? 'default' : 'outline'}
+                        className={selected ? 'h-9 min-w-12 rounded-full bg-[#003223] px-3 text-white hover:bg-[#164f3c]' : 'h-9 min-w-12 rounded-full px-3'}
+                        aria-label={String(label)}
+                        onClick={() => setFormData((prev) => {
+                          const current = normalizeProductAvailability(prev.availability_schedule);
+                          const nextDays = selected
+                            ? current.days.filter((value) => value !== Number(day))
+                            : [...current.days, Number(day)].sort();
+                          return { ...prev, availability_schedule: { ...current, days: nextDays } };
+                        })}
+                      >
+                        {String(label)}
+                      </Button>
+                    );
+                  })}
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="availability_start">Disponível a partir de</Label>
+                    <Input
+                      id="availability_start"
+                      type="time"
+                      value={normalizeProductAvailability(formData.availability_schedule).start_time}
+                      onChange={(event) => setFormData((prev) => ({
+                        ...prev,
+                        availability_schedule: { ...normalizeProductAvailability(prev.availability_schedule), start_time: event.target.value },
+                      }))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="availability_end">Até</Label>
+                    <Input
+                      id="availability_end"
+                      type="time"
+                      value={normalizeProductAvailability(formData.availability_schedule).end_time}
+                      onChange={(event) => setFormData((prev) => ({
+                        ...prev,
+                        availability_schedule: { ...normalizeProductAvailability(prev.availability_schedule), end_time: event.target.value },
+                      }))}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

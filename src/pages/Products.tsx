@@ -46,6 +46,13 @@ interface ProductItem {
   track_stock: boolean;
   stock_quantity: number;
   low_stock_threshold: number;
+  is_daily_special?: boolean;
+  availability_schedule?: {
+    enabled: boolean;
+    days: number[];
+    start_time: string;
+    end_time: string;
+  } | null;
 }
 
 interface Category {

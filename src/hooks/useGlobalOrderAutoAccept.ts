@@ -7,6 +7,7 @@ import { updateOrderStatus } from '@/utils/updateOrderStatus';
 import { POPSYSTEM_ORDER_SOUND_TYPE, soundNotifications } from '@/utils/soundUtils';
 import { useLocation } from 'react-router-dom';
 import { dequeuePendingOrderPrint, readPendingOrderPrintIds } from '@/services/orderPrintQueue';
+import { isScheduledOrderReady } from '@/lib/orderScheduling';
 
 const getAutoAcceptKey = (userId?: string) => `orders_auto_accept:${userId || 'local'}`;
 
@@ -92,7 +93,7 @@ export const useGlobalOrderAutoAccept = () => {
     const orderId = String(order?.id || '');
     const ownerId = String(order?.user_id || user?.id || '');
     if (!orderId || !ownerId || processingRef.current.has(orderId)) return;
-    if (!isPendingOrder(order) || isPdvCounterOrder(order) || isHiddenTableServiceOrder(order)) return;
+    if (!isPendingOrder(order) || isPdvCounterOrder(order) || isHiddenTableServiceOrder(order) || !isScheduledOrderReady(order)) return;
 
     processingRef.current.add(orderId);
     let accepted = false;

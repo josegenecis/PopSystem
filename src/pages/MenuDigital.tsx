@@ -29,6 +29,8 @@ import { getStoreOpenInfo } from '@/lib/storeHours';
 import { normalizeImageUrlForDisplay } from '@/utils/normalizeImageUrl';
 import { notifyOrderCreatedById } from '@/utils/orderNotifications';
 import { createMarketingContent, trackMarketingEvent } from '@/lib/marketingTracking';
+import { isProductAvailableAt } from '@/lib/productAvailability';
+import { buildOrderScheduleSlots, getOrderSchedulingConfig } from '@/lib/orderScheduling';
 // import ClubDiscountBanner from '@/components/menu/ClubDiscountBanner';
 
 interface Product {
@@ -46,6 +48,8 @@ interface Product {
   category_id: string;
   track_stock?: boolean;
   stock_quantity?: number;
+  is_daily_special?: boolean;
+  availability_schedule?: unknown;
 }
 
 interface Category {
@@ -83,6 +87,7 @@ const MenuDigital = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<string>('');
   const [openingProductId, setOpeningProductId] = useState<string | null>(null);
+  const [availabilityClock, setAvailabilityClock] = useState(() => new Date());
   const warnedStockRef = useRef<Set<string>>(new Set());
   const lastTrackedSearchRef = useRef('');
   const navigate = useNavigate();
@@ -99,25 +104,39 @@ const MenuDigital = () => {
     error: menuError 
   } = useMenuData({ userId: finalUserId, enableCache: true, cacheTTL: 5 });
   const storeOpenInfo = useMemo(() => getStoreOpenInfo((profile as any)?.opening_hours), [profile]);
+  const schedulingConfig = useMemo(() => getOrderSchedulingConfig((profile as any)?.theme_config), [profile]);
+  const availableProducts = useMemo(
+    () => (products as Product[]).filter((product) => isProductAvailableAt(product, availabilityClock)),
+    [products, availabilityClock],
+  );
+  const availableHighlights = useMemo(
+    () => (highlights as Product[]).filter((product) => isProductAvailableAt(product, availabilityClock)),
+    [highlights, availabilityClock],
+  );
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setAvailabilityClock(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const menuProductIds = useMemo(() => {
     return Array.from(
       new Set(
-        [...highlights, ...(products as any[])]
+        [...availableHighlights, ...(availableProducts as any[])]
           .map((p: any) => String(p?.id || '').trim())
           .filter(Boolean)
       )
     );
-  }, [highlights, products]);
+  }, [availableHighlights, availableProducts]);
   const priorityImageUrls = useMemo(() => {
     const urls = [
       normalizeImageUrlForDisplay(String((profile as any)?.banner_url || '')),
       normalizeImageUrlForDisplay(String((profile as any)?.logo_url || '')),
-      ...highlights.slice(0, 4).map((product) => normalizeImageUrlForDisplay(String(product.image_url || ''))),
-      ...(products as any[]).slice(0, 8).map((product) => normalizeImageUrlForDisplay(String(product?.image_url || '')))
+      ...availableHighlights.slice(0, 4).map((product) => normalizeImageUrlForDisplay(String(product.image_url || ''))),
+      ...(availableProducts as any[]).slice(0, 8).map((product) => normalizeImageUrlForDisplay(String(product?.image_url || '')))
     ].filter(Boolean);
 
     return Array.from(new Set(urls));
-  }, [profile, highlights, products]);
+  }, [profile, availableHighlights, availableProducts]);
   const variationsReadyFromCache = useMemo(() => {
     if (menuProductIds.length === 0) return true;
     return menuProductIds.every((id) => isSimpleVariationReady(id));
@@ -188,7 +207,7 @@ const MenuDigital = () => {
 
   useEffect(() => {
     const stockById = new Map<string, number>();
-    for (const p of products as any[]) {
+    for (const p of availableProducts as any[]) {
       const track = Boolean(p.track_stock);
       const available = Number(p.stock_quantity);
       if (track && Number.isFinite(available)) {
@@ -218,7 +237,7 @@ const MenuDigital = () => {
         warnedStockRef.current.delete(pid);
       }
     }
-  }, [products, cart]);
+  }, [availableProducts, cart]);
 
   // Pré-carregar imagens dos destaques para exibição instantânea
   useEffect(() => {
@@ -480,7 +499,7 @@ const MenuDigital = () => {
   };
 
   const linkedProducts = useMemo(() => {
-    return (products as Product[]).reduce<Record<string, { id: string; name: string; description?: string; price: number; imageUrl?: string }>>((acc, product) => {
+    return availableProducts.reduce<Record<string, { id: string; name: string; description?: string; price: number; imageUrl?: string }>>((acc, product) => {
       acc[String(product.id)] = {
         id: String(product.id),
         name: String(product.name || ''),
@@ -490,10 +509,10 @@ const MenuDigital = () => {
       };
       return acc;
     }, {});
-  }, [products]);
+  }, [availableProducts]);
 
   const handleQuickAddFromBanner = async (productId: string) => {
-    const product = (products as Product[]).find((item) => String(item.id) === String(productId));
+    const product = availableProducts.find((item) => String(item.id) === String(productId));
     if (!product) {
       toast({
         title: 'Produto não encontrado',
@@ -550,8 +569,18 @@ const MenuDigital = () => {
 
   const handlePlaceOrder = async (orderData: any) => {
     try {
-      if (!storeOpenInfo.isOpen) {
+      if (!storeOpenInfo.isOpen && !orderData.scheduled_at) {
         throw new Error('A loja está fechada no momento. Aguarde o horário de atendimento para finalizar seu pedido.');
+      }
+
+      if (orderData.scheduled_at) {
+        if (!schedulingConfig.enabled) {
+          throw new Error('O agendamento não está disponível para este restaurante.');
+        }
+        const validSlots = buildOrderScheduleSlots((profile as any)?.opening_hours, schedulingConfig, new Date());
+        if (!validSlots.some((slot) => slot.value === orderData.scheduled_at)) {
+          throw new Error('Este horário de agendamento não está mais disponível. Escolha outro horário.');
+        }
       }
 
       // Validar dados obrigatórios antes de enviar
@@ -584,7 +613,7 @@ const MenuDigital = () => {
           try {
             const { data: stockRows, error: stockError } = await (supabase as any)
               .from('products')
-              .select('id, track_stock, stock_quantity')
+              .select('id, track_stock, stock_quantity, availability_schedule')
               .eq('user_id', orderData.user_id)
               .in('id', productIds as any);
 
@@ -597,6 +626,10 @@ const MenuDigital = () => {
               const available = Number(row.stock_quantity);
               if (track && Number.isFinite(available) && requested > Math.max(0, Math.floor(available))) {
                 throw new Error(`Estoque insuficiente para ${nameByProduct[pid] || 'produto'}. Disponível: ${Math.max(0, Math.floor(available))}.`);
+              }
+              const availabilityDate = orderData.scheduled_at ? new Date(orderData.scheduled_at) : new Date();
+              if (!isProductAvailableAt(row, availabilityDate)) {
+                throw new Error(`${nameByProduct[pid] || 'Produto'} não está disponível no horário escolhido.`);
               }
             }
             lastError = null;
@@ -789,7 +822,7 @@ const MenuDigital = () => {
   };
 
   // Filtrar produtos por busca
-  const filteredProducts = products.filter(product => {
+  const filteredProducts = availableProducts.filter(product => {
     if (!searchQuery.trim()) return true;
     const query = searchQuery.toLowerCase();
     return (
@@ -817,11 +850,13 @@ const MenuDigital = () => {
   const visualCategories = categories.map((category) => ({
     ...category,
     image_url: normalizeImageUrlForDisplay(category.totem_image_url || '') ||
-      normalizeImageUrlForDisplay(products.find((product) => product.category_id === category.id)?.image_url || '') || null
+      normalizeImageUrlForDisplay(availableProducts.find((product) => product.category_id === category.id)?.image_url || '') || null
   }));
-  const featuredProducts = highlights.length > 0
-    ? highlights
-    : [...products].filter((product) => Number(product.order_count || 0) > 0 && Boolean(normalizeImageUrlForDisplay(product.image_url || ''))).sort((a, b) => Number(b.order_count || 0) - Number(a.order_count || 0)).slice(0, 8);
+  const dailySpecialProducts = availableProducts.filter((product) => Boolean(product.is_daily_special));
+  const dailySpecialIds = new Set(dailySpecialProducts.map((product) => product.id));
+  const featuredProducts = availableHighlights.length > 0
+    ? availableHighlights.filter((product) => !dailySpecialIds.has(product.id))
+    : [...availableProducts].filter((product) => !dailySpecialIds.has(product.id) && Number(product.order_count || 0) > 0 && Boolean(normalizeImageUrlForDisplay(product.image_url || ''))).sort((a, b) => Number(b.order_count || 0) - Number(a.order_count || 0)).slice(0, 8);
 
   if (menuLoading) {
     return (
@@ -953,6 +988,16 @@ const MenuDigital = () => {
 
         <div className="h-3 sm:h-5" />
         {/* Seção de Destaques */}
+        {dailySpecialProducts.length > 0 && (
+          <HighlightsSection
+            products={dailySpecialProducts}
+            onProductClick={handleProductClick}
+            title="Prato do dia"
+            subtitle="Disponível hoje por tempo limitado"
+            badges={['Prato do dia', 'Especial de hoje']}
+          />
+        )}
+
         {featuredProducts.length > 0 && (
           <HighlightsSection
             products={featuredProducts}
@@ -964,6 +1009,12 @@ const MenuDigital = () => {
 
         {/* Produtos por Categoria */}
         <div className="space-y-6 sm:space-y-8">
+          {productsByCategory.length === 0 && (
+            <div className="rounded-3xl border border-dashed border-slate-300 bg-white/70 px-6 py-10 text-center">
+              <h2 className="text-lg font-black" style={{ color: 'var(--menu-secondary, #063D2E)' }}>Nenhum produto disponível agora</h2>
+              <p className="mt-2 text-sm text-slate-500">Consulte os dias e horários de disponibilidade ou tente novamente mais tarde.</p>
+            </div>
+          )}
           {productsByCategory.map((category) => (
             <section
               key={category.id}
@@ -1024,6 +1075,8 @@ const MenuDigital = () => {
         deliveryZones={deliveryZones}
         deliverySettings={deliverySettings}
         userId={finalUserId}
+        schedulingConfig={schedulingConfig}
+        openingHours={(profile as any)?.opening_hours}
         isStoreOpen={storeOpenInfo.isOpen}
         storeClosedMessage={storeOpenInfo.detail}
         onPixPaid={(orderId) => {
@@ -1042,7 +1095,7 @@ const MenuDigital = () => {
         itemCount={getCartItemCount()}
         total={getCartTotal()}
         onOpenCart={() => {
-          if (!storeOpenInfo.isOpen) {
+          if (!storeOpenInfo.isOpen && !schedulingConfig.enabled) {
             toast({
               title: 'Loja fechada',
               description: storeOpenInfo.detail,

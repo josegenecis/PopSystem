@@ -900,6 +900,7 @@ export type Database = {
       orders: {
         Row: {
           acceptance_status: string | null
+          scheduled_at: string | null
           change_amount: number | null
           created_at: string
           customer_address: string | null
@@ -931,6 +932,7 @@ export type Database = {
         }
         Insert: {
           acceptance_status?: string | null
+          scheduled_at?: string | null
           change_amount?: number | null
           created_at?: string
           customer_address?: string | null
@@ -962,6 +964,7 @@ export type Database = {
         }
         Update: {
           acceptance_status?: string | null
+          scheduled_at?: string | null
           change_amount?: number | null
           created_at?: string
           customer_address?: string | null
@@ -1169,6 +1172,7 @@ export type Database = {
           available: boolean | null
           available_delivery: boolean | null
           available_pdv: boolean | null
+          availability_schedule: Json | null
           category: string
           category_id: string | null
           costing_mode: string
@@ -1176,6 +1180,7 @@ export type Database = {
           description: string | null
           id: string
           image_url: string | null
+          is_daily_special: boolean
           internal_code: string
           manual_unit_cost: number | null
           name: string
@@ -1193,6 +1198,7 @@ export type Database = {
           available?: boolean | null
           available_delivery?: boolean | null
           available_pdv?: boolean | null
+          availability_schedule?: Json | null
           category: string
           category_id?: string | null
           costing_mode?: string
@@ -1200,6 +1206,7 @@ export type Database = {
           description?: string | null
           id?: string
           image_url?: string | null
+          is_daily_special?: boolean
           internal_code?: string
           manual_unit_cost?: number | null
           name: string
@@ -1217,6 +1224,7 @@ export type Database = {
           available?: boolean | null
           available_delivery?: boolean | null
           available_pdv?: boolean | null
+          availability_schedule?: Json | null
           category?: string
           category_id?: string | null
           costing_mode?: string
@@ -1224,6 +1232,7 @@ export type Database = {
           description?: string | null
           id?: string
           image_url?: string | null
+          is_daily_special?: boolean
           internal_code?: string
           manual_unit_cost?: number | null
           name?: string

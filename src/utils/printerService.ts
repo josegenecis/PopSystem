@@ -1669,8 +1669,9 @@ function buildPopConnectReceiptPayload(order: any, config: NormalizedPrintConfig
     order_number: normalizeEscPosText(order.order_number),
     scheduled_at: order.scheduled_at || null,
     order_id: normalizeEscPosText(order.id),
-    print_job_id: normalizeEscPosText(order.__auto_print_job_id || ''),
+    print_job_id: normalizeEscPosText(order.__auto_print_job_id || order.__kitchen_print_job_id || ''),
     ticket_code: shouldPrintTicketCode(order),
+    table_number: normalizeEscPosText(order.table_number || ''),
     customer_name: normalizeEscPosText(order.customer_name || 'Balcao'),
     customer_phone: normalizeEscPosText(order.customer_phone || ''),
     customer_address: normalizeEscPosText(order.customer_address || ''),
@@ -1986,6 +1987,61 @@ export const PrinterService = {
     }
     this.printHtml(enrichedOrder, config);
     return { success: true };
+  },
+
+  // Lançamentos de mesa já representam uma solicitação de preparo. Envia
+  // somente o lote recém-adicionado para a rota da cozinha, sem imprimir o
+  // recibo do cliente e sem depender da tela de Pedidos estar aberta.
+  async printKitchenTicket(order: any) {
+    const { data: settings } = await (supabase as any)
+      .from('printer_settings')
+      .select('*')
+      .eq('user_id', order.user_id)
+      .maybeSingle();
+    const config = normalizePrintConfig(settings);
+    const printerConfig = loadPrinterConfig();
+    const configuredUrl = String(printerConfig.bridge.websocketUrl || 'ws://localhost:8766').trim();
+    const urls = configuredUrl ? [configuredUrl] : [];
+    const discoveredUrl = await discoverBridgeWebsocketUrl({ timeoutMs: 650 });
+    if (discoveredUrl && !urls.includes(discoveredUrl)) urls.push(discoveredUrl);
+
+    const normalizedItems = (Array.isArray(order.items) ? order.items : []).map((item: any) => ({
+      ...item,
+      variations: Array.from(new Set([
+        ...(Array.isArray(item.variations) ? item.variations : []),
+        ...(Array.isArray(item.options) ? item.options : []),
+      ].map((value) => String(value || '').trim()).filter(Boolean))),
+    }));
+    const payload = buildPopConnectReceiptPayload({ ...order, items: normalizedItems }, config);
+
+    let bridgeWasAvailable = false;
+    for (const websocketUrl of urls) {
+      const result = await bridgePrintReceipt({
+        websocketUrl,
+        transport: printerConfig.bridge.transport,
+        address: printerConfig.bridge.address,
+        payload,
+        route: 'kitchen',
+        template: 'kitchen_ticket',
+      });
+      bridgeWasAvailable = bridgeWasAvailable || result.available;
+      if (result.printed) return { success: true };
+      if (result.available) {
+        return {
+          success: false,
+          error: result.printerConnected
+            ? 'O Pop Connect não conseguiu imprimir na cozinha. Confira a impressora dessa rota.'
+            : 'Configure uma impressora para a cozinha no Pop Connect.',
+        };
+      }
+    }
+
+    return {
+      success: false,
+      error: bridgeWasAvailable
+        ? 'O Pop Connect não conseguiu imprimir na cozinha.'
+        : 'Abra o Pop Connect para imprimir a via da cozinha.',
+    };
   },
 
   async openCashDrawer() {

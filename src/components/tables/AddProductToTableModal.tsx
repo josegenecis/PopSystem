@@ -15,6 +15,7 @@ import {
   getTableManagerOrderStatus,
   shouldCreateTableManagerOrder,
 } from '@/utils/tableOrderFlow';
+import { PrinterService } from '@/utils/printerService';
 
 interface Product {
   id: string;
@@ -225,6 +226,78 @@ const AddProductToTableModal: React.FC<AddProductToTableModalProps> = ({
       const tableFlow = await fetchTableOrderFlowSettings(user.id);
       const itemsForKitchen = filterItemsForTableManagerOrder(orderItems, tableFlow);
       const canCreateKitchenOrder = shouldCreateTableManagerOrder(tableFlow) && itemsForKitchen.length > 0;
+      let kitchenPrintWarning = '';
+      let kitchenDispatchStatus: 'not_created' | 'pending_acceptance' | 'printed' = 'not_created';
+
+      const createKitchenOrder = async () => {
+        if (!canCreateKitchenOrder) return;
+
+        const orderStatus = getTableManagerOrderStatus(tableFlow);
+        const orderTotal = itemsForKitchen.reduce((sum: number, item: any) => sum + Number(item.subtotal || 0), 0);
+        const orderNumber = `MESA-${table.table_number}-${Date.now().toString().slice(-5)}`;
+        const { data: createdOrder, error: orderError } = await supabase
+          .from('orders')
+          .insert({
+            user_id: user.id,
+            order_number: orderNumber,
+            customer_name: customerName.trim() || `Mesa ${table.table_number}`,
+            customer_phone: customerPhone.trim() || '',
+            items: itemsForKitchen,
+            total: orderTotal,
+            payment_method: 'pendente',
+            order_type: 'dine_in',
+            table_id: table.id,
+            status: orderStatus.status,
+            acceptance_status: orderStatus.acceptance_status,
+            variations: {
+              source: 'TABLES_MODAL',
+              table_order_flow: tableFlow.mode,
+              show_in_manager: tableFlow.showInManager,
+              auto_accept: tableFlow.autoAccept,
+            },
+          })
+          .select('*')
+          .single();
+
+        if (orderError) throw orderError;
+
+        // No fluxo manual, aceitar o pedido continua sendo o gatilho da
+        // impressão. No automático, o lançamento da mesa precisa imprimir já.
+        if (orderStatus.status !== 'preparing') {
+          kitchenDispatchStatus = 'pending_acceptance';
+          return;
+        }
+
+        const printResult = await PrinterService.printKitchenTicket({
+          ...createdOrder,
+          user_id: user.id,
+          order_number: orderNumber,
+          table_number: table.table_number,
+          customer_name: customerName.trim() || `Mesa ${table.table_number}`,
+          order_type: 'dine_in',
+          items: itemsForKitchen,
+          total: orderTotal,
+          created_at: createdOrder?.created_at || new Date().toISOString(),
+          __kitchen_print_job_id: `table:${createdOrder?.id || orderNumber}`,
+        });
+
+        if (!printResult?.success) {
+          kitchenPrintWarning = printResult?.error || 'A via da cozinha não foi impressa.';
+          return;
+        }
+
+        kitchenDispatchStatus = 'printed';
+      };
+
+      const kitchenSuccessDescription = () => {
+        if (kitchenDispatchStatus === 'printed') {
+          return `Novos itens da Mesa ${table.table_number} enviados para a cozinha.`;
+        }
+        if (kitchenDispatchStatus === 'pending_acceptance') {
+          return `Pedido da Mesa ${table.table_number} aguardando aceite antes de seguir para a cozinha.`;
+        }
+        return `Produtos adicionados ao pedido da Mesa ${table.table_number}.`;
+      };
 
       if (existingAccount) {
         let currentItems = [];
@@ -253,37 +326,12 @@ const AddProductToTableModal: React.FC<AddProductToTableModalProps> = ({
 
         if (updateError) throw updateError;
 
-        if (canCreateKitchenOrder) {
-          const orderStatus = getTableManagerOrderStatus(tableFlow);
-          const orderTotal = itemsForKitchen.reduce((sum: number, item: any) => sum + Number(item.subtotal || 0), 0);
-          const { error: orderError } = await supabase
-            .from('orders')
-            .insert({
-              user_id: user.id,
-              order_number: `MESA-${table.table_number}-${Date.now().toString().slice(-5)}`,
-              customer_name: customerName.trim() || `Mesa ${table.table_number}`,
-              customer_phone: customerPhone.trim() || '',
-              items: itemsForKitchen,
-              total: orderTotal,
-              payment_method: 'pendente',
-              order_type: 'dine_in',
-              table_id: table.id,
-              status: orderStatus.status,
-              acceptance_status: orderStatus.acceptance_status,
-              variations: {
-                source: 'TABLES_MODAL',
-                table_order_flow: tableFlow.mode,
-                show_in_manager: tableFlow.showInManager,
-                auto_accept: tableFlow.autoAccept,
-              },
-            });
-
-          if (orderError) throw orderError;
-        }
+        await createKitchenOrder();
 
         toast({
-          title: "Produtos adicionados!",
-          description: `Produtos adicionados ao pedido da Mesa ${table.table_number}.`,
+          title: kitchenPrintWarning ? 'Itens salvos; confira a cozinha' : 'Produtos adicionados!',
+          description: kitchenPrintWarning || kitchenSuccessDescription(),
+          variant: kitchenPrintWarning ? 'destructive' : 'default',
         });
       } else {
         const accountData = {
@@ -307,38 +355,12 @@ const AddProductToTableModal: React.FC<AddProductToTableModalProps> = ({
           .update({ status: 'occupied' })
           .eq('id', table.id);
 
-        if (canCreateKitchenOrder) {
-          const orderNumber = `MESA-${table.table_number}-${Date.now().toString().slice(-5)}`;
-          const orderStatus = getTableManagerOrderStatus(tableFlow);
-          const orderTotal = itemsForKitchen.reduce((sum: number, item: any) => sum + Number(item.subtotal || 0), 0);
-          const { error: orderError } = await supabase
-            .from('orders')
-            .insert({
-              user_id: user.id,
-              order_number: orderNumber,
-              customer_name: customerName.trim() || `Mesa ${table.table_number}`,
-              customer_phone: customerPhone || '',
-              items: itemsForKitchen,
-              total: orderTotal,
-              payment_method: 'pendente',
-              order_type: 'dine_in',
-              table_id: table.id,
-              status: orderStatus.status,
-              acceptance_status: orderStatus.acceptance_status,
-              variations: {
-                source: 'TABLES_MODAL',
-                table_order_flow: tableFlow.mode,
-                show_in_manager: tableFlow.showInManager,
-                auto_accept: tableFlow.autoAccept,
-              },
-            });
-
-          if (orderError) throw orderError;
-        }
+        await createKitchenOrder();
 
         toast({
-          title: "Mesa lançada!",
-          description: `Produtos adicionados à Mesa ${table.table_number}.`,
+          title: kitchenPrintWarning ? 'Mesa lançada; confira a cozinha' : 'Mesa lançada!',
+          description: kitchenPrintWarning || kitchenSuccessDescription(),
+          variant: kitchenPrintWarning ? 'destructive' : 'default',
         });
       }
 

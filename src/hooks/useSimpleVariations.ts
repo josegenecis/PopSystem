@@ -48,8 +48,8 @@ type VariationPricingContext = {
 export type VariationPresence = 'unknown' | 'none' | 'has';
 
 const TTL_MS = 10 * 60 * 1000;
-const LS_PREFIX = 'boracume_variations_v4:';
-const LS_PRESENCE_PREFIX = 'boracume_variations_presence_v2:';
+const LS_PREFIX = 'boracume_variations_v5:';
+const LS_PRESENCE_PREFIX = 'boracume_variations_presence_v3:';
 const cache = new Map<string, { ts: number; data: Variation[] }>();
 const inflight = new Map<string, Promise<Variation[]>>();
 const presenceCache = new Map<string, { ts: number; status: Exclude<VariationPresence, 'unknown'> }>();
@@ -768,4 +768,3 @@ export function useSimpleVariations() {
     getSelectedVariationsTextWithReceiptLabels,
   };
 }
-

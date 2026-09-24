@@ -82,6 +82,12 @@ const Subscription = () => {
   const [periodOffer, setPeriodOffer] = useState<PeriodOffer | null>(null);
   const checkoutInFlightRef = useRef(false);
   const checkoutRequestIdRef = useRef(crypto.randomUUID());
+  const currentPeriodEnd = subscription?.current_period_end
+    ? new Date(subscription.current_period_end).getTime()
+    : 0;
+  const hasUnexpiredActivePeriod = subscription?.status === 'active'
+    && Number.isFinite(currentPeriodEnd)
+    && currentPeriodEnd > Date.now();
 
   useEffect(() => {
     refreshSubscription();
@@ -652,7 +658,7 @@ const Subscription = () => {
             const displayedPricing = calculatePlanPeriodPrice(plan, displayedPeriod, selectedStores);
             const selectedCycle = getBillingPeriodConfig(displayedPeriod).asaasCycle;
             const isCurrentPlan = currentCatalogPlan?.slug === plan.slug
-              && subscription?.status === 'active';
+              && hasUnexpiredActivePeriod;
             const isCurrentOffer = isCurrentPlan
               && String(subscription?.billing_cycle || 'MONTHLY') === selectedCycle;
             const disableCurrentOffer = isCurrentOffer && pricingMode === 'yearly';
@@ -895,11 +901,11 @@ const Subscription = () => {
                   semiannual: 'Mais tranquilidade',
                   yearly: 'O melhor valor por mês',
                 }[period];
-                const isExactCurrentPeriod = subscription?.status === 'active'
+                const isExactCurrentPeriod = hasUnexpiredActivePeriod
                   && Number(subscription.plan_id) === Number(periodOffer?.planId)
                   && Number(subscription.store_count || 1) === offeredStoreCount
                   && String(subscription.billing_cycle || 'MONTHLY') === periodPricing.asaasCycle;
-                const isShorterSamePlanPeriod = subscription?.status === 'active'
+                const isShorterSamePlanPeriod = hasUnexpiredActivePeriod
                   && Number(subscription.plan_id) === Number(periodOffer?.planId)
                   && Number(subscription.store_count || 1) === offeredStoreCount
                   && periodPricing.months < Number(subscription.billing_months || 1);

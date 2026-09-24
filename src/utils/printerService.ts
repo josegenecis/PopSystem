@@ -2038,7 +2038,7 @@ export const PrinterService = {
     }
   },
 
-  async printCashReport(report: { title: string; lines: string[]; userId?: string; hideStoreHeader?: boolean; footerText?: string }) {
+  async printCashReport(report: { title: string; lines: string[]; userId?: string; hideStoreHeader?: boolean; footerText?: string; suppressErrorToast?: boolean }) {
     const api = typeof window !== 'undefined' ? (window as any)?.electronAPI : null;
     const isElectron = Boolean(api?.printSystem);
     let store: any = null;
@@ -2115,7 +2115,7 @@ export const PrinterService = {
         },
       });
       bridgeWasAvailable = bridgeWasAvailable || result.available;
-      if (result.printed) return;
+      if (result.printed) return { success: true, channel: 'popconnect' as const };
     }
 
     if (isElectron) {
@@ -2124,14 +2124,17 @@ export const PrinterService = {
         resp = await printReportElectron(htmlContent);
       }
       if (!resp.success) {
-        toast.error(resp.error || 'Falha ao imprimir');
+        if (!report.suppressErrorToast) toast.error(resp.error || 'Falha ao imprimir');
+        return { success: false, error: resp.error || 'Falha ao imprimir' };
       }
-      return;
+      return { success: true, channel: 'desktop' as const };
     }
 
-    toast.error(bridgeWasAvailable
-      ? 'O Pop Connect não conseguiu imprimir o relatório do caixa. Confira a impressora selecionada.'
-      : 'Abra o Pop Connect para imprimir o relatório do caixa.');
+    const error = bridgeWasAvailable
+      ? 'O Pop Connect não conseguiu imprimir. Confira a impressora selecionada.'
+      : 'Abra o Pop Connect para imprimir.';
+    if (!report.suppressErrorToast) toast.error(error);
+    return { success: false, error };
   },
 
   // Impressão USB (ESC/POS)

@@ -149,6 +149,7 @@ const TableDetailsModal: React.FC<TableDetailsModalProps> = ({
 }) => {
   const [currentOrder, setCurrentOrder] = useState<TableOrder | null>(null);
   const [loading, setLoading] = useState(false);
+  const [printingPartial, setPrintingPartial] = useState(false);
   const [selectedTransferTable, setSelectedTransferTable] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<CheckoutPaymentMethod>('pix');
   const [paymentLines, setPaymentLines] = useState<PaymentLine[]>([]);
@@ -435,45 +436,51 @@ const TableDetailsModal: React.FC<TableDetailsModalProps> = ({
     }
   };
 
-  const handlePrintPartial = () => {
-    if (!currentOrder || !table) return;
+  const handlePrintPartial = async () => {
+    if (!currentOrder || !table || !user?.id || printingPartial) return;
 
-    // Criar conteúdo para impressão
-    const printContent = `
-      <div style="font-family: monospace; font-size: 12px; max-width: 300px;">
-        <h3 style="text-align: center; margin-bottom: 10px;">COMANDA PARCIAL</h3>
-        <p><strong>Mesa:</strong> ${table.table_number}</p>
-        <p><strong>Pedido:</strong> ${currentOrder.order_number}</p>
-        <p><strong>Cliente:</strong> ${currentOrder.customer_name}</p>
-        <p><strong>Data:</strong> ${new Date(currentOrder.created_at).toLocaleString('pt-BR')}</p>
-        <hr>
-        <h4>ITENS:</h4>
-        ${currentOrder.items.map(item => `
-          <div style="margin-bottom: 8px;">
-            <div><strong>${formatSaleQuantity(item.quantity, item.sale_unit)} ${item.product_name}</strong></div>
-            ${item.options ? item.options.map(opt => `<div style="margin-left: 10px;">• ${opt}</div>`).join('') : ''}
-            ${item.notes ? `<div style="margin-left: 10px; font-style: italic;">Obs: ${item.notes}</div>` : ''}
-            <div style="text-align: right;">${formatBRL(item.subtotal)}</div>
-          </div>
-        `).join('')}
-        <hr>
-        <div style="text-align: right; font-weight: bold;">
-          <p>TOTAL: ${formatBRL(currentOrder.total)}</p>
-        </div>
-      </div>
-    `;
+    setPrintingPartial(true);
+    try {
+      const itemLines = currentOrder.items.flatMap((item) => [
+        `${formatSaleQuantity(item.quantity, item.sale_unit)} ${item.product_name}`,
+        ...(item.options || []).map((option) => `  + ${option}`),
+        ...(item.notes ? [`  Obs: ${item.notes}`] : []),
+        `  ${formatBRL(item.subtotal)}`,
+        '-',
+      ]);
+      const result = await PrinterService.printCashReport({
+        title: 'COMANDA PARCIAL',
+        userId: user.id,
+        hideStoreHeader: true,
+        suppressErrorToast: true,
+        lines: [
+          `Mesa: ${table.table_number}`,
+          `Pedido: ${currentOrder.order_number}`,
+          `Cliente: ${currentOrder.customer_name}`,
+          `Data: ${new Date(currentOrder.created_at).toLocaleString('pt-BR')}`,
+          '=',
+          'ITENS:',
+          ...itemLines,
+          `TOTAL: ${formatBRL(currentOrder.total)}`,
+        ],
+      });
 
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(printContent);
-      printWindow.document.close();
-      printWindow.print();
+      if (!result?.success) throw new Error(result?.error || 'Não foi possível imprimir a comanda parcial.');
+
+      toast({
+        title: 'Comanda impressa',
+        description: 'A comanda parcial foi enviada ao Pop Connect.',
+      });
+    } catch (error) {
+      console.error('Erro ao imprimir comanda parcial:', error);
+      toast({
+        title: 'Não foi possível imprimir',
+        description: error instanceof Error ? error.message : 'Confira se o Pop Connect está aberto e com a impressora selecionada.',
+        variant: 'destructive',
+      });
+    } finally {
+      setPrintingPartial(false);
     }
-
-    toast({
-      title: "Impressão enviada",
-      description: "Comanda parcial enviada para impressão.",
-    });
   };
 
   const executeDeferToStaff = async (authorizedWaiterId: string) => {
@@ -1419,11 +1426,12 @@ const TableDetailsModal: React.FC<TableDetailsModalProps> = ({
                 <CardContent>
                   <Button
                     onClick={handlePrintPartial}
+                    disabled={printingPartial}
                     variant="outline"
                     className="w-full"
                     size="sm"
                   >
-                    Comanda Parcial
+                    {printingPartial ? 'Imprimindo...' : 'Comanda Parcial'}
                   </Button>
                 </CardContent>
               </Card>

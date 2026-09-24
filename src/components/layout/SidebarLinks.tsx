@@ -30,7 +30,7 @@ const SidebarLinks = () => {
     { to: '/pdv', icon: CreditCard, label: 'PDV (Ponto de Venda)' },
     { to: '/mesas', icon: Utensils, label: 'Mesas' },
     { to: '/produtos', icon: ShoppingBag, label: 'Produtos' },
-    { to: '/cardapio', icon: QrCode, label: 'Cardápio Digital' },
+    { to: '/configuracoes?tab=menu-orders&section=digital', icon: QrCode, label: 'Cardápio e Pedidos' },
     { to: '/estoque', icon: Package, label: 'Estoque' },
     { to: '/compras', icon: ShoppingBag, label: 'Compras e Fornecedores' },
     { to: '/cozinha', icon: ChefHat, label: 'Cozinha (KDS)' },

@@ -115,7 +115,6 @@ const CollapsibleSidebar = () => {
         { to: '/caixa', label: 'Caixa Geral', feature: 'finance', area: 'cash' },
         { to: '/pdv', label: 'PDV / Frente de Caixa', feature: 'pdv', area: 'pdv' },
         { to: '/mesas', label: 'Gestão de Mesas', feature: 'tables', area: 'tables' },
-        { to: '/mesas/regras', label: 'Regras de Mesa/Comanda', feature: 'tables', area: 'tables' },
       ]
     },
     {
@@ -176,8 +175,7 @@ const CollapsibleSidebar = () => {
         { to: '/produtos', label: 'Produtos', feature: 'products', area: 'products' },
         { to: '/produtos?tab=categories', label: 'Categorias', feature: 'products', area: 'products' },
         { to: '/produtos?tab=global-variations', label: 'Adicionais', feature: 'products', area: 'products' },
-        { to: '/cardapio', label: 'Acessar cardápio', feature: 'menu', area: 'products' },
-        { to: '/configuracoes?tab=appearance', label: 'Cores do Cardápio', feature: 'settings', area: 'settings' },
+        { to: '/configuracoes?tab=menu-orders&section=digital', label: 'Configurar cardápio', feature: 'settings', area: 'settings' },
       ]
     },
     {
@@ -201,11 +199,8 @@ const CollapsibleSidebar = () => {
       label: 'Configurações',
       items: [
         { to: '/configuracoes?tab=profile', label: 'Perfil', feature: 'settings', area: 'settings' },
-        { to: '/configuracoes?tab=appearance', label: 'Aparência', feature: 'settings', area: 'settings' },
-        { to: '/configuracoes?tab=notifications', label: 'Notificações', feature: 'settings', area: 'settings' },
-        { to: '/configuracoes?tab=hardware', label: 'Impressoras e Balanças', feature: 'hardware', area: 'hardware' },
+        { to: '/configuracoes?tab=menu-orders', label: 'Cardápio e pedidos', feature: 'settings', area: 'settings' },
         { to: '/configuracoes?tab=whatsapp', label: 'Conectar WhatsApp', feature: 'whatsapp', area: 'whatsapp' },
-        { to: '/configuracoes?tab=delivery', label: 'Delivery', feature: 'delivery', area: 'deliveryAreas' },
         { to: '/entregadores', label: 'Motoboys & Entregas', feature: 'deliveryTeam', area: 'deliveryTeam' },
         { to: '/fiscal', label: 'Configurações fiscais', feature: 'fiscal', area: 'fiscal' },
         { to: '/configuracoes?tab=ifood', label: <div className="flex items-center"><IfoodLogo className="h-4 w-auto" /></div>, title: 'iFood', feature: 'ifood', area: 'integrations' },

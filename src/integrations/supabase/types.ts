@@ -1185,6 +1185,7 @@ export type Database = {
           manual_unit_cost: number | null
           name: string
           price: number
+          preparation_route: string
           receipt_ingredients: string | null
           receipt_ingredients_enabled: boolean | null
           send_to_kds: boolean | null
@@ -1211,6 +1212,7 @@ export type Database = {
           manual_unit_cost?: number | null
           name: string
           price: number
+          preparation_route?: string
           receipt_ingredients?: string | null
           receipt_ingredients_enabled?: boolean | null
           send_to_kds?: boolean | null
@@ -1237,6 +1239,7 @@ export type Database = {
           manual_unit_cost?: number | null
           name?: string
           price?: number
+          preparation_route?: string
           receipt_ingredients?: string | null
           receipt_ingredients_enabled?: boolean | null
           send_to_kds?: boolean | null

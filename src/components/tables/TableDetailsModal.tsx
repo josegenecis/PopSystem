@@ -47,6 +47,8 @@ interface OrderItem {
   subtotal: number;
   options?: string[];
   notes?: string;
+  preparation_route?: 'kitchen' | 'bar' | 'none';
+  send_to_kds?: boolean;
 }
 
 interface TableOrder {
@@ -151,6 +153,7 @@ const TableDetailsModal: React.FC<TableDetailsModalProps> = ({
   const [currentOrder, setCurrentOrder] = useState<TableOrder | null>(null);
   const [loading, setLoading] = useState(false);
   const [printingPartial, setPrintingPartial] = useState(false);
+  const [printingPreparation, setPrintingPreparation] = useState(false);
   const [selectedTransferTable, setSelectedTransferTable] = useState<string>('');
   const [paymentMethod, setPaymentMethod] = useState<CheckoutPaymentMethod>('pix');
   const [paymentLines, setPaymentLines] = useState<PaymentLine[]>([]);
@@ -481,6 +484,51 @@ const TableDetailsModal: React.FC<TableDetailsModalProps> = ({
       });
     } finally {
       setPrintingPartial(false);
+    }
+  };
+
+  const handlePrintPreparation = async () => {
+    if (!currentOrder || !table || !user?.id || printingPreparation) return;
+    setPrintingPreparation(true);
+    try {
+      const productIds = Array.from(new Set(currentOrder.items.map((item) => item.product_id).filter(Boolean)));
+      const { data: productRows, error } = productIds.length
+        ? await (supabase.from('products') as any)
+            .select('id,preparation_route,send_to_kds')
+            .eq('user_id', user.id)
+            .in('id', productIds)
+        : { data: [], error: null };
+      if (error) throw error;
+      const routeByProduct = new Map((productRows || []).map((product: any) => [
+        String(product.id),
+        String(product.preparation_route || (product.send_to_kds ? 'kitchen' : 'none')),
+      ]));
+      const result = await PrinterService.printPreparationTickets({
+        ...currentOrder,
+        user_id: user.id,
+        table_id: table.id,
+        table_number: table.table_number,
+        order_type: 'dine_in',
+        items: currentOrder.items.map((item) => ({
+          ...item,
+          preparation_route: routeByProduct.get(String(item.product_id)) || item.preparation_route || (item.send_to_kds ? 'kitchen' : 'none'),
+        })),
+      });
+      if (!result?.success) throw new Error(result?.error || 'Não foi possível imprimir as vias de preparo.');
+      toast({
+        title: result?.skipped ? 'Nenhum item de preparo' : 'Vias de preparo impressas',
+        description: result?.skipped
+          ? 'Os produtos desta conta estão configurados para não imprimir no preparo.'
+          : 'Cozinha e bar/copa receberam somente os itens destinados a cada setor.',
+      });
+    } catch (error) {
+      toast({
+        title: 'Não foi possível imprimir o preparo',
+        description: error instanceof Error ? error.message : 'Confira as impressoras configuradas no Pop Connect.',
+        variant: 'destructive',
+      });
+    } finally {
+      setPrintingPreparation(false);
     }
   };
 
@@ -1425,7 +1473,7 @@ const TableDetailsModal: React.FC<TableDetailsModalProps> = ({
                     Imprimir
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-2">
                   <Button
                     onClick={handlePrintPartial}
                     disabled={printingPartial}
@@ -1434,6 +1482,14 @@ const TableDetailsModal: React.FC<TableDetailsModalProps> = ({
                     size="sm"
                   >
                     {printingPartial ? 'Imprimindo...' : 'Comanda Parcial'}
+                  </Button>
+                  <Button
+                    onClick={handlePrintPreparation}
+                    disabled={printingPreparation}
+                    className="w-full bg-emerald-700 hover:bg-emerald-800"
+                    size="sm"
+                  >
+                    {printingPreparation ? 'Imprimindo...' : 'Cozinha / Bar'}
                   </Button>
                 </CardContent>
               </Card>

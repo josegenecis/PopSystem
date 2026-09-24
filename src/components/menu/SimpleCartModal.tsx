@@ -29,6 +29,8 @@ interface CartItem {
     name: string;
     price: number;
     image_url?: string;
+    preparation_route?: 'kitchen' | 'bar' | 'none';
+    send_to_kds?: boolean;
   };
   quantity: number;
   variations: string[];
@@ -1057,7 +1059,9 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
           upsell_rule_id: selectedOffer?.ruleId || null,
           upsell_discount_type: selectedOffer?.discountType || null,
           upsell_discount_value: selectedOffer?.discountValue || null,
-          upsell_discount_amount: lineDiscount
+          upsell_discount_amount: lineDiscount,
+          preparation_route: product.preparation_route || (product.send_to_kds ? 'kitchen' : 'none'),
+          send_to_kds: Boolean(product.send_to_kds || product.preparation_route === 'kitchen' || product.preparation_route === 'bar')
         }
       ],
       total: Number(base.total || 0) + Number(lineTotal || 0),
@@ -1174,7 +1178,9 @@ export const SimpleCartModal: React.FC<SimpleCartModalProps> = ({
           options: Array.isArray(item.options) ? item.options : [],
           variations: item.variations,
           notes: item.notes,
-          total: item.totalPrice
+          total: item.totalPrice,
+          preparation_route: item.product.preparation_route || (item.product.send_to_kds ? 'kitchen' : 'none'),
+          send_to_kds: Boolean(item.product.send_to_kds || item.product.preparation_route === 'kitchen' || item.product.preparation_route === 'bar')
           })),
           ...(firstOrderPromotion?.rewardType === 'free_product' && firstOrderPromotion.product
             ? [{

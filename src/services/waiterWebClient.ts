@@ -180,6 +180,7 @@ export type Product = {
   price: number;
   featured: boolean;
   sendToKds: boolean;
+  preparationRoute?: 'kitchen' | 'bar' | 'none';
   weightBased: boolean;
   saleUnit: 'un' | 'kg';
   variations: ProductVariationGroup[];

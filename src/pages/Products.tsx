@@ -38,6 +38,7 @@ interface ProductItem {
   is_available?: boolean;
   weight_based: boolean;
   send_to_kds: boolean;
+  preparation_route?: 'kitchen' | 'bar' | 'none';
   show_in_pdv: boolean;
   show_in_delivery: boolean;
   receipt_ingredients_enabled?: boolean;
@@ -238,6 +239,7 @@ const Products = () => {
         show_in_delivery: product.show_in_delivery !== undefined ? product.show_in_delivery : true,
         weight_based: product.weight_based !== undefined ? product.weight_based : false,
         send_to_kds: product.send_to_kds !== undefined ? product.send_to_kds : false,
+        preparation_route: product.preparation_route || (product.send_to_kds ? 'kitchen' : 'none'),
         receipt_ingredients_enabled: Boolean(product.receipt_ingredients_enabled),
         receipt_ingredients: product.receipt_ingredients || null,
         track_stock: product.track_stock !== undefined ? product.track_stock : false,
@@ -268,6 +270,7 @@ const Products = () => {
             show_in_delivery: product.show_in_delivery !== undefined ? product.show_in_delivery : true,
             weight_based: product.weight_based !== undefined ? product.weight_based : false,
             send_to_kds: product.send_to_kds !== undefined ? product.send_to_kds : false,
+            preparation_route: product.preparation_route || (product.send_to_kds ? 'kitchen' : 'none'),
             receipt_ingredients_enabled: Boolean(product.receipt_ingredients_enabled),
             receipt_ingredients: product.receipt_ingredients || null,
             track_stock: product.track_stock !== undefined ? product.track_stock : false,
@@ -536,6 +539,7 @@ const Products = () => {
       is_available: product.is_available ?? product.available !== false,
       weight_based: Boolean(product.weight_based),
       send_to_kds: Boolean(product.send_to_kds),
+      preparation_route: product.preparation_route || (product.send_to_kds ? 'kitchen' : 'none'),
       show_in_pdv: product.show_in_pdv !== false,
       show_in_delivery: product.show_in_delivery !== false,
       receipt_ingredients_enabled: Boolean(product.receipt_ingredients_enabled),
@@ -557,6 +561,7 @@ const Products = () => {
       available: product.available !== false,
       weight_based: Boolean(product.weight_based),
       send_to_kds: Boolean(product.send_to_kds),
+      preparation_route: product.preparation_route || (product.send_to_kds ? 'kitchen' : 'none'),
       show_in_pdv: product.show_in_pdv !== false,
       show_in_delivery: product.show_in_delivery !== false,
       receipt_ingredients_enabled: Boolean(product.receipt_ingredients_enabled),

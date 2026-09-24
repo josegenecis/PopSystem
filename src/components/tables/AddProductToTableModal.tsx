@@ -27,6 +27,7 @@ interface Product {
   description?: string;
   weight_based?: boolean;
   send_to_kds?: boolean;
+  preparation_route?: 'kitchen' | 'bar' | 'none';
   fiscal_ncm?: string | null;
   fiscal_cfop?: string | null;
   fiscal_csosn?: string | null;
@@ -213,6 +214,7 @@ const AddProductToTableModal: React.FC<AddProductToTableModalProps> = ({
         variations: item.variations || [],
         notes: item.notes || '',
         send_to_kds: item.send_to_kds === true,
+        preparation_route: item.preparation_route || (item.send_to_kds ? 'kitchen' : 'none'),
         fiscal_ncm: item.fiscal_ncm || null,
         fiscal_cfop: item.fiscal_cfop || null,
         fiscal_csosn: item.fiscal_csosn || null,
@@ -224,16 +226,16 @@ const AddProductToTableModal: React.FC<AddProductToTableModalProps> = ({
       }));
 
       const tableFlow = await fetchTableOrderFlowSettings(user.id);
-      const itemsForKitchen = filterItemsForTableManagerOrder(orderItems, tableFlow);
-      const canCreateKitchenOrder = shouldCreateTableManagerOrder(tableFlow) && itemsForKitchen.length > 0;
-      let kitchenPrintWarning = '';
-      let kitchenDispatchStatus: 'not_created' | 'pending_acceptance' | 'printed' = 'not_created';
+      const itemsForManager = filterItemsForTableManagerOrder(orderItems, tableFlow);
+      const canCreateManagerOrder = shouldCreateTableManagerOrder(tableFlow) && itemsForManager.length > 0;
+      let preparationPrintWarning = '';
+      let preparationDispatchStatus: 'not_created' | 'pending_acceptance' | 'printed' = 'not_created';
 
-      const createKitchenOrder = async () => {
-        if (!canCreateKitchenOrder) return;
+      const createPreparationOrder = async () => {
+        if (!canCreateManagerOrder) return;
 
         const orderStatus = getTableManagerOrderStatus(tableFlow);
-        const orderTotal = itemsForKitchen.reduce((sum: number, item: any) => sum + Number(item.subtotal || 0), 0);
+        const orderTotal = itemsForManager.reduce((sum: number, item: any) => sum + Number(item.subtotal || 0), 0);
         const orderNumber = `MESA-${table.table_number}-${Date.now().toString().slice(-5)}`;
         const { data: createdOrder, error: orderError } = await supabase
           .from('orders')
@@ -242,7 +244,7 @@ const AddProductToTableModal: React.FC<AddProductToTableModalProps> = ({
             order_number: orderNumber,
             customer_name: customerName.trim() || `Mesa ${table.table_number}`,
             customer_phone: customerPhone.trim() || '',
-            items: itemsForKitchen,
+            items: itemsForManager,
             total: orderTotal,
             payment_method: 'pendente',
             order_type: 'dine_in',
@@ -254,6 +256,7 @@ const AddProductToTableModal: React.FC<AddProductToTableModalProps> = ({
               table_order_flow: tableFlow.mode,
               show_in_manager: tableFlow.showInManager,
               auto_accept: tableFlow.autoAccept,
+              table_number: table.table_number,
             },
           })
           .select('*')
@@ -264,37 +267,34 @@ const AddProductToTableModal: React.FC<AddProductToTableModalProps> = ({
         // No fluxo manual, aceitar o pedido continua sendo o gatilho da
         // impressão. No automático, o lançamento da mesa precisa imprimir já.
         if (orderStatus.status !== 'preparing') {
-          kitchenDispatchStatus = 'pending_acceptance';
+          preparationDispatchStatus = 'pending_acceptance';
           return;
         }
 
-        const printResult = await PrinterService.printKitchenTicket({
+        const printResult = await PrinterService.printOrderOnAccept({
           ...createdOrder,
           user_id: user.id,
           order_number: orderNumber,
           table_number: table.table_number,
           customer_name: customerName.trim() || `Mesa ${table.table_number}`,
           order_type: 'dine_in',
-          items: itemsForKitchen,
           total: orderTotal,
           created_at: createdOrder?.created_at || new Date().toISOString(),
-          __kitchen_print_job_id: `table:${createdOrder?.id || orderNumber}`,
         });
 
         if (!printResult?.success) {
-          kitchenPrintWarning = printResult?.error || 'A via da cozinha não foi impressa.';
+          preparationPrintWarning = `Itens salvos. Falha na impressão (${printResult?.error || 'não impresso'}).`;
           return;
         }
-
-        kitchenDispatchStatus = 'printed';
+        if (!printResult?.skipped) preparationDispatchStatus = 'printed';
       };
 
-      const kitchenSuccessDescription = () => {
-        if (kitchenDispatchStatus === 'printed') {
-          return `Novos itens da Mesa ${table.table_number} enviados para a cozinha.`;
+      const preparationSuccessDescription = () => {
+        if (preparationDispatchStatus === 'printed') {
+          return `Novos itens da Mesa ${table.table_number} enviados aos setores de preparo.`;
         }
-        if (kitchenDispatchStatus === 'pending_acceptance') {
-          return `Pedido da Mesa ${table.table_number} aguardando aceite antes de seguir para a cozinha.`;
+        if (preparationDispatchStatus === 'pending_acceptance') {
+          return `Pedido da Mesa ${table.table_number} aguardando aceite antes de seguir para o preparo.`;
         }
         return `Produtos adicionados ao pedido da Mesa ${table.table_number}.`;
       };
@@ -326,12 +326,12 @@ const AddProductToTableModal: React.FC<AddProductToTableModalProps> = ({
 
         if (updateError) throw updateError;
 
-        await createKitchenOrder();
+        await createPreparationOrder();
 
         toast({
-          title: kitchenPrintWarning ? 'Itens salvos; confira a cozinha' : 'Produtos adicionados!',
-          description: kitchenPrintWarning || kitchenSuccessDescription(),
-          variant: kitchenPrintWarning ? 'destructive' : 'default',
+          title: preparationPrintWarning ? 'Itens salvos; confira a impressão' : 'Produtos adicionados!',
+          description: preparationPrintWarning || preparationSuccessDescription(),
+          variant: preparationPrintWarning ? 'destructive' : 'default',
         });
       } else {
         const accountData = {
@@ -355,12 +355,12 @@ const AddProductToTableModal: React.FC<AddProductToTableModalProps> = ({
           .update({ status: 'occupied' })
           .eq('id', table.id);
 
-        await createKitchenOrder();
+        await createPreparationOrder();
 
         toast({
-          title: kitchenPrintWarning ? 'Mesa lançada; confira a cozinha' : 'Mesa lançada!',
-          description: kitchenPrintWarning || kitchenSuccessDescription(),
-          variant: kitchenPrintWarning ? 'destructive' : 'default',
+          title: preparationPrintWarning ? 'Mesa lançada; confira a impressão' : 'Mesa lançada!',
+          description: preparationPrintWarning || preparationSuccessDescription(),
+          variant: preparationPrintWarning ? 'destructive' : 'default',
         });
       }
 

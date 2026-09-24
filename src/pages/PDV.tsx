@@ -73,6 +73,7 @@ interface Product {
   costing_mode?: 'automatic_recipe' | 'manual';
   manual_unit_cost?: number | null;
   send_to_kds?: boolean;
+  preparation_route?: 'kitchen' | 'bar' | 'none';
   fiscal_ncm?: string | null;
   fiscal_cfop?: string | null;
   fiscal_csosn?: string | null;
@@ -2044,7 +2045,8 @@ const PDV = () => {
         options,
         variations: variationLines,
         notes: item.notes || '',
-        send_to_kds: item.send_to_kds === true
+        send_to_kds: item.send_to_kds === true || item.preparation_route === 'kitchen' || item.preparation_route === 'bar',
+        preparation_route: item.preparation_route || (item.send_to_kds ? 'kitchen' : 'none')
         };
       });
 

@@ -12,6 +12,7 @@ export interface TableOrderProductRef {
   id?: string | null;
   product_id?: string | null;
   send_to_kds?: boolean | null;
+  preparation_route?: 'kitchen' | 'bar' | 'none' | null;
 }
 
 const DEFAULT_TABLE_ORDER_FLOW: TableOrderFlowSettings = {
@@ -52,7 +53,9 @@ export const filterItemsForTableManagerOrder = <T extends TableOrderProductRef>(
 ): T[] => {
   if (!shouldCreateTableManagerOrder(settings)) return [];
   if (settings.mode === 'all_items') return items;
-  return items.filter((item) => item.send_to_kds === true);
+  return items.filter((item) => item.preparation_route
+    ? item.preparation_route !== 'none'
+    : item.send_to_kds === true);
 };
 
 export const getTableManagerOrderStatus = (settings: TableOrderFlowSettings) => ({

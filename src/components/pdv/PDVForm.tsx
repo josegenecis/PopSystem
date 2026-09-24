@@ -33,6 +33,7 @@ interface CartItem {
   options?: string[];
   notes?: string;
   send_to_kds?: boolean;
+  preparation_route?: 'kitchen' | 'bar' | 'none';
 }
 
 interface Table {
@@ -73,7 +74,8 @@ const PDVForm: React.FC = () => {
         subtotal: product.price * quantity,
         options: selectedOptions.length > 0 ? selectedOptions : undefined,
         notes: notes || undefined,
-        send_to_kds: product.send_to_kds === true
+        send_to_kds: product.send_to_kds === true || product.preparation_route === 'kitchen' || product.preparation_route === 'bar',
+        preparation_route: product.preparation_route || (product.send_to_kds ? 'kitchen' : 'none')
       };
       setCart([...cart, newItem]);
     }
@@ -132,7 +134,8 @@ const PDVForm: React.FC = () => {
         subtotal: item.subtotal,
         options: item.options || [],
         notes: item.notes || '',
-        send_to_kds: item.send_to_kds === true
+        send_to_kds: item.send_to_kds === true,
+        preparation_route: item.preparation_route || (item.send_to_kds ? 'kitchen' : 'none')
       }));
       const tableFlow = await fetchTableOrderFlowSettings(user?.id);
       const managerItems = filterItemsForTableManagerOrder(orderItems, tableFlow);

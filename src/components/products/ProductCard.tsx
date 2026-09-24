@@ -18,6 +18,7 @@ interface Product {
   show_in_pdv?: boolean;
   show_in_delivery?: boolean;
   send_to_kds?: boolean;
+  preparation_route?: 'kitchen' | 'bar' | 'none';
 }
 
 interface ProductCardProps {
@@ -79,9 +80,9 @@ const ProductCard: React.FC<ProductCardProps> = ({
                 Delivery
               </Badge>
             )}
-            {product.send_to_kds && (
+            {(product.preparation_route || (product.send_to_kds ? 'kitchen' : 'none')) !== 'none' && (
               <Badge variant="secondary" className="text-xs">
-                KDS
+                {(product.preparation_route || 'kitchen') === 'bar' ? 'Bar/Copa' : 'Cozinha'}
               </Badge>
             )}
           </div>

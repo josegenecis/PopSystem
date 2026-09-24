@@ -35,6 +35,7 @@ import { canAccessOperatorArea, getLocalOperatorSession, OperatorArea } from '@/
 const SETTINGS_TAB_ORDER = [
   'profile',
   'appearance',
+  'table-qr',
   'delivery',
   'payment-methods',
   'pix',
@@ -51,6 +52,7 @@ const SETTINGS_TAB_ORDER = [
 const SETTINGS_TAB_FEATURES: Record<string, FeatureKey> = {
   profile: 'settings',
   appearance: 'settings',
+  'table-qr': 'menu',
   delivery: 'delivery',
   'payment-methods': 'pix',
   pix: 'pix',
@@ -67,6 +69,7 @@ const SETTINGS_TAB_FEATURES: Record<string, FeatureKey> = {
 const SETTINGS_TAB_AREAS: Record<string, OperatorArea> = {
   profile: 'settings',
   appearance: 'settings',
+  'table-qr': 'settings',
   delivery: 'deliveryAreas',
   'payment-methods': 'pix',
   pix: 'pix',
@@ -171,6 +174,7 @@ const Configuracoes: React.FC = () => {
             >
               {canAccessOperatorTab('profile') && <option value="profile">Perfil</option>}
               {canAccessOperatorTab('appearance') && <option value="appearance">Cores do Cardápio</option>}
+              {canAccessOperatorTab('table-qr') && <option value="table-qr">QR Code das Mesas</option>}
               {canAccessOperatorTab('delivery') && <option value="delivery">Delivery</option>}
               {canAccessOperatorTab('payment-methods') && <option value="payment-methods">Formas de Pagamento</option>}
               {canAccessOperatorTab('pix') && <option value="pix">PIX</option>}
@@ -191,6 +195,7 @@ const Configuracoes: React.FC = () => {
         <TabsList className="mb-4 hidden sm:flex flex-wrap justify-start overflow-x-auto scrollbar-hide">
           {canAccessOperatorTab('profile') && <TabsTrigger value="profile">{tabLabel('Perfil', 'settings')}</TabsTrigger>}
           {canAccessOperatorTab('appearance') && <TabsTrigger value="appearance">{tabLabel('Cores do Cardápio', 'settings')}</TabsTrigger>}
+          {canAccessOperatorTab('table-qr') && <TabsTrigger value="table-qr">{tabLabel('QR Mesas', 'menu')}</TabsTrigger>}
           {canAccessOperatorTab('delivery') && <TabsTrigger value="delivery">{tabLabel('Delivery', 'delivery')}</TabsTrigger>}
           {canAccessOperatorTab('payment-methods') && <TabsTrigger value="payment-methods">{tabLabel('Formas de Pagamento', 'pix')}</TabsTrigger>}
           {canAccessOperatorTab('pix') && <TabsTrigger value="pix">{tabLabel('PIX', 'pix')}</TabsTrigger>}
@@ -212,6 +217,10 @@ const Configuracoes: React.FC = () => {
         
         <TabsContent value="appearance">
           <AppearanceSettings />
+        </TabsContent>
+
+        <TabsContent value="table-qr">
+          <QRCodeGenerator />
         </TabsContent>
 
         <TabsContent value="notifications">

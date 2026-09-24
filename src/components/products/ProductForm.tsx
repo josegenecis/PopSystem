@@ -45,6 +45,7 @@ interface ProductItem {
   available: boolean;
   weight_based: boolean; // Ensuring this is not optional
   send_to_kds: boolean;
+  preparation_route?: 'kitchen' | 'bar' | 'none';
   show_in_pdv: boolean;
   show_in_delivery: boolean;
   receipt_ingredients_enabled?: boolean;
@@ -154,6 +155,7 @@ const ProductForm: React.FC<ProductFormProps> = ({ product, onSave, onCancel }) 
     available: true,
     weight_based: false,
     send_to_kds: false,
+    preparation_route: 'none',
     show_in_pdv: true,
     show_in_delivery: true,
     receipt_ingredients_enabled: false,
@@ -836,6 +838,7 @@ const ProductForm: React.FC<ProductFormProps> = ({ product, onSave, onCancel }) 
       is_available: formData.available,
       weight_based: formData.weight_based,
       send_to_kds: formData.send_to_kds,
+      preparation_route: formData.preparation_route || (formData.send_to_kds ? 'kitchen' : 'none'),
       show_in_pdv: formData.weight_based ? true : formData.show_in_pdv,
       show_in_delivery: formData.weight_based ? false : formData.show_in_delivery,
       receipt_ingredients_enabled: Boolean(formData.receipt_ingredients_enabled),
@@ -1463,6 +1466,7 @@ const ProductForm: React.FC<ProductFormProps> = ({ product, onSave, onCancel }) 
           available: formData.available,
           weight_based: formData.weight_based,
           send_to_kds: formData.send_to_kds,
+          preparation_route: formData.preparation_route || (formData.send_to_kds ? 'kitchen' : 'none'),
           show_in_pdv: formData.show_in_pdv,
           show_in_delivery: formData.show_in_delivery,
           receipt_ingredients_enabled: Boolean(formData.receipt_ingredients_enabled),
@@ -1580,6 +1584,7 @@ const ProductForm: React.FC<ProductFormProps> = ({ product, onSave, onCancel }) 
           available: formData.available,
           weight_based: formData.weight_based,
           send_to_kds: formData.send_to_kds,
+          preparation_route: formData.preparation_route || (formData.send_to_kds ? 'kitchen' : 'none'),
           show_in_pdv: formData.show_in_pdv,
           show_in_delivery: formData.show_in_delivery,
           receipt_ingredients_enabled: Boolean(formData.receipt_ingredients_enabled),
@@ -1625,7 +1630,7 @@ const ProductForm: React.FC<ProductFormProps> = ({ product, onSave, onCancel }) 
     }, 800);
     setAutoSaveTimer(timer);
     return () => clearTimeout(timer);
-  }, [user?.id, loading, createdProductId, formData.name, formData.barcode, formData.price, formData.costing_mode, formData.manual_unit_cost, formData.category_id, formData.category, formData.description, formData.image_url, formData.available, formData.show_in_delivery, formData.receipt_ingredients_enabled, formData.receipt_ingredients, formData.is_highlight, formData.is_daily_special, formData.availability_schedule, formData.original_price, formData.track_stock, formData.stock_quantity, formData.low_stock_threshold, formData.fiscal_ncm, formData.fiscal_cfop, formData.fiscal_csosn, formData.fiscal_cst_pis, formData.fiscal_cst_cofins, formData.fiscal_origem, formData.fiscal_cest, formData.fiscal_beneficio, formData.fiscal_observacao, formData.fiscal_ibs_cbs_cst, formData.fiscal_cclass_trib, formData.fiscal_reducao_ibs, formData.fiscal_reducao_cbs, formData.fiscal_default_operation_id, stockSchemaSupported]);
+  }, [user?.id, loading, createdProductId, formData.name, formData.barcode, formData.price, formData.costing_mode, formData.manual_unit_cost, formData.category_id, formData.category, formData.description, formData.image_url, formData.available, formData.show_in_delivery, formData.send_to_kds, formData.preparation_route, formData.receipt_ingredients_enabled, formData.receipt_ingredients, formData.is_highlight, formData.is_daily_special, formData.availability_schedule, formData.original_price, formData.track_stock, formData.stock_quantity, formData.low_stock_threshold, formData.fiscal_ncm, formData.fiscal_cfop, formData.fiscal_csosn, formData.fiscal_cst_pis, formData.fiscal_cst_cofins, formData.fiscal_origem, formData.fiscal_cest, formData.fiscal_beneficio, formData.fiscal_observacao, formData.fiscal_ibs_cbs_cst, formData.fiscal_cclass_trib, formData.fiscal_reducao_ibs, formData.fiscal_reducao_cbs, formData.fiscal_default_operation_id, stockSchemaSupported]);
 
 
   const onDragEnd = (result: DropResult) => {
@@ -3134,6 +3139,25 @@ const ProductForm: React.FC<ProductFormProps> = ({ product, onSave, onCancel }) 
         </div>
 
         <div className="grid grid-cols-2 gap-4 pt-4 bg-gradient-to-br from-[#F5EBE1] via-white to-[#F5EBE1]/70 p-4 rounded-[26px] border border-[#FF6400]/20 shadow-[0_22px_45px_-35px_rgba(255,100,0,0.25)]">
+          <div className="col-span-2 space-y-2 rounded-2xl border border-emerald-200 bg-white/90 p-4">
+            <Label className="font-semibold text-boracume-dark-green">Destino de impressão no preparo</Label>
+            <Select
+              value={formData.preparation_route || (formData.send_to_kds ? 'kitchen' : 'none')}
+              onValueChange={(value: 'kitchen' | 'bar' | 'none') => setFormData((prev) => ({
+                ...prev,
+                preparation_route: value,
+                send_to_kds: value !== 'none',
+              }))}
+            >
+              <SelectTrigger className="h-11 rounded-xl bg-white"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="kitchen">Cozinha</SelectItem>
+                <SelectItem value="bar">Bar / Copa</SelectItem>
+                <SelectItem value="none">Não imprimir — somente lançar na conta</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-[#003223]/60">Define onde este item será impresso quando entrar em um pedido de mesa.</p>
+          </div>
           <div className="flex items-center space-x-2">
             <Switch
               id="available"

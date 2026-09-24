@@ -1038,7 +1038,7 @@ async function sendAccountDraftItemsToKitchen(
   const { data: productRows, error: productRowsError } = productIds.length
     ? await supabase
         .from('products')
-        .select('id, send_to_kds')
+        .select('id, send_to_kds, preparation_route')
         .in('id', productIds)
         .eq('user_id', waiterSession.profile.restaurantId)
     : { data: [], error: null }
@@ -1047,7 +1047,13 @@ async function sendAccountDraftItemsToKitchen(
 
   const tableFlow = await getTableOrderFlowSettings(supabase, waiterSession.profile.restaurantId)
   const kdsProductIds = new Set(
-    (productRows ?? []).filter((row: any) => row.send_to_kds === true).map((row: any) => String(row.id)),
+    (productRows ?? []).filter((row: any) => String(row.preparation_route || (row.send_to_kds ? 'kitchen' : 'none')) !== 'none').map((row: any) => String(row.id)),
+  )
+  const preparationRouteByProduct = new Map(
+    (productRows ?? []).map((row: any) => [
+      String(row.id),
+      String(row.preparation_route || (row.send_to_kds ? 'kitchen' : 'none')),
+    ]),
   )
   const shouldCreateManagerOrder = tableFlow.mode !== 'account_only' && tableFlow.showInManager
   // Em bases antigas, nenhum produto possuía a marca send_to_kds. Nesse caso,
@@ -1076,6 +1082,8 @@ async function sendAccountDraftItemsToKitchen(
       notes: row.notes || '',
       account_name: accountRow.name,
       table_number: Number(tableRow.table_number),
+      preparation_route: preparationRouteByProduct.get(String(row.product_id)) || 'none',
+      send_to_kds: (preparationRouteByProduct.get(String(row.product_id)) || 'none') !== 'none',
     }
   })
 
@@ -1106,6 +1114,7 @@ async function sendAccountDraftItemsToKitchen(
           table_order_flow: tableFlow.mode,
           show_in_manager: tableFlow.showInManager,
           auto_accept: tableFlow.autoAccept,
+          table_number: Number(tableRow.table_number),
         },
       })
       .select('id')
@@ -1513,6 +1522,7 @@ async function listCatalog(supabase: any, restaurantId: string) {
     price: effectivePrices.get(String(row.id)) ?? normalizeAmount(row.price),
     featured: Boolean(row.featured ?? row.is_featured),
     sendToKds: Boolean(row.send_to_kds ?? true),
+    preparationRoute: String(row.preparation_route || (row.send_to_kds ? 'kitchen' : 'none')),
     weightBased: Boolean(row.weight_based),
     saleUnit: row.weight_based ? 'kg' : 'un',
     variations: buildProductVariationGroups(row.id, specificRows ?? [], linkRows ?? [], globalRows ?? []),

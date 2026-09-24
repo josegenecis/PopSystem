@@ -25,6 +25,7 @@ import ProductCard from '@/components/menu/ProductCard';
 import MarketingBanners from '@/components/marketing/MarketingBanners';
 import MarketingPixels from '@/components/marketing/MarketingPixels';
 import { Badge } from '@/components/ui/badge';
+import { TableQrCartModal } from '@/components/menu/TableQrCartModal';
 import { getStoreOpenInfo } from '@/lib/storeHours';
 import { normalizeImageUrlForDisplay } from '@/utils/normalizeImageUrl';
 import { notifyOrderCreatedById } from '@/utils/orderNotifications';
@@ -50,6 +51,8 @@ interface Product {
   stock_quantity?: number;
   is_daily_special?: boolean;
   availability_schedule?: unknown;
+  preparation_route?: 'kitchen' | 'bar' | 'none';
+  send_to_kds?: boolean;
 }
 
 interface Category {
@@ -67,6 +70,7 @@ const MenuDigital = () => {
   const location = useLocation();
   const queryParams = new URLSearchParams(location.search);
   const userIdFromQuery = queryParams.get('userId');
+  const tableQrToken = queryParams.get('table');
 
   const finalUserId = userId || userIdFromQuery || '';
   
@@ -88,6 +92,8 @@ const MenuDigital = () => {
   const [activeCategory, setActiveCategory] = useState<string>('');
   const [openingProductId, setOpeningProductId] = useState<string | null>(null);
   const [availabilityClock, setAvailabilityClock] = useState(() => new Date());
+  const [tableQr, setTableQr] = useState<any>(null);
+  const [tableQrLoading, setTableQrLoading] = useState(Boolean(tableQrToken));
   const warnedStockRef = useRef<Set<string>>(new Set());
   const lastTrackedSearchRef = useRef('');
   const navigate = useNavigate();
@@ -105,6 +111,27 @@ const MenuDigital = () => {
   } = useMenuData({ userId: finalUserId, enableCache: true, cacheTTL: 5 });
   const storeOpenInfo = useMemo(() => getStoreOpenInfo((profile as any)?.opening_hours), [profile]);
   const schedulingConfig = useMemo(() => getOrderSchedulingConfig((profile as any)?.theme_config), [profile]);
+  const isTableQr = Boolean(tableQrToken && tableQr?.ok);
+  const tableOrderingEnabled = Boolean(isTableQr && tableQr?.ordering_enabled);
+
+  useEffect(() => {
+    if (!tableQrToken || !finalUserId) {
+      setTableQr(null);
+      setTableQrLoading(false);
+      return;
+    }
+    let active = true;
+    setTableQrLoading(true);
+    void (supabase as any).rpc('resolve_table_qr', {
+      p_user_id: finalUserId,
+      p_qr_token: tableQrToken,
+    }).then(({ data, error }: any) => {
+      if (!active) return;
+      setTableQr(error ? { ok: false, error: error.message } : data);
+      setTableQrLoading(false);
+    });
+    return () => { active = false; };
+  }, [finalUserId, tableQrToken]);
   const availableProducts = useMemo(
     () => (products as Product[]).filter((product) => isProductAvailableAt(product, availabilityClock)),
     [products, availabilityClock],
@@ -371,6 +398,14 @@ const MenuDigital = () => {
       return;
     }
 
+    if (isTableQr && !tableOrderingEnabled) {
+      toast({
+        title: 'Cardápio para consulta',
+        description: 'Esta mesa está configurada somente para visualização.',
+      });
+      return;
+    }
+
     trackProductView(product);
 
     const cachedVariationsReady = isSimpleVariationReady(product.id);
@@ -496,6 +531,44 @@ const MenuDigital = () => {
     trackProductAdded(product, quantity, variationPrice);
     setShowVariationModal(false);
     setSelectedProduct(null);
+  };
+
+  const handlePlaceTableQrOrder = async (customer: { name: string; phone: string; notes: string }) => {
+    if (!tableQrToken || !tableQr?.ok || !tableOrderingEnabled) {
+      throw new Error('Esta mesa não está habilitada para receber pedidos pelo QR Code.');
+    }
+
+    const items = cart.map((item) => ({
+      product_id: item.product.id,
+      product_name: item.product.name,
+      name: item.product.name,
+      quantity: Number(item.quantity || 1),
+      price: Number(item.totalPrice || 0) / Math.max(1, Number(item.quantity || 1)),
+      subtotal: Number(item.totalPrice || 0),
+      total: Number(item.totalPrice || 0),
+      variations: Array.isArray(item.variations) ? item.variations : [],
+      options: Array.isArray(item.options) ? item.options : [],
+      notes: String(item.notes || ''),
+      preparation_route: item.product.preparation_route || (item.product.send_to_kds ? 'kitchen' : 'none'),
+      send_to_kds: Boolean(item.product.send_to_kds || item.product.preparation_route === 'kitchen' || item.product.preparation_route === 'bar'),
+    }));
+
+    const { data, error } = await (supabase as any).rpc('place_table_qr_order', {
+      p_user_id: finalUserId,
+      p_qr_token: tableQrToken,
+      p_customer_name: customer.name,
+      p_customer_phone: customer.phone,
+      p_items: items,
+      p_total: getCartTotal(),
+      p_notes: customer.notes,
+    });
+    if (error || !data?.ok) throw new Error(error?.message || data?.error || 'Não foi possível enviar o pedido da mesa.');
+
+    clearCart();
+    setShowCartModal(false);
+    toast({ title: 'Pedido enviado', description: `Seu pedido foi enviado para a Mesa ${data.table_number}.` });
+    void notifyOrderCreatedById(data.order_id).catch((notifyError) => console.warn('Falha ao notificar pedido da mesa:', notifyError));
+    navigate(`/track/${data.order_id}`);
   };
 
   const linkedProducts = useMemo(() => {
@@ -858,7 +931,7 @@ const MenuDigital = () => {
     ? availableHighlights.filter((product) => !dailySpecialIds.has(product.id))
     : [...availableProducts].filter((product) => !dailySpecialIds.has(product.id) && Number(product.order_count || 0) > 0 && Boolean(normalizeImageUrlForDisplay(product.image_url || ''))).sort((a, b) => Number(b.order_count || 0) - Number(a.order_count || 0)).slice(0, 8);
 
-  if (menuLoading) {
+  if (menuLoading || tableQrLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
@@ -886,6 +959,17 @@ const MenuDigital = () => {
         <div className="text-center">
           <h1 className="text-2xl font-bold text-gray-900 mb-4">Link inválido</h1>
           <p className="text-gray-600">Verifique se o link está correto.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (tableQrToken && !tableQr?.ok) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 px-6">
+        <div className="max-w-md text-center">
+          <h1 className="mb-3 text-2xl font-bold text-gray-900">QR Code da mesa inválido</h1>
+          <p className="text-gray-600">Peça à equipe do restaurante o QR Code correto desta mesa.</p>
         </div>
       </div>
     );
@@ -937,11 +1021,17 @@ const MenuDigital = () => {
                   <span className="text-[9px] font-medium text-gray-500 sm:text-xs">{storeOpenInfo.detail}</span>
                 </div>
               </div>
-              <button type="button" onClick={() => setShowCartModal(true)} className="relative flex h-10 w-10 flex-none items-center justify-center rounded-xl bg-[#f8f6f1] shadow-sm sm:h-12 sm:w-12 sm:rounded-2xl" aria-label="Abrir sacola">
+              {(!isTableQr || tableOrderingEnabled) && <button type="button" onClick={() => setShowCartModal(true)} className="relative flex h-10 w-10 flex-none items-center justify-center rounded-xl bg-[#f8f6f1] shadow-sm sm:h-12 sm:w-12 sm:rounded-2xl" aria-label="Abrir sacola">
                 <ShoppingBag className="h-5 w-5" style={{ color: 'var(--menu-secondary, #063D2E)' }} />
                 {getCartItemCount() > 0 && <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] font-black text-white" style={{ backgroundColor: 'var(--menu-accent, #EF6C20)' }}>{getCartItemCount()}</span>}
-              </button>
+              </button>}
             </div>
+            {isTableQr && (
+              <div className={`mt-3 rounded-2xl px-4 py-3 text-sm font-bold ${tableOrderingEnabled ? 'bg-emerald-50 text-emerald-900' : 'bg-amber-50 text-amber-900'}`}>
+                Mesa {tableQr.table_number} • {tableOrderingEnabled ? 'Faça seu pedido pelo celular' : 'Cardápio disponível somente para consulta'}
+                {tableQr.message && <p className="mt-1 text-xs font-medium opacity-75">{tableQr.message}</p>}
+              </div>
+            )}
             {(profile as any)?.address && <p className="mt-2 flex items-center gap-1 truncate text-[9px] text-slate-500 sm:mt-3 sm:gap-1.5 sm:text-xs"><MapPin className="h-3 w-3 flex-none sm:h-3.5 sm:w-3.5" />{String((profile as any).address)}</p>}
             <div className="mt-3 flex gap-2 sm:mt-4">
               <div className="relative flex-1">
@@ -1064,7 +1154,7 @@ const MenuDigital = () => {
         })()}
       />
 
-      <SimpleCartModal
+      {!isTableQr && <SimpleCartModal
         isOpen={showCartModal}
         onClose={() => setShowCartModal(false)}
         cart={cart}
@@ -1086,12 +1176,23 @@ const MenuDigital = () => {
             navigate(`/track/${orderId}`);
           }
         }}
-      />
+      />}
+
+      {isTableQr && tableOrderingEnabled && <TableQrCartModal
+        isOpen={showCartModal}
+        onClose={() => setShowCartModal(false)}
+        cart={cart}
+        total={getCartTotal()}
+        tableNumber={tableQr.table_number}
+        onUpdateQuantity={updateQuantity}
+        onRemoveItem={removeFromCart}
+        onPlaceOrder={handlePlaceTableQrOrder}
+      />}
 
       {/* Clube de Vantagens removido conforme solicitação */}
 
       {/* Carrinho Fixo */}
-      <CartBottomBar
+      {(!isTableQr || tableOrderingEnabled) && <CartBottomBar
         itemCount={getCartItemCount()}
         total={getCartTotal()}
         onOpenCart={() => {
@@ -1105,7 +1206,7 @@ const MenuDigital = () => {
           }
           setShowCartModal(true);
         }}
-      />
+      />}
     </div>
   );
 };

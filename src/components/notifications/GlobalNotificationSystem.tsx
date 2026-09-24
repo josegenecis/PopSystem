@@ -232,7 +232,6 @@ const GlobalNotificationSystem: React.FC = () => {
         },
         async (payload) => {
           const newOrder = payload.new as PendingOrder;
-          if (isAutoAcceptEnabled()) return;
           if (isPdvCounterOrder(newOrder)) return;
           if (!isScheduledOrderReady(newOrder)) {
             toast({
@@ -258,6 +257,7 @@ const GlobalNotificationSystem: React.FC = () => {
             }
             return;
           }
+          if (isAutoAcceptEnabled()) return;
 
           const showForInsert =
             newOrder.acceptance_status === 'pending_acceptance' ||
@@ -279,10 +279,6 @@ const GlobalNotificationSystem: React.FC = () => {
         },
         async (payload) => {
           const updatedOrder = payload.new as PendingOrder;
-          if (isAutoAcceptEnabled()) {
-            setPendingOrders((prev) => prev.filter((order) => order.id !== updatedOrder.id));
-            return;
-          }
           if (isPdvCounterOrder(updatedOrder)) {
             setPendingOrders((prev) => prev.filter((order) => order.id !== updatedOrder.id));
             return;
@@ -306,6 +302,10 @@ const GlobalNotificationSystem: React.FC = () => {
                 console.warn('Falha ao imprimir pedido de mesa aceito:', error);
               }
             }
+            return;
+          }
+          if (isAutoAcceptEnabled()) {
+            setPendingOrders((prev) => prev.filter((order) => order.id !== updatedOrder.id));
             return;
           }
 

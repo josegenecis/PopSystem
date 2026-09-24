@@ -1671,7 +1671,7 @@ function buildPopConnectReceiptPayload(order: any, config: NormalizedPrintConfig
     order_id: normalizeEscPosText(order.id),
     print_job_id: normalizeEscPosText(order.__auto_print_job_id || order.__kitchen_print_job_id || ''),
     ticket_code: shouldPrintTicketCode(order),
-    table_number: normalizeEscPosText(order.table_number || ''),
+    table_number: normalizeEscPosText(order.table_number || order?.variations?.table_number || ''),
     customer_name: normalizeEscPosText(order.customer_name || 'Balcao'),
     customer_phone: normalizeEscPosText(order.customer_phone || ''),
     customer_address: normalizeEscPosText(order.customer_address || ''),
@@ -1992,7 +1992,7 @@ export const PrinterService = {
   // Lançamentos de mesa já representam uma solicitação de preparo. Envia
   // somente o lote recém-adicionado para a rota da cozinha, sem imprimir o
   // recibo do cliente e sem depender da tela de Pedidos estar aberta.
-  async printKitchenTicket(order: any) {
+  async printPreparationTicket(order: any, route: 'kitchen' | 'bar' = 'kitchen') {
     const { data: settings } = await (supabase as any)
       .from('printer_settings')
       .select('*')
@@ -2000,6 +2000,7 @@ export const PrinterService = {
       .maybeSingle();
     const config = normalizePrintConfig(settings);
     const printerConfig = loadPrinterConfig();
+    const routeTarget = printerConfig.routes?.[route];
     const configuredUrl = String(printerConfig.bridge.websocketUrl || 'ws://localhost:8766').trim();
     const urls = configuredUrl ? [configuredUrl] : [];
     const discoveredUrl = await discoverBridgeWebsocketUrl({ timeoutMs: 650 });
@@ -2018,10 +2019,10 @@ export const PrinterService = {
     for (const websocketUrl of urls) {
       const result = await bridgePrintReceipt({
         websocketUrl,
-        transport: printerConfig.bridge.transport,
-        address: printerConfig.bridge.address,
+        transport: routeTarget?.transport || printerConfig.bridge.transport,
+        address: routeTarget?.address || printerConfig.bridge.address,
         payload,
-        route: 'kitchen',
+        route,
         template: 'kitchen_ticket',
       });
       bridgeWasAvailable = bridgeWasAvailable || result.available;
@@ -2030,8 +2031,8 @@ export const PrinterService = {
         return {
           success: false,
           error: result.printerConnected
-            ? 'O Pop Connect não conseguiu imprimir na cozinha. Confira a impressora dessa rota.'
-            : 'Configure uma impressora para a cozinha no Pop Connect.',
+            ? `O Pop Connect não conseguiu imprimir no ${route === 'bar' ? 'bar/copa' : 'setor da cozinha'}. Confira a impressora dessa rota.`
+            : `Configure uma impressora para ${route === 'bar' ? 'o bar/copa' : 'a cozinha'} no Pop Connect.`,
         };
       }
     }
@@ -2039,9 +2040,40 @@ export const PrinterService = {
     return {
       success: false,
       error: bridgeWasAvailable
-        ? 'O Pop Connect não conseguiu imprimir na cozinha.'
-        : 'Abra o Pop Connect para imprimir a via da cozinha.',
+        ? `O Pop Connect não conseguiu imprimir no ${route === 'bar' ? 'bar/copa' : 'setor da cozinha'}.`
+        : `Abra o Pop Connect para imprimir a via ${route === 'bar' ? 'do bar/copa' : 'da cozinha'}.`,
     };
+  },
+
+  async printKitchenTicket(order: any) {
+    return this.printPreparationTicket(order, 'kitchen');
+  },
+
+  async printPreparationTickets(order: any) {
+    const items = Array.isArray(order?.items) ? order.items : [];
+    const failures: string[] = [];
+    let printedRoutes = 0;
+
+    for (const route of ['kitchen', 'bar'] as const) {
+      const routeItems = items.filter((item: any) => {
+        const configuredRoute = String(item?.preparation_route || '').toLowerCase();
+        if (configuredRoute) return configuredRoute === route;
+        return route === 'kitchen' && item?.send_to_kds === true;
+      });
+      if (routeItems.length === 0) continue;
+
+      const result = await this.printPreparationTicket({
+        ...order,
+        items: routeItems,
+        __kitchen_print_job_id: `table:${order?.id || order?.order_number || 'order'}:${route}`,
+      }, route);
+      if (result?.success) printedRoutes += 1;
+      else failures.push(`${route === 'bar' ? 'bar/copa' : 'cozinha'}: ${result?.error || 'não impresso'}`);
+    }
+
+    if (failures.length > 0) return { success: false, error: failures.join('; ') };
+    if (printedRoutes === 0) return { success: true, skipped: true, reason: 'no_preparation_items' };
+    return { success: true, printedRoutes };
   },
 
   async openCashDrawer() {
@@ -2067,10 +2099,16 @@ export const PrinterService = {
       // Aceitar um pedido sempre representa uma intenção explícita de impressão,
       // tanto no PWA quanto no desktop. O fallback do diálogo do navegador não
       // confirma impressão e, por isso, não pode retirar o pedido da fila.
-      const result = await this.printOrder(
-        { ...order, __auto_print_job_id: orderId || undefined },
-        { onlyIfAuto: true, allowBrowserDialog: false },
-      );
+      const orderType = String(order?.order_type || '').toLowerCase();
+      const source = String(order?.variations?.source || order?.source || '').toUpperCase();
+      const isTablePreparationOrder = orderType === 'dine_in'
+        && (Boolean(order?.table_id) || source.includes('TABLE'));
+      const result = isTablePreparationOrder
+        ? await this.printPreparationTickets({ ...order, __auto_print_job_id: orderId || undefined })
+        : await this.printOrder(
+            { ...order, __auto_print_job_id: orderId || undefined },
+            { onlyIfAuto: true, allowBrowserDialog: false },
+          );
       if (result?.success) {
         if (orderId) printedAcceptedOrderIds.add(orderId);
         if (ownerId && orderId) dequeuePendingOrderPrint(ownerId, orderId);

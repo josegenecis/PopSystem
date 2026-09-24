@@ -105,6 +105,21 @@ test('builds a kitchen copy without prices, address or payment totals', () => {
   assert.doesNotMatch(ticket, /PIX/)
 })
 
+test('identifies a bar copy without exposing payment data', () => {
+  const ticket = readable(buildEscposKitchenTicket({
+    print_route: 'bar',
+    order_number: 'B55',
+    table_number: '8',
+    items: [{ product_name: 'Refrigerante', quantity: 2, subtotal: 20 }],
+    total: 20,
+  }))
+
+  assert.match(ticket, /BAR \/ COPA/)
+  assert.match(ticket, /Mesa: 8/)
+  assert.match(ticket, /2x Refrigerante/)
+  assert.doesNotMatch(ticket, /20,00/)
+})
+
 test('uses a commercial hierarchy without widening the receipt body', () => {
   const receipt = buildEscposReceipt({
     store: { restaurant_name: 'The place Acai' },

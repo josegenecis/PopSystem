@@ -155,7 +155,8 @@ export function buildEscposKitchenTicket(data = {}) {
   const separator = '='.repeat(width)
   const items = Array.isArray(data.items) ? data.items : []
   const output = [`${ESC}\x40`, FONT_A, SIZE_NORMAL, `${ESC}\x61\x01`, `${ESC}\x45\x01`, SIZE_DOUBLE]
-  output.push('COZINHA\n')
+  const preparationRoute = normalizeLine(data.print_route).toLowerCase()
+  output.push(preparationRoute === 'bar' ? 'BAR / COPA\n' : 'COZINHA\n')
   output.push(SIZE_NORMAL)
   const orderNumber = normalizeLine(data.order_number).replace(/^PED[-\s]*/i, '')
   appendWrapped(output, orderNumber ? `PEDIDO #${orderNumber}` : 'NOVO PEDIDO', width)

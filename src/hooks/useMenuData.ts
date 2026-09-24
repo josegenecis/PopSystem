@@ -32,6 +32,8 @@ interface Product {
   price_source?: 'base' | 'price_table';
   is_daily_special?: boolean;
   availability_schedule?: unknown;
+  preparation_route?: 'kitchen' | 'bar' | 'none';
+  send_to_kds?: boolean;
 }
 
 interface Category {
@@ -91,7 +93,7 @@ interface UseMenuDataOptions {
   pricingChannel?: PricingChannel;
 }
 
-const CACHE_PREFIX = 'boracume_menu_data_v7';
+const CACHE_PREFIX = 'boracume_menu_data_v8';
 
 function compareProductsByDisplayOrder(a: Product, b: Product) {
   const aOrder = a.display_order !== undefined && a.display_order !== null
@@ -196,7 +198,7 @@ async function fetchMenuDataDirect(userId: string): Promise<MenuPayload> {
       ]);
 
     const productSelectAttempts = [
-      'id, name, description, price, original_price, discount_percentage, image_url, available, is_available, show_in_delivery, is_highlight, highlight_order, order_count, category_id, track_stock, stock_quantity, low_stock_threshold, display_order, is_daily_special, availability_schedule',
+      'id, name, description, price, original_price, discount_percentage, image_url, available, is_available, show_in_delivery, is_highlight, highlight_order, order_count, category_id, track_stock, stock_quantity, low_stock_threshold, display_order, is_daily_special, availability_schedule, preparation_route, send_to_kds',
       'id, name, description, price, original_price, discount_percentage, image_url, available, show_in_delivery, is_highlight, highlight_order, order_count, category_id, track_stock, stock_quantity, low_stock_threshold, display_order',
       'id, name, description, price, original_price, discount_percentage, image_url, is_available, show_in_delivery, is_highlight, highlight_order, order_count, category_id, track_stock, stock_quantity, low_stock_threshold, display_order',
       'id, name, description, price, image_url, available, show_in_delivery, category_id, display_order'

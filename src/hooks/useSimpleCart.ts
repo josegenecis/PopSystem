@@ -12,6 +12,8 @@ interface CartProduct {
   price_rule_id?: string | null;
   price_table_name?: string | null;
   price_source?: 'base' | 'price_table';
+  preparation_route?: 'kitchen' | 'bar' | 'none';
+  send_to_kds?: boolean;
 }
 
 interface CartItem {

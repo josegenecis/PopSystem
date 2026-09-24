@@ -1,5 +1,11 @@
 export type PrinterTransport = 'network' | 'usb' | 'bluetooth' | 'system'
 
+export interface PrinterRouteTarget {
+  name?: string
+  transport: PrinterTransport
+  address?: string
+}
+
 export interface PrinterConfig {
   autoPrintKds: boolean
   bridge: {
@@ -15,6 +21,10 @@ export interface PrinterConfig {
       address?: string
     }
   }
+  routes: {
+    kitchen?: PrinterRouteTarget
+    bar?: PrinterRouteTarget
+  }
 }
 
 const STORAGE_KEY = 'boracume_printer_config_v1'
@@ -27,6 +37,7 @@ export const getDefaultPrinterConfig = (): PrinterConfig => ({
     address: '',
   },
   relay: {},
+  routes: {},
 })
 
 export const loadPrinterConfig = (): PrinterConfig => {
@@ -45,6 +56,10 @@ export const loadPrinterConfig = (): PrinterConfig => {
       relay: {
         ...getDefaultPrinterConfig().relay,
         ...(parsed?.relay || {}),
+      },
+      routes: {
+        ...getDefaultPrinterConfig().routes,
+        ...(parsed?.routes || {}),
       },
     }
     return merged

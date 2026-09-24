@@ -46,6 +46,7 @@ const DeviceManager = () => {
   const [scaleReading, setScaleReading] = React.useState<string>('');
   const [webUsbPrinterConnected, setWebUsbPrinterConnected] = React.useState(false);
   const [openingDrawer, setOpeningDrawer] = React.useState(false);
+  const [routePrinters, setRoutePrinters] = React.useState(() => loadPrinterConfig().routes || {});
 
   React.useEffect(() => {
     if (!user?.id) return;
@@ -147,6 +148,25 @@ const DeviceManager = () => {
   const scales = devices.filter(d => d.type === 'scale');
   const printers = devices.filter(d => d.type === 'printer');
   const connectedPrinter = printers.find(d => d.status === 'connected');
+
+  const saveRoutePrinter = (route: 'kitchen' | 'bar', address: string) => {
+    const cfg = loadPrinterConfig();
+    const nextRoutes = { ...(cfg.routes || {}) };
+    if (address === '__default__') {
+      delete nextRoutes[route];
+    } else {
+      const device = printers.find((item) => item.address === address);
+      if (!device) return;
+      nextRoutes[route] = {
+        name: device.name,
+        transport: device.id.startsWith('bridge_net_') ? 'network' : device.id.startsWith('bridge_usb_') ? 'usb' : 'system',
+        address: device.address || '',
+      };
+    }
+    savePrinterConfig({ ...cfg, routes: nextRoutes });
+    setRoutePrinters(nextRoutes);
+    toast({ title: 'Destino atualizado', description: route === 'kitchen' ? 'Impressora da cozinha salva.' : 'Impressora do bar/copa salva.' });
+  };
 
   return (
     <div className="space-y-6">
@@ -311,6 +331,28 @@ const DeviceManager = () => {
                     checked={autoPrintKds}
                     onCheckedChange={(checked) => { void persistKitchenTicketSetting(checked); }}
                   />
+                </div>
+                <div className="mt-3 space-y-3 border-t pt-3">
+                  <div>
+                    <div className="text-sm font-medium">Destinos de impressão</div>
+                    <div className="text-xs text-muted-foreground">Clique em “Escanear Dispositivos” e escolha uma impressora para cada setor. Sem escolha, usa a impressora padrão.</div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {(['kitchen', 'bar'] as const).map((route) => (
+                      <div key={route} className="space-y-1.5">
+                        <Label>{route === 'kitchen' ? 'Cozinha' : 'Bar / Copa'}</Label>
+                        <Select value={routePrinters?.[route]?.address || '__default__'} onValueChange={(value) => saveRoutePrinter(route, value)}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__default__">Impressora padrão</SelectItem>
+                            {printers.filter((printer) => printer.address).map((printer) => (
+                              <SelectItem key={`${route}:${printer.id}`} value={printer.address || printer.id}>{printer.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ))}
+                  </div>
                 </div>
                 <div className="flex justify-end gap-2 mt-2">
                   <Button

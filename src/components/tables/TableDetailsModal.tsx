@@ -26,6 +26,7 @@ import AdminPinDialog from '@/components/security/AdminPinDialog';
 import { verifyAdminPin } from '@/services/adminPin';
 import { getLocalOperatorSession, isAdminOperator } from '@/services/operatorAuth';
 import { formatSaleQuantity } from '@/utils/saleQuantity';
+import { friendlyErrorMessage } from '@/lib/friendly-error';
 
 interface Table {
   id: string;
@@ -585,9 +586,10 @@ const TableDetailsModal: React.FC<TableDetailsModalProps> = ({
       });
       onRefresh();
     } catch (error) {
+      console.error('Erro ao cancelar item da mesa:', error);
       toast({
         title: 'Não foi possível cancelar o item',
-        description: error instanceof Error ? error.message : 'Atualize a mesa e tente novamente.',
+        description: friendlyErrorMessage(error, 'Atualize a mesa e tente novamente.'),
         variant: 'destructive',
       });
     } finally {

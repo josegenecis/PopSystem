@@ -30,6 +30,13 @@ const writeConfig = (cfg) => {
   fs.writeFileSync(configPath(), JSON.stringify(cfg, null, 2))
 }
 
+const normalizePrinterRoutes = (cfg = {}) => ({
+  receipt: String(cfg?.printerRoutes?.receipt || cfg?.printerName || ''),
+  kitchen: String(cfg?.printerRoutes?.kitchen || ''),
+  bar: String(cfg?.printerRoutes?.bar || ''),
+  service: String(cfg?.printerRoutes?.service || ''),
+})
+
 let bridgeProc = null
 let tray = null
 let win = null
@@ -339,7 +346,8 @@ const startBridge = (token) => {
     SUPABASE_ANON_KEY,
     PRINT_AGENT_TOKEN: token,
     PRINT_TRANSPORT: 'system',
-    PRINT_ADDRESS: cfg?.printerName || '',
+    PRINT_ADDRESS: normalizePrinterRoutes(cfg).receipt,
+    PRINT_ROUTES_JSON: JSON.stringify(normalizePrinterRoutes(cfg)),
     SCALE_PORT: cfg?.scale?.portPath || '',
     SCALE_PROTOCOL: cfg?.scale?.protocol || 'generic',
     SCALE_BAUD_RATE: String(cfg?.scale?.baudRate || ''),
@@ -536,8 +544,9 @@ const createTray = () => {
       label: 'Abrir gaveta',
       click: async () => {
         const cfg = readConfig()
-        if (!cfg?.printerName) return win && win.show()
-        const connected = await bridgeCommand('connect_printer', { transport: 'system', address: cfg.printerName }, 'printer_connected')
+        const receiptPrinter = normalizePrinterRoutes(cfg).receipt
+        if (!receiptPrinter) return win && win.show()
+        const connected = await bridgeCommand('connect_printer', { transport: 'system', address: receiptPrinter }, 'printer_connected')
         if (connected?.ok) await bridgeCommand('open_cash_drawer', { connector: 'auto' }, 'cash_drawer_opened')
       },
     },
@@ -553,7 +562,8 @@ ipcMain.handle('bridge:getStatus', async () => {
     paired: !!cfg.token,
     running: !!bridgeProc,
     pairingCode: cfg.pairingCode || null,
-    printerName: cfg?.printerName || '',
+    printerName: normalizePrinterRoutes(cfg).receipt,
+    printerRoutes: normalizePrinterRoutes(cfg),
     scale: cfg?.scale || null,
   }
 })
@@ -640,32 +650,56 @@ ipcMain.handle('bridge:listPrinters', async () => {
 
 ipcMain.handle('bridge:getPrinterSelection', async () => {
   const cfg = readConfig()
-  return { ok: true, printerName: cfg?.printerName || '' }
+  return { ok: true, printerName: normalizePrinterRoutes(cfg).receipt }
 })
 
 ipcMain.handle('bridge:setPrinterSelection', async (_ev, payload) => {
   const cfg = readConfig()
   const printerName = payload?.printerName ? String(payload.printerName) : ''
-  const selectionChanged = printerName !== String(cfg?.printerName || '')
-  writeConfig({ ...cfg, printerName })
+  const currentRoutes = normalizePrinterRoutes(cfg)
+  const selectionChanged = printerName !== currentRoutes.receipt
+  writeConfig({ ...cfg, printerName, printerRoutes: { ...currentRoutes, receipt: printerName } })
   if (selectionChanged || !bridgeProc) {
     await restartBridge(cfg?.token || '')
   }
   return { ok: true }
 })
 
-ipcMain.handle('bridge:testPrinter', async () => {
+ipcMain.handle('bridge:getPrinterRoutes', async () => {
   const cfg = readConfig()
-  if (!cfg?.printerName) return { ok: false, error: 'printer_not_selected' }
-  const connected = await bridgeCommand('connect_printer', { transport: 'system', address: cfg.printerName }, 'printer_connected')
+  return { ok: true, routes: normalizePrinterRoutes(cfg) }
+})
+
+ipcMain.handle('bridge:setPrinterRoutes', async (_event, payload) => {
+  const cfg = readConfig()
+  const incoming = payload?.routes && typeof payload.routes === 'object' ? payload.routes : {}
+  const routes = {
+    receipt: String(incoming.receipt || ''),
+    kitchen: String(incoming.kitchen || ''),
+    bar: String(incoming.bar || ''),
+    service: String(incoming.service || ''),
+  }
+  const changed = JSON.stringify(routes) !== JSON.stringify(normalizePrinterRoutes(cfg))
+  writeConfig({ ...cfg, printerName: routes.receipt, printerRoutes: routes })
+  if (changed || !bridgeProc) await restartBridge(cfg?.token || '')
+  return { ok: true, routes }
+})
+
+ipcMain.handle('bridge:testPrinter', async (_event, payload) => {
+  const cfg = readConfig()
+  const route = ['receipt', 'kitchen', 'bar', 'service'].includes(String(payload?.route)) ? String(payload.route) : 'receipt'
+  const printerName = normalizePrinterRoutes(cfg)[route]
+  if (!printerName) return { ok: false, error: 'printer_not_selected' }
+  const connected = await bridgeCommand('connect_printer', { transport: 'system', address: printerName }, 'printer_connected')
   if (!connected?.ok) return connected
   return await bridgeCommand('test_print', {}, 'printed_test', 10000)
 })
 
 ipcMain.handle('bridge:openCashDrawer', async () => {
   const cfg = readConfig()
-  if (!cfg?.printerName) return { ok: false, error: 'printer_not_selected' }
-  const connected = await bridgeCommand('connect_printer', { transport: 'system', address: cfg.printerName }, 'printer_connected')
+  const receiptPrinter = normalizePrinterRoutes(cfg).receipt
+  if (!receiptPrinter) return { ok: false, error: 'printer_not_selected' }
+  const connected = await bridgeCommand('connect_printer', { transport: 'system', address: receiptPrinter }, 'printer_connected')
   if (!connected?.ok) return connected
   return await bridgeCommand('open_cash_drawer', { connector: 'auto' }, 'cash_drawer_opened')
 })

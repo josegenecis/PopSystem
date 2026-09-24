@@ -177,6 +177,8 @@ export const bridgePrintReceipt = async (params: {
   transport: PrinterTransport
   address?: string
   payload: unknown
+  route?: 'receipt' | 'kitchen' | 'bar' | 'service'
+  template?: 'receipt' | 'kitchen_ticket'
   timeoutMs?: number
 }): Promise<BridgePrintResult> => {
   const timeoutMs = Math.max(1000, params.timeoutMs ?? 10000)
@@ -209,7 +211,16 @@ export const bridgePrintReceipt = async (params: {
       }
     }
 
-    const printed = await sendAndWait(ws, 'print_receipt', params.payload, 'printed_receipt', timeoutMs)
+    const basePayload = params.payload && typeof params.payload === 'object' ? params.payload as Record<string, unknown> : {}
+    const printed = await sendAndWait(ws, 'print_receipt', {
+      ...basePayload,
+      print_route: params.route || 'receipt',
+      print_template: params.template || 'receipt',
+      printer: {
+        transport: params.transport,
+        address: params.address || '',
+      },
+    }, 'printed_receipt', timeoutMs)
     return {
       available: true,
       printerConnected: true,

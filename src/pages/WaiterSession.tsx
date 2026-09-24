@@ -944,17 +944,15 @@ const WaiterSessionPage = () => {
       const response = await moveWaiterItem({
         itemId: moveItemId,
         targetAccountId: moveTargetAccountId,
-        quantity: movingItem?.saleUnit === 'kg'
-          ? Math.max(0.001, parseDecimalInput(moveQuantity))
-          : Math.max(1, Math.floor(parseDecimalInput(moveQuantity))),
+        quantity: Math.max(0.001, Math.round(parseDecimalInput(moveQuantity) * 1000) / 1000),
       });
       applySession(response.session);
       setMoveItemId('');
       setMoveTargetAccountId('');
       setMoveQuantity('1');
       toast({
-        title: 'Item movido',
-        description: 'O item foi redistribuido entre as comandas.',
+        title: 'Divisão concluída',
+        description: 'A cobrança foi redistribuída sem reenviar o item para a cozinha.',
       });
     } catch (error: any) {
       toast({
@@ -1383,22 +1381,11 @@ const WaiterSessionPage = () => {
                                       </div>
                                     </div>
 
-                                    {item.status === 'draft' ? (
-                                      <div className="mt-3 flex flex-wrap gap-2">
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                      {item.status === 'draft' ? (
+                                        <>
                                         <Button variant="outline" className="h-8 rounded-2xl text-[11px] sm:h-9 sm:text-sm" onClick={() => openProductDialog(account, item.id)}>
                                           Editar item
-                                        </Button>
-                                        <Button
-                                          variant="outline"
-                                          className="h-8 rounded-2xl text-[11px] sm:h-9 sm:text-sm"
-                                          onClick={() => {
-                                            setMoveItemId(item.id);
-                                            setMoveTargetAccountId('');
-                                            setMoveQuantity(item.saleUnit === 'kg' ? item.quantity.toFixed(3).replace('.', ',') : String(item.quantity));
-                                          }}
-                                          disabled={session.accounts.length < 2}
-                                        >
-                                          Mover item
                                         </Button>
                                         <Button
                                           variant="ghost"
@@ -1407,8 +1394,22 @@ const WaiterSessionPage = () => {
                                         >
                                           Remover
                                         </Button>
-                                      </div>
-                                    ) : null}
+                                        </>
+                                      ) : null}
+                                      <Button
+                                        variant="outline"
+                                        className="h-8 rounded-2xl text-[11px] sm:h-9 sm:text-sm"
+                                        onClick={() => {
+                                          setMoveItemId(item.id);
+                                          setMoveTargetAccountId('');
+                                          setMoveQuantity(String(Math.max(0.001, item.quantity / 2)).replace('.', ','));
+                                        }}
+                                        disabled={session.accounts.length < 2}
+                                      >
+                                        <Split className="mr-1.5 h-3.5 w-3.5" />
+                                        Dividir / mover
+                                      </Button>
+                                    </div>
                                   </div>
                                 ))
                               )}
@@ -2190,10 +2191,18 @@ const WaiterSessionPage = () => {
 
       <Dialog open={Boolean(moveItemId)} onOpenChange={(open) => !open && setMoveItemId('')}>
         <DialogContent className="rounded-[28px] border-0 sm:max-w-lg">
-          <DialogTitle className="text-2xl font-semibold text-[#082F23]">Mover item entre comandas</DialogTitle>
+          <DialogTitle className="text-2xl font-semibold text-[#082F23]">Dividir entre comandas</DialogTitle>
           <DialogDescription>
-            Use este fluxo para redistribuir itens de uma comanda para outra dentro da mesma mesa.
+            Escolha quanto desta cobrança vai para outra comanda. O pedido da cozinha não será duplicado.
           </DialogDescription>
+          {movingItem ? (
+            <div className="rounded-2xl bg-[#F4F8F2] px-4 py-3">
+              <div className="font-semibold text-[#082F23]">{movingItem.productName}</div>
+              <div className="mt-1 text-sm text-slate-500">
+                Atual: {formatSaleQuantity(movingItem.quantity, movingItem.saleUnit)} · {formatMoney(movingItem.totalPrice)}
+              </div>
+            </div>
+          ) : null}
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label>Comanda de destino</Label>
@@ -2213,25 +2222,39 @@ const WaiterSessionPage = () => {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>{movingItem?.saleUnit === 'kg' ? 'Peso a mover (kg)' : 'Quantidade a mover'}</Label>
+              <Label>{movingItem?.saleUnit === 'kg' ? 'Peso para a outra comanda (kg)' : 'Parte para a outra comanda'}</Label>
               <Input
-                inputMode={movingItem?.saleUnit === 'kg' ? 'decimal' : 'numeric'}
+                inputMode="decimal"
                 value={moveQuantity}
-                onChange={(event) => setMoveQuantity(
-                  movingItem?.saleUnit === 'kg'
-                    ? event.target.value.replace(/[^\d,.]/g, '').slice(0, 8)
-                    : event.target.value.replace(/\D/g, '').slice(0, 2),
-                )}
+                onChange={(event) => setMoveQuantity(event.target.value.replace(/[^\d,.]/g, '').slice(0, 8))}
                 className="h-12 rounded-2xl"
               />
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 rounded-xl text-xs"
+                  onClick={() => movingItem && setMoveQuantity(String(Math.max(0.001, movingItem.quantity / 2)).replace('.', ','))}
+                >
+                  Metade
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 rounded-xl text-xs"
+                  onClick={() => movingItem && setMoveQuantity(String(movingItem.quantity).replace('.', ','))}
+                >
+                  Tudo
+                </Button>
+              </div>
             </div>
           </div>
           <DialogFooter className="gap-3 sm:justify-between">
             <Button variant="outline" className="rounded-2xl" onClick={() => setMoveItemId('')} disabled={submitting}>
               Cancelar
             </Button>
-            <Button className="rounded-2xl bg-[#082F23] hover:bg-[#0B4A36]" onClick={handleMoveItem} disabled={submitting || !moveTargetAccountId}>
-              Confirmar movimento
+            <Button className="rounded-2xl bg-[#082F23] hover:bg-[#0B4A36]" onClick={handleMoveItem} disabled={submitting || !moveTargetAccountId || parseDecimalInput(moveQuantity) <= 0 || parseDecimalInput(moveQuantity) > Number(movingItem?.quantity || 0)}>
+              Confirmar divisão
             </Button>
           </DialogFooter>
         </DialogContent>

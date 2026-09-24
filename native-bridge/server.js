@@ -3,7 +3,7 @@ import os from 'os'
 import net from 'net'
 import printerLib from '@thiagoelg/node-printer'
 import { SerialPort } from 'serialport'
-import { buildEscposReceipt, buildEscposReport, buildReceiptLogoHtml } from './receipt.js'
+import { buildEscposKitchenTicket, buildEscposReceipt, buildEscposReport, buildReceiptLogoHtml } from './receipt.js'
 import { createPrintQueue } from './print-queue.js'
 
 const bridgePort = Number(process.env.POP_CONNECT_PORT || process.env.BRIDGE_PORT || 8766)
@@ -20,6 +20,27 @@ let renderRequestSequence = 0
 const pendingRenderRequests = new Map()
 const physicalPrintQueue = createPrintQueue()
 let shuttingDown = false
+
+const parsePrinterRoutes = () => {
+  try {
+    const parsed = JSON.parse(process.env.PRINT_ROUTES_JSON || '{}')
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+const configuredPrinterRoutes = parsePrinterRoutes()
+
+const resolvePrinterTarget = (route = 'receipt', fallback = {}) => {
+  const configuredAddress = String(configuredPrinterRoutes?.[route] || '').trim()
+  if (configuredAddress) return { transport: 'system', address: configuredAddress }
+  const fallbackAddress = String(fallback?.address || '').trim()
+  return {
+    transport: fallback?.transport || getEnv('PRINT_TRANSPORT', 'BRIDGE_TRANSPORT') || 'system',
+    address: fallbackAddress || getEnv('PRINT_ADDRESS', 'BRIDGE_ADDRESS') || '',
+  }
+}
 
 async function shutdown() {
   if (shuttingDown) return
@@ -278,7 +299,8 @@ async function printTest() {
 }
 
 async function printReceipt(data) {
-  const rendered = await renderReceiptHtml(data?.rendered_html)
+  const kitchenTicket = data?.print_template === 'kitchen_ticket' || data?.print_route === 'kitchen'
+  const rendered = kitchenTicket ? null : await renderReceiptHtml(data?.rendered_html)
   if (rendered?.length) {
     if (systemPrinterName) return await printRawSystem(rendered)
     if (networkAddress) return await printRawNetwork(rendered)
@@ -286,8 +308,8 @@ async function printReceipt(data) {
 
   // Compatibilidade com versões antigas do aplicativo/PWA e contingência caso
   // o renderizador visual não esteja disponível.
-  const escposData = buildEscposReceipt(data)
-  const logoHtml = buildReceiptLogoHtml(data)
+  const escposData = kitchenTicket ? buildEscposKitchenTicket(data) : buildEscposReceipt(data)
+  const logoHtml = kitchenTicket ? '' : buildReceiptLogoHtml(data)
   const logoBytes = logoHtml ? await renderReceiptHtml(logoHtml, { fragment: true }) : null
   const printData = logoBytes?.length
     ? Buffer.concat([logoBytes, Buffer.from(escposData, 'binary')])
@@ -299,9 +321,13 @@ async function printReceipt(data) {
   return false
 }
 
-async function queueReceiptPrint(data) {
+async function queueReceiptPrint(data, target = null) {
   const key = String(data?.print_job_id || '').trim()
-  const result = await physicalPrintQueue.run(() => printReceipt(data), { key })
+  const result = await physicalPrintQueue.run(async () => {
+    if (target?.address && !openPrinter(target.transport || 'system', target.address)) return false
+    if (!systemPrinterName && !networkAddress) restoreConfiguredPrinter()
+    return await printReceipt(data)
+  }, { key })
   return result.ok
 }
 
@@ -405,8 +431,12 @@ wss.on('connection', (ws) => {
           break
         }
         case 'print_receipt': {
-          restoreConfiguredPrinter()
-          const ok = (systemPrinterName || networkAddress) ? await queueReceiptPrint(payload) : false
+          const route = String(payload?.print_route || 'receipt')
+          const target = resolvePrinterTarget(route, {
+            transport: payload?.printer?.transport,
+            address: payload?.printer?.address,
+          })
+          const ok = target.address ? await queueReceiptPrint(payload, target) : false
           ws.send(JSON.stringify({ ok, event: 'printed_receipt' }))
           break
         }
@@ -543,10 +573,18 @@ async function pollPrintJobs() {
       let errText = ''
       try {
         const printerCfg = job?.payload?.printer || {}
-        const transport = printerCfg.transport || relayTransport
-        const address = printerCfg.address || relayAddress || undefined
-        try { openPrinter(transport, address) } catch {}
-        ok = await queueReceiptPrint({ ...(job?.payload || {}), print_job_id: `relay:${job.id}` })
+        const jobType = String(job?.job_type || '').toLowerCase()
+        const route = String(job?.payload?.print_route || (jobType.includes('kds') || jobType.includes('kitchen') ? 'kitchen' : 'receipt'))
+        const target = resolvePrinterTarget(route, {
+          transport: printerCfg.transport || relayTransport,
+          address: printerCfg.address || relayAddress,
+        })
+        ok = target.address ? await queueReceiptPrint({
+          ...(job?.payload || {}),
+          print_route: route,
+          print_template: route === 'kitchen' ? 'kitchen_ticket' : (job?.payload?.print_template || 'receipt'),
+          print_job_id: `relay:${job.id}`,
+        }, target) : false
       } catch (e) {
         ok = false
         errText = String(e?.message || e)

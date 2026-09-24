@@ -150,6 +150,50 @@ export function buildEscposReport(data = {}) {
   return output.join('')
 }
 
+export function buildEscposKitchenTicket(data = {}) {
+  const width = data?.receipt?.paper_width === '58mm' || data?.paper_width === '58mm' ? 32 : 48
+  const separator = '='.repeat(width)
+  const items = Array.isArray(data.items) ? data.items : []
+  const output = [`${ESC}\x40`, FONT_A, SIZE_NORMAL, `${ESC}\x61\x01`, `${ESC}\x45\x01`, SIZE_DOUBLE]
+  output.push('COZINHA\n')
+  output.push(SIZE_NORMAL)
+  const orderNumber = normalizeLine(data.order_number).replace(/^PED[-\s]*/i, '')
+  appendWrapped(output, orderNumber ? `PEDIDO #${orderNumber}` : 'NOVO PEDIDO', width)
+  output.push(`${ESC}\x45\x00${separator}\n${ESC}\x61\x00`)
+
+  const type = orderTypeLabel(data.order_type)
+  if (type) appendWrapped(output, `Tipo: ${type}`, width)
+  if (data.table_number) appendWrapped(output, `Mesa: ${data.table_number}`, width)
+  if (data.customer_name) appendWrapped(output, `Cliente/Comanda: ${data.customer_name}`, width)
+  if (data.date) {
+    const parsed = new Date(data.date)
+    if (!Number.isNaN(parsed.getTime())) {
+      appendWrapped(output, `Hora: ${parsed.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`, width)
+    }
+  }
+  output.push(`${separator}\n${ESC}\x45\x01`)
+  appendWrapped(output, 'ITENS', width)
+  output.push(`${ESC}\x45\x00`)
+
+  for (const item of items) {
+    const quantity = Number(item.quantity || item.qty || 1)
+    const name = item.product_name || item.name || 'Item'
+    appendWrapped(output, `${quantity.toLocaleString('pt-BR', { maximumFractionDigits: 3 })}x ${name}`, width)
+    const variations = Array.isArray(item.variations) ? item.variations : []
+    for (const variation of variations) appendWrapped(output, variation, width, '  + ')
+    if (item.notes || item.observations) appendWrapped(output, `OBS: ${item.notes || item.observations}`, width, '  ')
+    output.push('-'.repeat(width) + '\n')
+  }
+
+  if (data.notes) {
+    output.push(`${ESC}\x45\x01`)
+    appendWrapped(output, `OBSERVACOES: ${data.notes}`, width)
+    output.push(`${ESC}\x45\x00`)
+  }
+  output.push(`${ESC}\x61\x01\n${separator}\n\n\n\n${GS}\x56\x00`)
+  return output.join('')
+}
+
 export function buildEscposReceipt(data = {}) {
   const width = data?.receipt?.paper_width === '58mm' || data?.paper_width === '58mm' ? 32 : 48
   const separator = '-'.repeat(width)

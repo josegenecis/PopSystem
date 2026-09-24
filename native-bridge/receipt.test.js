@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildEscposReceipt, buildEscposReport, buildReceiptLogoHtml, normalizePrinterText } from './receipt.js'
+import { buildEscposKitchenTicket, buildEscposReceipt, buildEscposReport, buildReceiptLogoHtml, normalizePrinterText } from './receipt.js'
 
 const readable = (value) => value.replace(/[\x00-\x1f]/g, '')
 
@@ -74,6 +74,35 @@ test('prints the explicit received amount and change sent by the PDV', () => {
 
   assert.match(receipt, /Troco para:\s+R\$ 100,00/)
   assert.match(receipt, /Troco:\s+R\$ 70,00/)
+})
+
+test('builds a kitchen copy without prices, address or payment totals', () => {
+  const ticket = readable(buildEscposKitchenTicket({
+    order_number: 'PED1234',
+    order_type: 'dine_in',
+    table_number: '12',
+    customer_name: 'Comanda João',
+    customer_address_display: 'Rua que nao deve sair',
+    items: [{
+      product_name: 'Pizza grande',
+      quantity: 1,
+      subtotal: 79.9,
+      variations: ['Sabor: Calabresa'],
+      notes: 'Sem cebola',
+    }],
+    total: 79.9,
+    payment_method: 'PIX',
+  }))
+
+  assert.match(ticket, /COZINHA/)
+  assert.match(ticket, /PEDIDO #1234/)
+  assert.match(ticket, /Mesa: 12/)
+  assert.match(ticket, /1x Pizza grande/)
+  assert.match(ticket, /Sabor: Calabresa/)
+  assert.match(ticket, /OBS: Sem cebola/)
+  assert.doesNotMatch(ticket, /79,90/)
+  assert.doesNotMatch(ticket, /Rua que nao deve sair/)
+  assert.doesNotMatch(ticket, /PIX/)
 })
 
 test('uses a commercial hierarchy without widening the receipt body', () => {

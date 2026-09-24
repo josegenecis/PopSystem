@@ -1709,9 +1709,22 @@ async function printPopConnect(order: any, config: NormalizedPrintConfig) {
         transport: printerConfig.bridge.transport,
         address: printerConfig.bridge.address,
         payload,
+        route: 'receipt',
+        template: 'receipt',
       });
       lastResult = result;
       if (!result.printed) break;
+    }
+    if (lastResult.printed && config.print_kitchen_ticket) {
+      const kitchenResult = await bridgePrintReceipt({
+        websocketUrl,
+        transport: printerConfig.bridge.transport,
+        address: printerConfig.bridge.address,
+        payload,
+        route: 'kitchen',
+        template: 'kitchen_ticket',
+      });
+      if (!kitchenResult.printed) return kitchenResult;
     }
     if (lastResult.printed) return lastResult;
     if (lastResult.available) return lastResult;

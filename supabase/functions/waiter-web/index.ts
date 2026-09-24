@@ -12,9 +12,9 @@ const normalizeAmount = (value: unknown) => Number(value || 0)
 const normalizeItemQuantity = (value: unknown, saleUnit: 'un' | 'kg') => {
   const numeric = Number(value)
   if (!Number.isFinite(numeric) || numeric <= 0) return saleUnit === 'kg' ? 0.001 : 1
-  return saleUnit === 'kg'
-    ? Math.max(0.001, Math.round(numeric * 1000) / 1000)
-    : Math.max(1, Math.floor(numeric))
+  // Produtos por unidade continuam entrando no catalogo como inteiros, mas um
+  // item ja lancado pode ser rateado (ex.: 0,5 refrigerante em cada comanda).
+  return Math.max(0.001, Math.round(numeric * 1000) / 1000)
 }
 const isEffectivelyZero = (value: number) => Math.abs(value) <= EPSILON
 const toNumberOrNull = (value: unknown) => {
@@ -2309,83 +2309,17 @@ Deno.serve(async (req: Request) => {
         .single()
 
       if (itemError) throw itemError
-      if (itemRow.status !== 'draft') return fail('So e possivel mover itens ainda nao enviados.', 400)
       const itemSaleUnit = itemRow.sale_unit === 'kg' ? 'kg' : 'un'
       const moveQuantity = normalizeItemQuantity(requestedMoveQuantity, itemSaleUnit)
+      const { error: redistributeError } = await supabase.rpc('redistribute_table_order_item', {
+        p_restaurant_user_id: waiterSession.profile.restaurantId,
+        p_waiter_id: waiterSession.profile.id,
+        p_item_id: itemId,
+        p_target_account_id: targetAccountId,
+        p_quantity: moveQuantity,
+      })
+      if (redistributeError) throw redistributeError
 
-      const { data: accountRows, error: accountError } = await supabase
-        .from('table_accounts')
-        .select('id, session_id')
-        .in('id', [itemRow.account_id, targetAccountId])
-
-      if (accountError) throw accountError
-      if ((accountRows ?? []).length !== 2) return fail('Comanda de origem ou destino nao encontrada.', 404)
-
-      const sourceAccount = (accountRows ?? []).find((row: any) => row.id === itemRow.account_id)
-      const targetAccount = (accountRows ?? []).find((row: any) => row.id === targetAccountId)
-      if (!sourceAccount || !targetAccount) return fail('Comanda de origem ou destino nao encontrada.', 404)
-      if (sourceAccount.session_id !== targetAccount.session_id) return fail('So e possivel mover itens dentro da mesma mesa.', 400)
-
-      const { data: optionRows, error: optionError } = await supabase
-        .from('order_item_options')
-        .select('*')
-        .eq('order_item_id', itemId)
-
-      if (optionError) throw optionError
-
-      const sourceQuantity = normalizeItemQuantity(itemRow.quantity, itemSaleUnit)
-      const quantityToMove = Math.min(sourceQuantity, moveQuantity)
-
-      if (quantityToMove >= sourceQuantity) {
-        const { error: moveError } = await supabase
-          .from('order_items')
-          .update({ account_id: targetAccountId })
-          .eq('id', itemId)
-
-        if (moveError) throw moveError
-      } else {
-        const { data: duplicatedItem, error: duplicateError } = await supabase
-          .from('order_items')
-          .insert({
-            session_id: itemRow.session_id,
-            account_id: targetAccountId,
-            product_id: itemRow.product_id,
-            product_name: itemRow.product_name,
-            quantity: quantityToMove,
-            sale_unit: itemSaleUnit,
-            unit_price: normalizeAmount(itemRow.unit_price),
-            notes: itemRow.notes || '',
-            status: 'draft',
-          })
-          .select('id')
-          .single()
-
-        if (duplicateError) throw duplicateError
-
-        if ((optionRows ?? []).length) {
-          const { error: insertOptionsError } = await supabase
-            .from('order_item_options')
-            .insert(
-              (optionRows ?? []).map((option: any) => ({
-                order_item_id: duplicatedItem.id,
-                option_name: option.option_name,
-                price: normalizeAmount(option.price),
-                quantity: Math.max(1, Number(option.quantity || 1)),
-              })),
-            )
-
-          if (insertOptionsError) throw insertOptionsError
-        }
-
-        const { error: reduceError } = await supabase
-          .from('order_items')
-          .update({ quantity: sourceQuantity - quantityToMove })
-          .eq('id', itemId)
-
-        if (reduceError) throw reduceError
-      }
-
-      await refreshAccountTotals(supabase, [itemRow.account_id, targetAccountId])
       await refreshSessionStatus(supabase, itemRow.session_id)
 
       const session = await buildSessionResponse(supabase, waiterSession, itemRow.session_id)

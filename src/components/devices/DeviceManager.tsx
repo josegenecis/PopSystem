@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Scale, Printer, Bluetooth, Wifi, Usb, Search, Power, PowerOff, Link as LinkIcon, ScanBarcode, ArchiveRestore } from 'lucide-react';
 import { useDeviceIntegration, Device } from '@/hooks/useDeviceIntegration';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { loadPrinterConfig, savePrinterConfig } from '@/services/printerConfig';

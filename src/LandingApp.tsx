@@ -1,10 +1,11 @@
-import { lazy, Suspense } from 'react';
+import { Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { HelmetProvider } from 'react-helmet-async';
 import { Analytics } from '@vercel/analytics/react';
 import LandingPage from '@/pages/LandingPage';
+import { lazyWithChunkRecovery } from '@/utils/lazyWithChunkRecovery';
 
-const LegalPage = lazy(() => import('@/pages/LegalPage'));
+const LegalPage = lazyWithChunkRecovery(() => import('@/pages/LegalPage'));
 
 export default function LandingApp() {
   return (

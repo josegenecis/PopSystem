@@ -1,11 +1,12 @@
-import { lazy, Suspense } from 'react';
+import { Suspense } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { Toaster } from '@/components/ui/toaster';
 import MenuDigital from '@/pages/MenuDigital';
+import { lazyWithChunkRecovery } from '@/utils/lazyWithChunkRecovery';
 
-const OrderTracking = lazy(() => import('@/pages/OrderTracking'));
+const OrderTracking = lazyWithChunkRecovery(() => import('@/pages/OrderTracking'));
 
 const menuQueryClient = new QueryClient({
   defaultOptions: {

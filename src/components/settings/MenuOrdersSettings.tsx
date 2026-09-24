@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect, useMemo } from 'react';
+import React, { Suspense, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Bell, CreditCard, Lock, Palette, Printer, QrCode, Truck, UtensilsCrossed } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -8,18 +8,19 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useFeatureGate } from '@/components/subscription/FeatureGateProvider';
 import type { FeatureKey } from '@/lib/featureAccess';
+import { lazyWithChunkRecovery } from '@/utils/lazyWithChunkRecovery';
 
-const AppearanceSettings = lazy(() => import('@/components/settings/AppearanceSettings'));
-const DeliverySettings = lazy(() => import('@/components/settings/DeliverySettings'));
-const NotificationSettings = lazy(() => import('@/components/settings/NotificationSettings'));
-const PaymentMethodsSettings = lazy(() => import('@/components/settings/PaymentMethodsSettings'));
-const TableOrderFlowSettings = lazy(() => import('@/components/settings/TableOrderFlowSettings'));
-const ProductPreparationRoutingSettings = lazy(() => import('@/components/settings/ProductPreparationRoutingSettings'));
-const QRCodeGenerator = lazy(() => import('@/components/products/QRCodeGenerator'));
-const MenuLinkGenerator = lazy(() => import('@/components/menu/MenuLinkGenerator'));
-const DeviceManager = lazy(() => import('@/components/devices/DeviceManager'));
-const HardwareSettings = lazy(() => import('@/components/settings/HardwareSettings'));
-const PixSetup = lazy(() => import('@/pages/PixSetup'));
+const AppearanceSettings = lazyWithChunkRecovery(() => import('@/components/settings/AppearanceSettings'));
+const DeliverySettings = lazyWithChunkRecovery(() => import('@/components/settings/DeliverySettings'));
+const NotificationSettings = lazyWithChunkRecovery(() => import('@/components/settings/NotificationSettings'));
+const PaymentMethodsSettings = lazyWithChunkRecovery(() => import('@/components/settings/PaymentMethodsSettings'));
+const TableOrderFlowSettings = lazyWithChunkRecovery(() => import('@/components/settings/TableOrderFlowSettings'));
+const ProductPreparationRoutingSettings = lazyWithChunkRecovery(() => import('@/components/settings/ProductPreparationRoutingSettings'));
+const QRCodeGenerator = lazyWithChunkRecovery(() => import('@/components/products/QRCodeGenerator'));
+const MenuLinkGenerator = lazyWithChunkRecovery(() => import('@/components/menu/MenuLinkGenerator'));
+const DeviceManager = lazyWithChunkRecovery(() => import('@/components/devices/DeviceManager'));
+const HardwareSettings = lazyWithChunkRecovery(() => import('@/components/settings/HardwareSettings'));
+const PixSetup = lazyWithChunkRecovery(() => import('@/pages/PixSetup'));
 
 const sections = [
   { id: 'digital', label: 'Cardápio digital', icon: Palette },

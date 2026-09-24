@@ -1,5 +1,5 @@
 
-import React, { lazy, Suspense, useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
 import { BrowserRouter, HashRouter, Routes, Route, Outlet, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { HelmetProvider } from 'react-helmet-async';
@@ -21,6 +21,9 @@ import { OperatorRoute } from '@/components/auth/OperatorRoute';
 import { OperatorGate } from '@/components/auth/OperatorGate';
 import { PrinterService } from '@/utils/printerService';
 import { toast } from 'sonner';
+import { lazyWithChunkRecovery } from '@/utils/lazyWithChunkRecovery';
+
+const lazy = lazyWithChunkRecovery;
 
 const Index = lazy(() => import('@/pages/Index'));
 const Login = lazy(() => import('@/pages/Login'));

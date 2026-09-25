@@ -564,6 +564,61 @@ export const getIfoodMerchantStatus = async (supabase: any, settings: any, merch
     expectedStatuses: [200],
   })
 
+export const listIfoodMerchantInterruptions = async (supabase: any, settings: any, merchantId: string) =>
+  await ifoodApiRequest(supabase, settings, {
+    baseUrl: MERCHANT_BASE_URL,
+    path: `/merchants/${merchantId}/interruptions`,
+    expectedStatuses: [200],
+  })
+
+export const createIfoodMerchantInterruption = async (
+  supabase: any,
+  settings: any,
+  merchantId: string,
+  interruption: { description: string; start: string; end: string },
+) =>
+  await ifoodApiRequest(supabase, settings, {
+    baseUrl: MERCHANT_BASE_URL,
+    path: `/merchants/${merchantId}/interruptions`,
+    method: 'POST',
+    body: interruption,
+    expectedStatuses: [201],
+  })
+
+export const deleteIfoodMerchantInterruption = async (
+  supabase: any,
+  settings: any,
+  merchantId: string,
+  interruptionId: string,
+) =>
+  await ifoodApiRequest(supabase, settings, {
+    baseUrl: MERCHANT_BASE_URL,
+    path: `/merchants/${merchantId}/interruptions/${interruptionId}`,
+    method: 'DELETE',
+    expectedStatuses: [204],
+  })
+
+export const getIfoodMerchantOpeningHours = async (supabase: any, settings: any, merchantId: string) =>
+  await ifoodApiRequest(supabase, settings, {
+    baseUrl: MERCHANT_BASE_URL,
+    path: `/merchants/${merchantId}/opening-hours`,
+    expectedStatuses: [200],
+  })
+
+export const updateIfoodMerchantOpeningHours = async (
+  supabase: any,
+  settings: any,
+  merchantId: string,
+  shifts: Array<{ dayOfWeek: string; start: string; duration: number }>,
+) =>
+  await ifoodApiRequest(supabase, settings, {
+    baseUrl: MERCHANT_BASE_URL,
+    path: `/merchants/${merchantId}/opening-hours`,
+    method: 'PUT',
+    body: { storeId: merchantId, shifts },
+    expectedStatuses: [200, 201],
+  })
+
 export const fetchIfoodPollingEvents = async (supabase: any, settings: any) => {
   const headers: Record<string, string> = {}
   if (settings?.merchant_id) headers['x-polling-merchants'] = String(settings.merchant_id)

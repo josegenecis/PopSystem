@@ -81,3 +81,7 @@ Thumbs.db
 .trae
 .env*.local
 /output/
+
+# Required native printing module (not a generated system script).
+!native-bridge/system-print-data.js
+!native-bridge/system-print-data.test.js

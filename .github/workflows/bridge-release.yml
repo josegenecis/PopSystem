@@ -40,6 +40,9 @@ jobs:
           $version = "${{ github.ref_name }}" -replace '^bridge-v', '' -replace '^pop-connect-v', ''
           node scripts/set-release-version.cjs $version
 
+      - name: Verify native bridge modules
+        run: node --test native-bridge/receipt.test.js native-bridge/system-print-data.test.js native-bridge/print-queue.test.js
+
       - name: Build Pop Connect Installer
         run: npm run dist:pop-connect
 

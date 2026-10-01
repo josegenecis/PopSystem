@@ -301,3 +301,14 @@ test('NFC-e uses the same native body as a normal receipt and preserves fiscal Q
   assert.equal((fiscal.match(/Sistema PopSystem/g)||[]).length,1)
   assert.ok(!buildEscposReceipt({...base,nfce,receipt_partial:true}).includes('CUPOM FISCAL'))
 })
+
+ test('assigned attendance ticket is stable in customer and kitchen copies without replacing order number', () => {
+  const data = { order_number: 'PED987654', attendance_ticket: '001', ticket_code: true, items: [], total: 0 };
+  for (const build of [buildEscposReceipt, buildEscposKitchenTicket]) {
+    const result=readable(build(data));
+    assert.match(result,/SENHA: 001/);
+    assert.match(result,/987654/);
+    assert.doesNotMatch(result,/SENHA: 7654/);
+    assert.match(readable(build({...data, attendance_ticket:'10001'})),/SENHA: 10001/);
+  }
+ });

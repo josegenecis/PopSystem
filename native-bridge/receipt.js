@@ -160,6 +160,7 @@ export function buildEscposKitchenTicket(data = {}) {
   output.push(SIZE_NORMAL)
   const orderNumber = normalizeLine(data.order_number).replace(/^PED[-\s]*/i, '')
   appendWrapped(output, orderNumber ? `PEDIDO #${orderNumber}` : 'NOVO PEDIDO', width)
+  if (data.attendance_ticket) appendWrapped(output, `SENHA: ${data.attendance_ticket}`, width)
   output.push(`${ESC}\x45\x00${separator}\n${ESC}\x61\x00`)
 
   const type = orderTypeLabel(data.order_type)
@@ -234,7 +235,7 @@ export function buildEscposReceipt(data = {}) {
   if (normalizeLine(data.waiter_name)) appendWrapped(output, `Garcom: ${data.waiter_name}`, width)
   if (data.ticket_code && data.order_number) {
     output.push(`${ESC}\x45\x01${SIZE_DOUBLE}`)
-    appendWrapped(output, `SENHA: ${String(data.order_number).slice(-4)}`, width / 2)
+    appendWrapped(output, `SENHA: ${String(data.attendance_ticket || String(data.order_number).slice(-4))}`, width / 2)
     output.push(`${ESC}\x45\x00${bodySize}`)
   }
   if (data.order_number) {

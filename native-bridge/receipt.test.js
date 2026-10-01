@@ -4,6 +4,38 @@ import { buildEscposKitchenTicket, buildEscposReceipt, buildEscposReport, buildR
 
 const readable = (value) => value.replace(/[\x00-\x1f]/g, '')
 
+for (const paperWidth of ['58mm', '80mm']) {
+  test(`partial receipt preserves the complete bill without payment (${paperWidth})`, () => {
+    const order = {
+      store: { restaurant_name: 'Restaurante X', address: 'Rua Principal, 10', phone: '85999999999', cnpj: '12.345.678/0001-90', logo_url: 'https://cdn.example.com/restaurante.png' },
+      receipt: { paper_width: paperWidth, footer: 'Volte sempre!' },
+      order_number: 'PED123', table_number: '7', customer_name: 'Cliente da mesa', waiter_name: 'Ana Silva',
+      items: [{ product_name: 'Refeicao', quantity: 2, price: 25, subtotal: 50, variations: ['Sem cebola'] }],
+      subtotal: 50, discount: 5,
+      charges: [{ label: 'Acrescimo', amount: 5 }, { label: 'Servico (10%)', amount: 5 }],
+      total: 55, payment_method: 'DINHEIRO', change_amount: 100, change_value: 45,
+    }
+    const partial = readable(buildEscposReceipt({ ...order, receipt_partial: true }))
+    for (const text of ['Restaurante X', 'Rua Principal, 10', 'CNPJ: 12.345.678/0001-90', 'Tel: 85999999999', 'Cliente da mesa', 'Refeicao', 'Sem cebola', 'Subtotal:', 'Desconto:', 'Acrescimo:', 'Servico (10%):', 'TOTAL:', 'Volte sempre!']) {
+      assert.ok(partial.includes(text), `missing ${text}`)
+    }
+    assert.match(partial, /COMANDA PARCIAL/)
+    assert.match(partial, /Mesa: 7/)
+    assert.match(partial, /Garcom: Ana Silva/)
+    assert.doesNotMatch(partial, /Pagamento:|Troco/)
+    const final = readable(buildEscposReceipt(order))
+    assert.match(final, /Garcom: Ana Silva/)
+    assert.match(final, /Pagamento: DINHEIRO/)
+    assert.match(final, /Troco:/)
+    assert.doesNotMatch(final, /COMANDA PARCIAL/)
+    const partialLogo = buildReceiptLogoHtml({ ...order, receipt_partial: true })
+    assert.match(partialLogo, /restaurante\.png/)
+    assert.equal(partialLogo, buildReceiptLogoHtml(order))
+    const withoutPayment = final.replace(/Pagamento: DINHEIRO/, '').replace(/Troco para:\s+R\$ 100,00/, '').replace(/Troco:\s+R\$ 45,00/, '')
+    assert.equal(partial.replace('COMANDA PARCIAL', ''), withoutPayment)
+  })
+}
+
 test('uses the restaurant identity and prints the complete operational order', () => {
   const receipt = readable(buildEscposReceipt({
     store: {
@@ -103,6 +135,21 @@ test('builds a kitchen copy without prices, address or payment totals', () => {
   assert.doesNotMatch(ticket, /79,90/)
   assert.doesNotMatch(ticket, /Rua que nao deve sair/)
   assert.doesNotMatch(ticket, /PIX/)
+})
+
+test('identifies a bar copy without exposing payment data', () => {
+  const ticket = readable(buildEscposKitchenTicket({
+    print_route: 'bar',
+    order_number: 'B55',
+    table_number: '8',
+    items: [{ product_name: 'Refrigerante', quantity: 2, subtotal: 20 }],
+    total: 20,
+  }))
+
+  assert.match(ticket, /BAR \/ COPA/)
+  assert.match(ticket, /Mesa: 8/)
+  assert.match(ticket, /2x Refrigerante/)
+  assert.doesNotMatch(ticket, /20,00/)
 })
 
 test('uses a commercial hierarchy without widening the receipt body', () => {
@@ -219,4 +266,38 @@ test('builds a cash report for silent ESC/POS printing', () => {
   assert.match(text, /Abertura de Caixa/)
   assert.match(text, /Valor inicial: R\$ 100,00/)
   assert.ok(report.endsWith('\n\n\n\n\n\n\x1d\x56\x00'))
+})
+
+for (const route of ['kitchen', 'bar']) {
+  for (const paperWidth of ['58mm', '80mm']) {
+    test(`prints the attending waiter on ${route} (${paperWidth})`, () => {
+      const payload = {
+        receipt: { paper_width: paperWidth }, print_route: route,
+        waiter_name: 'Ana Silva', table_number: '7', order_type: 'dine_in',
+        items: [{ product_name: 'Produto', quantity: 1, subtotal: 25 }],
+      }
+      const receipt = readable(buildEscposKitchenTicket(payload))
+      assert.match(receipt, /Garcom: Ana Silva/)
+      assert.match(receipt, /Mesa: 7/)
+      assert.match(receipt, route === 'bar' ? /BAR \/ COPA/ : /COZINHA/)
+      assert.doesNotMatch(receipt, /R\$/)
+      assert.doesNotMatch(readable(buildEscposKitchenTicket({ ...payload, waiter_name: '' })), /Garcom:/)
+      assert.doesNotMatch(readable(buildEscposReceipt({ ...payload, waiter_name: '' })), /Garcom:/)
+    })
+  }
+}
+
+test('NFC-e uses the same native body as a normal receipt and preserves fiscal QR payload', () => {
+  const base = { store: { name: 'Loja' }, total: 13, payment_method: 'DEBITO', items: [{name:'Produto',quantity:1,price:13}], receipt: {paper_width:'80mm'} }
+  const nfce = {numero:'90',serie:'1',protocolo:'323260000240342',ambiente:'homologacao',chave:'1'.repeat(44),qrCodeUrl:'https://example.com/qrcode?p='+'1'.repeat(44)+'|2|2|token'}
+  const normal = buildEscposReceipt(base)
+  const fiscal = buildEscposReceipt({...base,nfce})
+  const endBody = normal.indexOf('Pagamento: DEBITO') + 'Pagamento: DEBITO'.length
+  assert.equal(fiscal.slice(0,endBody),normal.slice(0,endBody))
+  assert.ok(fiscal.includes('SEM VALOR FISCAL'))
+  assert.ok(fiscal.includes(nfce.protocolo))
+  assert.ok(fiscal.includes(nfce.qrCodeUrl))
+  assert.ok(fiscal.includes('\x1d(k\x03\x00\x31\x51\x30'))
+  assert.equal((fiscal.match(/Sistema PopSystem/g)||[]).length,1)
+  assert.ok(!buildEscposReceipt({...base,nfce,receipt_partial:true}).includes('CUPOM FISCAL'))
 })

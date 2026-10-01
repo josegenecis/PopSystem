@@ -4,6 +4,7 @@ import net from 'net'
 import printerLib from '@thiagoelg/node-printer'
 import { SerialPort } from 'serialport'
 import { buildEscposKitchenTicket, buildEscposReceipt, buildEscposReport, buildReceiptLogoHtml } from './receipt.js'
+import { prepareSystemPrintData } from './system-print-data.js'
 import { createPrintQueue } from './print-queue.js'
 
 const bridgePort = Number(process.env.POP_CONNECT_PORT || process.env.BRIDGE_PORT || 8766)
@@ -300,7 +301,8 @@ async function printTest() {
 
 async function printReceipt(data) {
   const kitchenTicket = data?.print_template === 'kitchen_ticket' || data?.print_route === 'kitchen'
-  const rendered = kitchenTicket ? null : await renderReceiptHtml(data?.rendered_html)
+  const nativeFiscal = data?.nfce && String(data.nfce.modelCode || '65') === '65'
+  const rendered = kitchenTicket || nativeFiscal ? null : await renderReceiptHtml(data?.rendered_html)
   if (rendered?.length) {
     if (systemPrinterName) return await printRawSystem(rendered)
     if (networkAddress) return await printRawNetwork(rendered)
@@ -369,7 +371,9 @@ async function openCashDrawer(payload = {}) {
 async function printRawSystem(data) {
   return await new Promise((resolve) => {
     try {
-      printerLib.printDirect({ data, printer: systemPrinterName || undefined, type: 'RAW', success: () => resolve(true), error: () => resolve(false) })
+      const deviceUri = process.platform === 'darwin' ? printerLib.getPrinter(systemPrinterName)?.options?.['device-uri'] : ''
+      const bytes = prepareSystemPrintData(data, process.platform, deviceUri)
+      printerLib.printDirect({ data: bytes, printer: systemPrinterName || undefined, type: 'RAW', success: () => resolve(true), error: () => resolve(false) })
     } catch { resolve(false) }
   })
 }

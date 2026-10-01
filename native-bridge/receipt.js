@@ -155,7 +155,8 @@ export function buildEscposKitchenTicket(data = {}) {
   const separator = '='.repeat(width)
   const items = Array.isArray(data.items) ? data.items : []
   const output = [`${ESC}\x40`, FONT_A, SIZE_NORMAL, `${ESC}\x61\x01`, `${ESC}\x45\x01`, SIZE_DOUBLE]
-  output.push('COZINHA\n')
+  const preparationRoute = normalizeLine(data.print_route).toLowerCase()
+  output.push(preparationRoute === 'bar' ? 'BAR / COPA\n' : 'COZINHA\n')
   output.push(SIZE_NORMAL)
   const orderNumber = normalizeLine(data.order_number).replace(/^PED[-\s]*/i, '')
   appendWrapped(output, orderNumber ? `PEDIDO #${orderNumber}` : 'NOVO PEDIDO', width)
@@ -164,6 +165,7 @@ export function buildEscposKitchenTicket(data = {}) {
   const type = orderTypeLabel(data.order_type)
   if (type) appendWrapped(output, `Tipo: ${type}`, width)
   if (data.table_number) appendWrapped(output, `Mesa: ${data.table_number}`, width)
+  if (normalizeLine(data.waiter_name)) appendWrapped(output, `Garcom: ${data.waiter_name}`, width)
   if (data.customer_name) appendWrapped(output, `Cliente/Comanda: ${data.customer_name}`, width)
   if (data.date) {
     const parsed = new Date(data.date)
@@ -227,6 +229,9 @@ export function buildEscposReceipt(data = {}) {
   }
   output.push(`${separator}\n`)
 
+  if (data.receipt_partial) appendWrapped(output, 'COMANDA PARCIAL', width)
+  if (data.table_number) appendWrapped(output, `Mesa: ${data.table_number}`, width)
+  if (normalizeLine(data.waiter_name)) appendWrapped(output, `Garcom: ${data.waiter_name}`, width)
   if (data.ticket_code && data.order_number) {
     output.push(`${ESC}\x45\x01${SIZE_DOUBLE}`)
     appendWrapped(output, `SENHA: ${String(data.order_number).slice(-4)}`, width / 2)
@@ -235,6 +240,15 @@ export function buildEscposReceipt(data = {}) {
   if (data.order_number) {
     const displayOrderNumber = normalizeLine(data.order_number).replace(/^PED[-_\s]*/i, '')
     appendWrapped(output, `Pedido #${displayOrderNumber || data.order_number}`, width)
+  }
+  if (data.scheduled_at) {
+    const scheduled = new Date(data.scheduled_at)
+    if (Number.isFinite(scheduled.getTime())) {
+      output.push(`${ESC}\x61\x01${ESC}\x45\x01`)
+      appendWrapped(output, '*** PEDIDO AGENDADO ***', width)
+      appendWrapped(output, scheduled.toLocaleString('pt-BR'), width)
+      output.push(`${ESC}\x45\x00${ESC}\x61\x00`)
+    }
   }
   output.push(`${separator}\n`)
 
@@ -275,20 +289,53 @@ export function buildEscposReceipt(data = {}) {
   const discount = Number(data.discount || 0)
   const deliveryFee = Number(data.delivery_fee || 0)
   appendColumns(output, 'Subtotal:', `R$ ${money(subtotal || data.total)}`, width)
+  for (const charge of data.charges || []) {
+    if (Number(charge.amount) > 0) appendColumns(output, `${charge.label}:`, `R$ ${money(charge.amount)}`, width)
+  }
   if (discount > 0) appendColumns(output, 'Desconto:', `-R$ ${money(discount)}`, width)
   if (deliveryFee > 0) appendColumns(output, 'Taxa Entrega:', `R$ ${money(deliveryFee)}`, width)
   output.push(`${separator}\n${ESC}\x45\x01${SIZE_DOUBLE}`)
   appendColumns(output, 'TOTAL:', `R$ ${money(data.total)}`, width / 2)
   output.push(`${bodySize}${ESC}\x45\x00`)
-  if (data.payment_method) appendWrapped(output, `Pagamento: ${data.payment_method}`, width)
+  if (!data.receipt_partial && data.payment_method) appendWrapped(output, `Pagamento: ${data.payment_method}`, width)
   const changeFor = Number(data.cash_received ?? data.change_amount ?? data.change_for ?? 0)
-  if (Number.isFinite(changeFor) && changeFor > 0) {
+  if (!data.receipt_partial && Number.isFinite(changeFor) && changeFor > 0) {
     appendColumns(output, 'Troco para:', `R$ ${money(changeFor)}`, width)
     const explicitChange = Number(data.change_value ?? data.cash_change)
     const change = Number.isFinite(explicitChange)
       ? Math.max(0, explicitChange)
       : Math.max(0, changeFor - Number(data.total || 0))
     if (change > 0) appendColumns(output, 'Troco:', `R$ ${money(change)}`, width)
+  }
+
+  // Use the same resident printer font as the non-fiscal receipt.
+  const fiscal = !data.receipt_partial && data.nfce
+  if (fiscal && String(fiscal.modelCode || '65') === '65') {
+    output.push(`${ESC}\x61\x01${separator}\n${ESC}\x45\x01`)
+    appendWrapped(output, 'CUPOM FISCAL NFC-e', width)
+    output.push(`${ESC}\x45\x00`)
+    appendWrapped(output, `NFC-e ${fiscal.numero || ''} / Serie ${fiscal.serie || '1'}`, width)
+    if (fiscal.protocolo) appendWrapped(output, `Protocolo: ${fiscal.protocolo}`, width)
+    if (fiscal.ambiente && fiscal.ambiente !== 'producao') {
+      appendWrapped(output, `AMBIENTE: ${String(fiscal.ambiente).toUpperCase()}`, width)
+      appendWrapped(output, 'SEM VALOR FISCAL', width)
+    }
+    if (fiscal.chave) {
+      appendWrapped(output, 'CHAVE DE ACESSO', width)
+      appendWrapped(output, String(fiscal.chave).replace(/\D/g, '').match(/.{1,4}/g)?.join(' ') || '', width)
+    }
+    const qr = String(fiscal.qrCodeUrl || '').replace(/&amp;/g, '&')
+    if (qr) {
+      const bytes = Buffer.from(qr, 'utf8')
+      const size = bytes.length + 3
+      output.push('\n', `${GS}(k\x04\x00\x31\x41\x32\x00`,
+        `${GS}(k\x03\x00\x31\x43\x04`, `${GS}(k\x03\x00\x31\x45\x31`,
+        `${GS}(k${String.fromCharCode(size & 255, size >> 8)}\x31\x50\x30`,
+        bytes.toString('binary'), `${GS}(k\x03\x00\x31\x51\x30`, '\n')
+      appendWrapped(output, 'Consulta pela chave:', width)
+      const url = qr.split('?')[0]
+      for (let i = 0; i < url.length; i += width) output.push(url.slice(i, i + width) + '\n')
+    }
   }
 
   output.push(`${ESC}\x61\x01${separator}\n`)

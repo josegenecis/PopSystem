@@ -312,3 +312,17 @@ test('NFC-e uses the same native body as a normal receipt and preserves fiscal Q
     assert.match(readable(build({...data, attendance_ticket:'10001'})),/SENHA: 10001/);
   }
  });
+
+
+test('kitchen financial summary is opt-in, preserves zero totals and hides partial payment', () => {
+  const order = { total: 14.99, payment_method: 'debit', items: [{ name: 'Pastel', quantity: 1 }] };
+  assert.doesNotMatch(buildEscposKitchenTicket(order), /TOTAL DO PEDIDO|Pagamento:/);
+  const enabled = buildEscposKitchenTicket({ ...order, kitchen_show_total_payment: true });
+  assert.match(enabled, /TOTAL DO PEDIDO:/);
+  assert.match(enabled, /14,99/);
+  assert.match(enabled, /Pagamento: DEBITO/);
+  assert.match(buildEscposKitchenTicket({ kitchen_show_total_payment: true, total: 0 }), /Pagamento: PENDENTE/);
+  const partial = buildEscposKitchenTicket({ ...order, kitchen_show_total_payment: true, receipt_partial: true });
+  assert.match(partial, /TOTAL DO PEDIDO:/);
+  assert.doesNotMatch(partial, /Pagamento:/);
+});

@@ -193,6 +193,15 @@ export function buildEscposKitchenTicket(data = {}) {
     appendWrapped(output, `OBSERVACOES: ${data.notes}`, width)
     output.push(`${ESC}\x45\x00`)
   }
+  if (data.kitchen_show_total_payment === true) {
+    output.push(`${separator}\n`)
+    appendColumns(output, 'TOTAL DO PEDIDO:', `R$ ${money(data.total)}`, width)
+    if (!data.receipt_partial) {
+      const method = String(data.kitchen_payment_label || data.payment_method || 'PENDENTE')
+      const labels = { debit: 'DEBITO', credit: 'CREDITO', cash: 'DINHEIRO', pending: 'PENDENTE', pix: 'PIX' }
+      appendWrapped(output, `Pagamento: ${labels[method.toLowerCase()] || method}`, width)
+    }
+  }
   output.push(`${ESC}\x61\x01\n${separator}\n\n\n\n${GS}\x56\x00`)
   return output.join('')
 }

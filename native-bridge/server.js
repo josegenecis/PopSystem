@@ -333,6 +333,19 @@ async function queueReceiptPrint(data, target = null) {
   return result.ok
 }
 
+// A gaveta pertence ao caixa, independentemente da última via impressa.
+// A seleção ocorre dentro da fila física para não disputar o destino com cupons.
+async function queueCashDrawer(payload = {}) {
+  const target = resolvePrinterTarget('receipt')
+  const result = await physicalPrintQueue.run(async () => {
+    if (target.address) {
+      if (!openPrinter(target.transport || 'system', target.address)) return false
+    } else if (!restoreConfiguredPrinter()) return false
+    return await openCashDrawer(payload)
+  })
+  return result.ok
+}
+
 async function queueReportPrint(data) {
   const result = await physicalPrintQueue.run(() => printReport(data))
   return result.ok
@@ -455,8 +468,7 @@ wss.on('connection', (ws) => {
           break
         }
         case 'open_cash_drawer': {
-          restoreConfiguredPrinter()
-          const ok = await openCashDrawer(payload)
+          const ok = await queueCashDrawer(payload)
           ws.send(JSON.stringify({
             ok,
             event: 'cash_drawer_opened',
